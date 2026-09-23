@@ -1,0 +1,1878 @@
+"use client";
+
+import { useEffect, useState, useCallback, useRef } from "react";
+import {
+  ChevronLeft,
+  Pencil,
+  RefreshCw,
+  FileStack,
+  FileText,
+  ListChecks,
+  MapPin,
+  Calculator,
+  Send,
+  MessageSquare,
+  FileDiff,
+  Sparkles,
+  Upload,
+  Trash2,
+  Download,
+  Wand2,
+  Loader2,
+  Plus,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  AlertTriangle,
+  Link2,
+  Bot,
+  Save,
+  X,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Switch } from "@/components/ui/switch";
+import { api, TENDER_STATUSES, TENDER_OUTCOMES, CHECKLIST_STATUSES, LIBRARY_CATEGORIES } from "@/lib/api";
+import {
+  useDashboardStore,
+  formatDate,
+  formatDateTime,
+  formatCurrency,
+  daysUntil,
+  statusColor,
+  deadlineColor,
+} from "@/lib/dashboard-store";
+import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+
+interface TenderDetailProps {
+  tenderId: number;
+  onBack: () => void;
+}
+
+type SubTab = "overview" | "documents" | "checklist" | "briefings" | "pricing" | "submission" | "communications" | "addendums" | "ai";
+
+export function TenderDetail({ tenderId, onBack }: TenderDetailProps) {
+  const { refresh } = useDashboardStore();
+  const [tender, setTender] = useState<any | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<SubTab>("overview");
+  const [showEdit, setShowEdit] = useState(false);
+
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const t = await api.getTender(tenderId);
+      setTender(t);
+    } catch (e: any) {
+      setError(e.message || "Failed to load tender");
+    } finally {
+      setLoading(false);
+    }
+  }, [tenderId]);
+
+  useEffect(() => {
+    fetch();
+  }, [fetch]);
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-10 w-32" />
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-8 w-full" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <Alert variant="destructive">
+        <AlertDescription className="flex items-center justify-between">
+          <span>{error}</span>
+          <Button variant="outline" size="sm" onClick={fetch}>Retry</Button>
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
+  if (!tender) return null;
+
+  const days = daysUntil(tender.closing_date);
+  const checklistTotal = tender.checklist_items?.length || 0;
+  const checklistComplete = tender.checklist_items?.filter((c: any) => c.status === "Complete").length || 0;
+  const completionPct = checklistTotal > 0 ? Math.round((checklistComplete / checklistTotal) * 100) : 0;
+
+  return (
+    <div className="space-y-4">
+      {/* Back + header */}
+      <div className="flex items-center gap-2">
+        <Button variant="ghost" size="sm" onClick={onBack}>
+          <ChevronLeft className="h-4 w-4" />
+          Back to tenders
+        </Button>
+      </div>
+
+      <Card className="overflow-hidden">
+        <CardContent className="p-4 sm:p-6">
+          <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              <div className="flex flex-wrap items-center gap-2 mb-2">
+                <span className="font-mono text-sm font-semibold text-primary">
+                  {tender.reference_number}
+                </span>
+                <Badge variant="outline" className={cn("text-xs", statusColor(tender.status))}>
+                  {tender.status}
+                </Badge>
+                {tender.outcome && tender.outcome !== "Pending" && (
+                  <Badge variant="outline" className={cn(
+                    "text-xs",
+                    tender.outcome === "Awarded" && "bg-emerald-600 text-white",
+                    tender.outcome === "Unsuccessful" && "bg-rose-100 text-rose-800",
+                    tender.outcome === "Withdrawn" && "bg-muted text-muted-foreground",
+                  )}>
+                    {tender.outcome}
+                  </Badge>
+                )}
+                {tender.ai_extracted_info && !tender.ai_extracted_info._error && (
+                  <Badge variant="outline" className="text-xs bg-violet-100 text-violet-800">
+                    <Sparkles className="h-3 w-3 mr-1" />
+                    AI Extracted
+                  </Badge>
+                )}
+              </div>
+              <h1 className="text-xl sm:text-2xl font-semibold tracking-tight">{tender.title}</h1>
+              <p className="text-sm text-muted-foreground mt-1">{tender.client_company}</p>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 text-xs text-muted-foreground">
+                {tender.closing_date && (
+                  <span className="flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    Closes: <span className={deadlineColor(days)}>{formatDate(tender.closing_date)}{tender.closing_time ? ` ${tender.closing_time}` : ""}</span>
+                    {days !== null && days >= 0 && (
+                      <span className={deadlineColor(days)}>· {days === 0 ? "today" : `${days}d left`}</span>
+                    )}
+                  </span>
+                )}
+                {tender.location_site && (
+                  <span className="flex items-center gap-1">
+                    <MapPin className="h-3 w-3" />
+                    {tender.location_site}
+                  </span>
+                )}
+                {tender.estimated_value != null && (
+                  <span className="font-medium text-foreground">{formatCurrency(tender.estimated_value)}</span>
+                )}
+                {tender.person_responsible && (
+                  <span>Responsible: {tender.person_responsible}</span>
+                )}
+              </div>
+              {checklistTotal > 0 && (
+                <div className="mt-3 flex items-center gap-3 max-w-md">
+                  <Progress value={completionPct} className="h-2 flex-1" />
+                  <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">
+                    {completionPct}% complete ({checklistComplete}/{checklistTotal})
+                  </span>
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={fetch}>
+                <RefreshCw className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setShowEdit(true)}>
+                <Pencil className="h-3.5 w-3.5" />
+                Edit
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Sub-tabs */}
+      <Tabs value={tab} onValueChange={(v) => setTab(v as SubTab)}>
+        <TabsList className="w-full flex-wrap h-auto justify-start overflow-x-auto scrollbar-thin">
+          <TabsTrigger value="overview" className="text-xs"><FileText className="h-3.5 w-3.5 mr-1" />Overview</TabsTrigger>
+          <TabsTrigger value="documents" className="text-xs"><FileStack className="h-3.5 w-3.5 mr-1" />Documents</TabsTrigger>
+          <TabsTrigger value="checklist" className="text-xs"><ListChecks className="h-3.5 w-3.5 mr-1" />Checklist</TabsTrigger>
+          <TabsTrigger value="briefings" className="text-xs"><MapPin className="h-3.5 w-3.5 mr-1" />Briefings</TabsTrigger>
+          <TabsTrigger value="pricing" className="text-xs"><Calculator className="h-3.5 w-3.5 mr-1" />Pricing</TabsTrigger>
+          <TabsTrigger value="submission" className="text-xs"><Send className="h-3.5 w-3.5 mr-1" />Submission</TabsTrigger>
+          <TabsTrigger value="communications" className="text-xs"><MessageSquare className="h-3.5 w-3.5 mr-1" />Comms</TabsTrigger>
+          <TabsTrigger value="addendums" className="text-xs"><FileDiff className="h-3.5 w-3.5 mr-1" />Addendums</TabsTrigger>
+          <TabsTrigger value="ai" className="text-xs"><Bot className="h-3.5 w-3.5 mr-1" />AI</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="mt-4">
+          <OverviewSection tender={tender} />
+        </TabsContent>
+        <TabsContent value="documents" className="mt-4">
+          <DocumentsSection tender={tender} onChanged={fetch} />
+        </TabsContent>
+        <TabsContent value="checklist" className="mt-4">
+          <ChecklistSection tender={tender} onChanged={fetch} />
+        </TabsContent>
+        <TabsContent value="briefings" className="mt-4">
+          <BriefingsSection tender={tender} onChanged={fetch} />
+        </TabsContent>
+        <TabsContent value="pricing" className="mt-4">
+          <PricingSection tender={tender} onChanged={fetch} />
+        </TabsContent>
+        <TabsContent value="submission" className="mt-4">
+          <SubmissionSection tender={tender} onChanged={fetch} />
+        </TabsContent>
+        <TabsContent value="communications" className="mt-4">
+          <CommunicationsSection tender={tender} onChanged={fetch} />
+        </TabsContent>
+        <TabsContent value="addendums" className="mt-4">
+          <AddendumsSection tender={tender} onChanged={fetch} />
+        </TabsContent>
+        <TabsContent value="ai" className="mt-4">
+          <AISection tender={tender} onChanged={fetch} />
+        </TabsContent>
+      </Tabs>
+
+      <EditTenderDialog
+        tender={tender}
+        open={showEdit}
+        onOpenChange={setShowEdit}
+        onSaved={() => {
+          refresh();
+          fetch();
+        }}
+      />
+    </div>
+  );
+}
+
+// ============== Overview Section ==============
+function OverviewSection({ tender }: { tender: any }) {
+  const fields: { label: string; value: any; icon?: React.ElementType }[] = [
+    { label: "Reference number", value: tender.reference_number, icon: FileText },
+    { label: "Client / company", value: tender.client_company, icon: FileStack },
+    { label: "Category", value: tender.category },
+    { label: "Location / site", value: tender.location_site, icon: MapPin },
+    { label: "Issue date", value: formatDate(tender.issue_date) },
+    { label: "Closing date", value: formatDate(tender.closing_date) },
+    { label: "Closing time", value: tender.closing_time },
+    { label: "Validity period", value: tender.validity_period },
+    { label: "Estimated value", value: formatCurrency(tender.estimated_value) },
+    { label: "Contract period", value: tender.contract_period },
+    { label: "Contact person", value: tender.contact_person },
+    { label: "Contact email", value: tender.contact_email },
+    { label: "Contact telephone", value: tender.contact_telephone },
+    { label: "Submission method", value: tender.submission_method },
+    { label: "Person responsible", value: tender.person_responsible },
+    { label: "Outcome", value: tender.outcome },
+  ];
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Tender details</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3">
+            {fields.map((f) => (
+              <div key={f.label} className="space-y-0.5">
+                <div className="text-xs text-muted-foreground">{f.label}</div>
+                <div className="text-sm font-medium break-words">{f.value || <span className="text-muted-foreground">—</span>}</div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {tender.description && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Description</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-sm whitespace-pre-wrap">{tender.description}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {tender.scope_of_work && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Scope of work</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-sm whitespace-pre-wrap">{tender.scope_of_work}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {tender.notes && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Notes</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-sm whitespace-pre-wrap text-muted-foreground">{tender.notes}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {tender.unsuccessful_reason && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>
+            <strong>Unsuccessful reason:</strong> {tender.unsuccessful_reason}
+          </AlertDescription>
+        </Alert>
+      )}
+    </div>
+  );
+}
+
+// ============== Documents Section ==============
+function DocumentsSection({ tender, onChanged }: { tender: any; onChanged: () => void }) {
+  const [uploading, setUploading] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [deleteDoc, setDeleteDoc] = useState<any | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      await api.uploadTenderDocument(tender.id, file);
+      toast.success("Document uploaded");
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Upload failed");
+    } finally {
+      setUploading(false);
+      if (fileInput.current) fileInput.current.value = "";
+    }
+  };
+
+  const handleExtract = async () => {
+    setExtracting(true);
+    toast.info("AI is reading your tender documents…");
+    try {
+      await api.aiExtractTender(tender.id);
+      toast.success("AI extraction complete — checklist & fields updated");
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "AI extraction failed");
+    } finally {
+      setExtracting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteDoc) return;
+    try {
+      await api.deleteTenderDocument(tender.id, deleteDoc.id);
+      toast.success("Document deleted");
+      setDeleteDoc(null);
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Delete failed");
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardContent className="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="font-semibold text-sm">Tender documents</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Upload the tender PDF/DOCX/TXT — then let AI read it and extract requirements.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExtract}
+              disabled={extracting || !tender.documents?.length}
+            >
+              {extracting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+              AI Extract
+            </Button>
+            <Button size="sm" onClick={() => fileInput.current?.click()} disabled={uploading}>
+              {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+              Upload document
+            </Button>
+            <input ref={fileInput} type="file" accept=".pdf,.doc,.docx,.txt,.csv" onChange={handleUpload} className="hidden" />
+          </div>
+        </CardContent>
+      </Card>
+
+      {!tender.documents?.length ? (
+        <Card>
+          <CardContent className="py-12 flex flex-col items-center text-center">
+            <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-3">
+              <FileStack className="h-6 w-6 text-primary" />
+            </div>
+            <h3 className="font-semibold">No documents uploaded</h3>
+            <p className="text-sm text-muted-foreground mt-1 max-w-sm">
+              Upload the tender document and the AI will automatically read it, extract key information,
+              and build your submission checklist.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {tender.documents.map((doc: any) => (
+            <Card key={doc.id}>
+              <CardContent className="p-3 flex items-center gap-3">
+                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                  <FileText className="h-5 w-5 text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-sm truncate">{doc.original_filename}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {doc.file_size ? `${(doc.file_size / 1024).toFixed(0)} KB · ` : ""}
+                    {formatDateTime(doc.uploaded_at)}
+                    {doc.is_primary && <Badge variant="outline" className="ml-2 text-xs">Primary</Badge>}
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  asChild
+                >
+                  <a
+                    href={`/uploads/${doc.filename}?XTransformPort=8000`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Download"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                  </a>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                  onClick={() => setDeleteDoc(doc)}
+                  title="Delete"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <AlertDialog open={!!deleteDoc} onOpenChange={(o) => !o && setDeleteDoc(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete document?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Permanently delete <strong>{deleteDoc?.original_filename}</strong>?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-rose-600 hover:bg-rose-700 focus:ring-rose-600">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+// ============== Checklist Section ==============
+function ChecklistSection({ tender, onChanged }: { tender: any; onChanged: () => void }) {
+  const [items, setItems] = useState<any[]>(tender.checklist_items || []);
+  const [newName, setNewName] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [libraryDocs, setLibraryDocs] = useState<any[]>([]);
+  const [showLink, setShowLink] = useState<number | null>(null);
+
+  useEffect(() => {
+    setItems(tender.checklist_items || []);
+  }, [tender.checklist_items]);
+
+  useEffect(() => {
+    api.listLibrary().then((r) => setLibraryDocs(r.items)).catch(() => {});
+  }, []);
+
+  const updateItem = async (id: number, payload: any) => {
+    try {
+      await api.updateChecklistItem(id, payload);
+      setItems((arr) => arr.map((it) => it.id === id ? { ...it, ...payload } : it));
+    } catch (e: any) {
+      toast.error(e.message || "Update failed");
+    }
+  };
+
+  const addItem = async () => {
+    if (!newName.trim()) return;
+    setAdding(true);
+    try {
+      const created = await api.addChecklistItem(tender.id, { name: newName.trim(), status: "Outstanding" });
+      setItems((arr) => [...arr, created]);
+      setNewName("");
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Add failed");
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const deleteItem = async (id: number) => {
+    try {
+      await api.deleteChecklistItem(id);
+      setItems((arr) => arr.filter((it) => it.id !== id));
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Delete failed");
+    }
+  };
+
+  const linkLibraryDoc = async (itemId: number, docId: number | null) => {
+    await updateItem(itemId, { linked_library_doc_id: docId });
+    setShowLink(null);
+    if (docId) toast.success("Document linked");
+  };
+
+  const complete = items.filter((i) => i.status === "Complete").length;
+  const outstanding = items.filter((i) => i.status === "Outstanding").length;
+  const expired = items.filter((i) => i.status === "Expired").length;
+  const pct = items.length > 0 ? Math.round((complete / items.length) * 100) : 0;
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="font-semibold text-sm">Submission checklist</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Built automatically by AI when you extract — adjust as you go.
+              </p>
+            </div>
+            <Badge variant="outline" className="text-xs">{pct}% complete</Badge>
+          </div>
+          <div className="grid grid-cols-3 gap-2 mb-3 text-center">
+            <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 p-2">
+              <div className="text-lg font-semibold text-emerald-700 dark:text-emerald-400">{complete}</div>
+              <div className="text-xs text-muted-foreground">Complete</div>
+            </div>
+            <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 p-2">
+              <div className="text-lg font-semibold text-amber-700 dark:text-amber-400">{outstanding}</div>
+              <div className="text-xs text-muted-foreground">Outstanding</div>
+            </div>
+            <div className="rounded-lg bg-rose-50 dark:bg-rose-950/30 p-2">
+              <div className="text-lg font-semibold text-rose-700 dark:text-rose-400">{expired}</div>
+              <div className="text-xs text-muted-foreground">Expired</div>
+            </div>
+          </div>
+          <Progress value={pct} className="h-2" />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-4 space-y-2">
+          {items.length === 0 ? (
+            <div className="text-center py-8 text-sm text-muted-foreground">
+              No checklist items. Add one below or run AI extraction on the tender document.
+            </div>
+          ) : (
+            items.map((item) => (
+              <div key={item.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 group">
+                <Select
+                  value={item.status}
+                  onValueChange={(v) => updateItem(item.id, { status: v })}
+                >
+                  <SelectTrigger className="w-32 h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CHECKLIST_STATUSES.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        <span className="flex items-center gap-1.5">
+                          {s === "Complete" && <CheckCircle2 className="h-3 w-3 text-emerald-600" />}
+                          {s === "Outstanding" && <Clock className="h-3 w-3 text-amber-600" />}
+                          {s === "Expired" && <XCircle className="h-3 w-3 text-rose-600" />}
+                          {s === "Not Applicable" && <X className="h-3 w-3 text-muted-foreground" />}
+                          {s}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="flex-1 min-w-0">
+                  <Input
+                    value={item.name}
+                    onChange={(e) => setItems((arr) => arr.map((it) => it.id === item.id ? { ...it, name: e.target.value } : it))}
+                    onBlur={(e) => updateItem(item.id, { name: e.target.value })}
+                    className="h-8 text-sm border-0 hover:border focus-visible:border"
+                  />
+                  {item.linked_library_doc_id && (
+                    <div className="text-xs text-emerald-600 flex items-center gap-1 mt-0.5">
+                      <Link2 className="h-3 w-3" />
+                      Linked: {libraryDocs.find((d) => d.id === item.linked_library_doc_id)?.name || "library document"}
+                    </div>
+                  )}
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 opacity-0 group-hover:opacity-100"
+                  onClick={() => setShowLink(item.id)}
+                  title="Link library document"
+                >
+                  <Link2 className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 opacity-0 group-hover:opacity-100 text-rose-600 hover:text-rose-700"
+                  onClick={() => deleteItem(item.id)}
+                  title="Remove"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))
+          )}
+          <Separator className="my-2" />
+          <div className="flex items-center gap-2">
+            <Input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addItem()}
+              placeholder="Add new checklist item…"
+              className="h-8 text-sm"
+            />
+            <Button size="sm" variant="outline" onClick={addItem} disabled={adding || !newName.trim()}>
+              <Plus className="h-3.5 w-3.5" />
+              Add
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Link library doc dialog */}
+      <Dialog open={showLink !== null} onOpenChange={(o) => !o && setShowLink(null)}>
+        <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto scrollbar-thin">
+          <DialogHeader>
+            <DialogTitle>Link compliance document</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1 py-2">
+            {libraryDocs.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">
+                No documents in your library yet. Upload some in the Compliance Library tab.
+              </p>
+            ) : (
+              libraryDocs.map((d) => (
+                <button
+                  key={d.id}
+                  onClick={() => showLink !== null && linkLibraryDoc(showLink, d.id)}
+                  className="w-full text-left p-2 rounded-lg hover:bg-accent flex items-center gap-2"
+                >
+                  <FileText className="h-4 w-4 text-primary shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium truncate">{d.name}</div>
+                    <div className="text-xs text-muted-foreground">{d.category}</div>
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => showLink !== null && linkLibraryDoc(showLink, null)}>Unlink</Button>
+            <Button variant="ghost" onClick={() => setShowLink(null)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ============== Briefings Section ==============
+function BriefingsSection({ tender, onChanged }: { tender: any; onChanged: () => void }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({
+    briefing_type: "Briefing",
+    date: "",
+    time: "",
+    location: "",
+    contact_person: "",
+    attendance_required: true,
+    attendance_confirmed: false,
+    person_attending: "",
+    notes: "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  const briefings = tender.briefings || [];
+
+  const handleAdd = async () => {
+    if (!form.date) { toast.error("Date is required"); return; }
+    setSaving(true);
+    try {
+      await api.createBriefing(tender.id, {
+        ...form,
+        time: form.time || null,
+      });
+      toast.success("Briefing added");
+      setShowAdd(false);
+      setForm({
+        briefing_type: "Briefing", date: "", time: "", location: "",
+        contact_person: "", attendance_required: true, attendance_confirmed: false,
+        person_attending: "", notes: "",
+      });
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleConfirmed = async (b: any) => {
+    try {
+      await api.updateBriefing(b.id, { attendance_confirmed: !b.attendance_confirmed });
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Update failed");
+    }
+  };
+
+  const handleDelete = async (b: any) => {
+    try {
+      await api.deleteBriefing(b.id);
+      toast.success("Briefing deleted");
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Delete failed");
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-sm">Briefings & site inspections</h3>
+        <Button size="sm" onClick={() => setShowAdd(true)}>
+          <Plus className="h-3.5 w-3.5" />
+          Add
+        </Button>
+      </div>
+
+      {briefings.length === 0 ? (
+        <Card>
+          <CardContent className="py-10 flex flex-col items-center text-center">
+            <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-3">
+              <MapPin className="h-6 w-6 text-primary" />
+            </div>
+            <h3 className="font-semibold">No briefings scheduled</h3>
+            <p className="text-sm text-muted-foreground mt-1">Track compulsory briefings and site inspections here.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        briefings.map((b: any) => {
+          const days = daysUntil(b.date);
+          return (
+            <Card key={b.id}>
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Badge variant="outline" className={cn(
+                        "text-xs",
+                        b.briefing_type === "Briefing" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+                      )}>
+                        {b.briefing_type}
+                      </Badge>
+                      {b.attendance_required && (
+                        <Badge variant="outline" className="text-xs">Compulsory</Badge>
+                      )}
+                      <span className={cn("text-xs font-medium", deadlineColor(days))}>
+                        {formatDate(b.date)} {b.time && `at ${b.time}`}
+                      </span>
+                    </div>
+                    {b.location && <div className="text-sm">{b.location}</div>}
+                    <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
+                      {b.contact_person && <div>Contact: {b.contact_person}</div>}
+                      {b.person_attending && <div>Attending: {b.person_attending}</div>}
+                      {b.notes && <div className="mt-1 italic">{b.notes}</div>}
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <Button
+                      size="sm"
+                      variant={b.attendance_confirmed ? "default" : "outline"}
+                      onClick={() => toggleConfirmed(b)}
+                    >
+                      {b.attendance_confirmed ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Clock className="h-3.5 w-3.5" />}
+                      {b.attendance_confirmed ? "Confirmed" : "Mark confirmed"}
+                    </Button>
+                    <Button size="icon" variant="ghost" className="h-7 w-7 text-rose-600" onClick={() => handleDelete(b)}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+                {b.attendance_required && !b.attendance_confirmed && days !== null && days >= 0 && days <= 7 && (
+                  <div className="mt-2 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 rounded p-2 flex items-center gap-1.5">
+                    <AlertTriangle className="h-3 w-3" />
+                    Attendance confirmation required — briefing is within {days} day{days === 1 ? "" : "s"}!
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })
+      )}
+
+      <Dialog open={showAdd} onOpenChange={setShowAdd}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto scrollbar-thin">
+          <DialogHeader><DialogTitle>Add briefing / site inspection</DialogTitle></DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-2">
+            <Field2 label="Type">
+              <Select value={form.briefing_type} onValueChange={(v) => setForm({ ...form, briefing_type: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Briefing">Briefing</SelectItem>
+                  <SelectItem value="Site Inspection">Site Inspection</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field2>
+            <Field2 label="Date *">
+              <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+            </Field2>
+            <Field2 label="Time">
+              <Input type="time" value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} />
+            </Field2>
+            <Field2 label="Location">
+              <Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />
+            </Field2>
+            <Field2 label="Contact person">
+              <Input value={form.contact_person} onChange={(e) => setForm({ ...form, contact_person: e.target.value })} />
+            </Field2>
+            <Field2 label="Person attending">
+              <Input value={form.person_attending} onChange={(e) => setForm({ ...form, person_attending: e.target.value })} />
+            </Field2>
+            <div className="col-span-2 flex items-center gap-4">
+              <label className="flex items-center gap-2 text-sm">
+                <Switch checked={form.attendance_required} onCheckedChange={(v) => setForm({ ...form, attendance_required: v })} />
+                Attendance required
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <Switch checked={form.attendance_confirmed} onCheckedChange={(v) => setForm({ ...form, attendance_confirmed: v })} />
+                Attendance confirmed
+              </label>
+            </div>
+            <div className="col-span-2">
+              <Field2 label="Notes">
+                <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} />
+              </Field2>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
+            <Button onClick={handleAdd} disabled={saving}>{saving ? "Saving…" : "Add briefing"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ============== Pricing Section ==============
+function PricingSection({ tender, onChanged }: { tender: any; onChanged: () => void }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [label, setLabel] = useState("");
+  const [notes, setNotes] = useState("");
+  const [items, setItems] = useState<any[]>([{ category: "Labour", description: "", quantity: 1, rate: 0 }]);
+  const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+
+  const versions = tender.pricing_versions || [];
+
+  const subtotal = items.reduce((sum, it) => sum + (Number(it.quantity) || 0) * (Number(it.rate) || 0), 0);
+  const vat = subtotal * 0.15;
+  const total = subtotal + vat;
+
+  const handleAdd = async () => {
+    setSaving(true);
+    try {
+      await api.createPricing(tender.id, {
+        tender_id: tender.id,
+        version_label: label || undefined,
+        notes: notes || undefined,
+        line_items: items.map((it) => ({
+          ...it,
+          total: (Number(it.quantity) || 0) * (Number(it.rate) || 0),
+        })),
+      });
+      toast.success("Pricing version saved");
+      setShowAdd(false);
+      setLabel(""); setNotes(""); setItems([{ category: "Labour", description: "", quantity: 1, rate: 0 }]);
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      await api.deletePricing(deleteTarget.id);
+      toast.success("Version deleted");
+      setDeleteTarget(null);
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Failed");
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-sm">Pricing versions</h3>
+        <Button size="sm" onClick={() => setShowAdd(true)}>
+          <Plus className="h-3.5 w-3.5" />
+          New version
+        </Button>
+      </div>
+
+      {versions.length === 0 ? (
+        <Card>
+          <CardContent className="py-10 flex flex-col items-center text-center">
+            <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-3">
+              <Calculator className="h-6 w-6 text-primary" />
+            </div>
+            <h3 className="font-semibold">No pricing versions yet</h3>
+            <p className="text-sm text-muted-foreground mt-1">Build your first pricing sheet with labour, equipment, transport and other costs.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        [...versions].reverse().map((v: any) => (
+          <Card key={v.id}>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-xs">v{v.version_number}</Badge>
+                  <span className="font-medium text-sm">{v.version_label || `Version ${v.version_number}`}</span>
+                  <span className="text-xs text-muted-foreground">{formatDateTime(v.created_at)}</span>
+                </div>
+                <Button size="icon" variant="ghost" className="h-7 w-7 text-rose-600" onClick={() => setDeleteTarget(v)}>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+              {v.line_items && v.line_items.length > 0 && (
+                <div className="overflow-x-auto scrollbar-thin">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-left text-muted-foreground border-b">
+                        <th className="py-1 pr-2">Category</th>
+                        <th className="py-1 pr-2">Description</th>
+                        <th className="py-1 pr-2 text-right">Qty</th>
+                        <th className="py-1 pr-2 text-right">Rate</th>
+                        <th className="py-1 text-right">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {v.line_items.map((li: any, i: number) => (
+                        <tr key={i} className="border-b last:border-b-0">
+                          <td className="py-1 pr-2"><Badge variant="outline" className="text-[10px]">{li.category}</Badge></td>
+                          <td className="py-1 pr-2">{li.description || "—"}</td>
+                          <td className="py-1 pr-2 text-right">{li.quantity}</td>
+                          <td className="py-1 pr-2 text-right">{formatCurrency(li.rate)}</td>
+                          <td className="py-1 text-right font-medium">{formatCurrency(li.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <div className="flex justify-end mt-3 gap-6 text-sm">
+                <div><span className="text-muted-foreground">Subtotal:</span> <span className="font-medium">{formatCurrency(v.subtotal)}</span></div>
+                <div><span className="text-muted-foreground">VAT (15%):</span> <span className="font-medium">{formatCurrency(v.vat)}</span></div>
+                <div className="text-base"><span className="text-muted-foreground">Total:</span> <span className="font-bold text-emerald-600">{formatCurrency(v.total)}</span></div>
+              </div>
+              {v.notes && <p className="text-xs text-muted-foreground mt-2 italic">{v.notes}</p>}
+            </CardContent>
+          </Card>
+        ))
+      )}
+
+      <Dialog open={showAdd} onOpenChange={setShowAdd}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto scrollbar-thin">
+          <DialogHeader><DialogTitle>New pricing version</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <Field2 label="Version label (optional)">
+                <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Draft, Final, Revised" />
+              </Field2>
+            </div>
+            <div className="border rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-muted">
+                  <tr>
+                    <th className="p-2 text-left text-xs font-medium">Category</th>
+                    <th className="p-2 text-left text-xs font-medium">Description</th>
+                    <th className="p-2 text-right text-xs font-medium w-20">Qty</th>
+                    <th className="p-2 text-right text-xs font-medium w-28">Rate (ZAR)</th>
+                    <th className="p-2 text-right text-xs font-medium w-28">Total</th>
+                    <th className="w-10"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((it, idx) => (
+                    <tr key={idx} className="border-t">
+                      <td className="p-1">
+                        <Select value={it.category} onValueChange={(v) => setItems(arr => arr.map((x, i) => i === idx ? { ...x, category: v } : x))}>
+                          <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {["Labour", "Equipment", "Consumables", "Transport", "Other"].map((c) => (
+                              <SelectItem key={c} value={c}>{c}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="p-1">
+                        <Input value={it.description} onChange={(e) => setItems(arr => arr.map((x, i) => i === idx ? { ...x, description: e.target.value } : x))} className="h-8 text-xs" />
+                      </td>
+                      <td className="p-1">
+                        <Input type="number" value={it.quantity} onChange={(e) => setItems(arr => arr.map((x, i) => i === idx ? { ...x, quantity: parseFloat(e.target.value) || 0 } : x))} className="h-8 text-xs text-right" />
+                      </td>
+                      <td className="p-1">
+                        <Input type="number" value={it.rate} onChange={(e) => setItems(arr => arr.map((x, i) => i === idx ? { ...x, rate: parseFloat(e.target.value) || 0 } : x))} className="h-8 text-xs text-right" />
+                      </td>
+                      <td className="p-2 text-right text-xs font-medium">{formatCurrency((Number(it.quantity) || 0) * (Number(it.rate) || 0))}</td>
+                      <td className="p-1">
+                        <Button size="icon" variant="ghost" className="h-7 w-7 text-rose-600" onClick={() => setItems(arr => arr.filter((_, i) => i !== idx))}>
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => setItems([...items, { category: "Labour", description: "", quantity: 1, rate: 0 }])}>
+              <Plus className="h-3.5 w-3.5" /> Add line item
+            </Button>
+            <div className="flex justify-end gap-6 text-sm border-t pt-3">
+              <div><span className="text-muted-foreground">Subtotal:</span> <span className="font-medium">{formatCurrency(subtotal)}</span></div>
+              <div><span className="text-muted-foreground">VAT (15%):</span> <span className="font-medium">{formatCurrency(vat)}</span></div>
+              <div><span className="text-muted-foreground">Total:</span> <span className="font-bold text-emerald-600 text-base">{formatCurrency(total)}</span></div>
+            </div>
+            <Field2 label="Notes">
+              <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+            </Field2>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
+            <Button onClick={handleAdd} disabled={saving}>{saving ? "Saving…" : "Save version"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete pricing version?</AlertDialogTitle>
+            <AlertDialogDescription>Delete {deleteTarget?.version_label || `v${deleteTarget?.version_number}`}?</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-rose-600 hover:bg-rose-700 focus:ring-rose-600">Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+// ============== Submission Section ==============
+function SubmissionSection({ tender, onChanged }: { tender: any; onChanged: () => void }) {
+  const sub = tender.submission;
+  const [form, setForm] = useState({
+    submission_date: sub?.submission_date || "",
+    submission_time: sub?.submission_time || "",
+    submission_method: sub?.submission_method || "",
+    submitted_by: sub?.submitted_by || "",
+    confirmation_reference: sub?.confirmation_reference || "",
+    final_pricing: sub?.final_pricing?.toString() || "",
+    notes: sub?.notes || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [outcome, setOutcome] = useState(tender.outcome || "Pending");
+  const [reason, setReason] = useState(tender.unsuccessful_reason || "");
+  const [savingOutcome, setSavingOutcome] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.saveSubmission(tender.id, {
+        tender_id: tender.id,
+        submission_date: form.submission_date || null,
+        submission_time: form.submission_time || null,
+        submission_method: form.submission_method || null,
+        submitted_by: form.submitted_by || null,
+        confirmation_reference: form.confirmation_reference || null,
+        final_pricing: form.final_pricing ? parseFloat(form.final_pricing) : null,
+        notes: form.notes || null,
+      });
+      toast.success("Submission saved");
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleOutcome = async () => {
+    setSavingOutcome(true);
+    try {
+      await api.updateTender(tender.id, {
+        outcome,
+        unsuccessful_reason: outcome === "Unsuccessful" ? reason : null,
+      });
+      toast.success("Outcome updated");
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Failed");
+    } finally {
+      setSavingOutcome(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader><CardTitle className="text-base">Submission details</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field2 label="Submission date">
+              <Input type="date" value={form.submission_date} onChange={(e) => setForm({ ...form, submission_date: e.target.value })} />
+            </Field2>
+            <Field2 label="Submission time">
+              <Input type="time" value={form.submission_time} onChange={(e) => setForm({ ...form, submission_time: e.target.value })} />
+            </Field2>
+            <Field2 label="Submission method">
+              <Select value={form.submission_method} onValueChange={(v) => setForm({ ...form, submission_method: v })}>
+                <SelectTrigger><SelectValue placeholder="Select method" /></SelectTrigger>
+                <SelectContent>
+                  {["Email", "Online Portal", "Physical Delivery", "Courier", "E-procurement portal", "Other"].map((m) => (
+                    <SelectItem key={m} value={m}>{m}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field2>
+            <Field2 label="Submitted by">
+              <Input value={form.submitted_by} onChange={(e) => setForm({ ...form, submitted_by: e.target.value })} />
+            </Field2>
+            <Field2 label="Confirmation reference">
+              <Input value={form.confirmation_reference} onChange={(e) => setForm({ ...form, confirmation_reference: e.target.value })} placeholder="e.g. Bid submission ref" />
+            </Field2>
+            <Field2 label="Final pricing (ZAR)">
+              <Input type="number" value={form.final_pricing} onChange={(e) => setForm({ ...form, final_pricing: e.target.value })} />
+            </Field2>
+          </div>
+          <Field2 label="Notes">
+            <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} />
+          </Field2>
+          <Button onClick={handleSave} disabled={saving}>
+            <Save className="h-3.5 w-3.5" />
+            {saving ? "Saving…" : "Save submission"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Tender outcome</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <Field2 label="Outcome">
+            <Select value={outcome} onValueChange={setOutcome}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {TENDER_OUTCOMES.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </Field2>
+          {outcome === "Unsuccessful" && (
+            <Field2 label="Reason for unsuccessful bid">
+              <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} placeholder="e.g. Lower price competitor, missing documentation, etc." />
+            </Field2>
+          )}
+          <Button onClick={handleOutcome} disabled={savingOutcome}>
+            {savingOutcome ? "Saving…" : "Update outcome"}
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ============== Communications Section ==============
+function CommunicationsSection({ tender, onChanged }: { tender: any; onChanged: () => void }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({
+    comm_type: "Email",
+    subject: "",
+    body: "",
+    comm_date: new Date().toISOString().slice(0, 16),
+    from_party: "",
+    to_party: "",
+    notes: "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  const comms = tender.communications || [];
+
+  const handleAdd = async () => {
+    if (!form.comm_type) { toast.error("Type is required"); return; }
+    setSaving(true);
+    try {
+      await api.createCommunication(tender.id, {
+        tender_id: tender.id,
+        ...form,
+        comm_date: form.comm_date ? new Date(form.comm_date).toISOString() : null,
+      });
+      toast.success("Communication logged");
+      setShowAdd(false);
+      setForm({ comm_type: "Email", subject: "", body: "", comm_date: new Date().toISOString().slice(0, 16), from_party: "", to_party: "", notes: "" });
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (c: any) => {
+    try {
+      await api.deleteCommunication(c.id);
+      toast.success("Deleted");
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Failed");
+    }
+  };
+
+  const COMM_TYPES = ["Email", "Clarification Request", "Clarification Response", "Meeting", "Addendum", "Extension", "Tender Validity Extension", "Pricing Clarification", "Client Correspondence", "Other"];
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-sm">Communication log ({comms.length})</h3>
+        <Button size="sm" onClick={() => setShowAdd(true)}>
+          <Plus className="h-3.5 w-3.5" />
+          Log communication
+        </Button>
+      </div>
+
+      {comms.length === 0 ? (
+        <Card>
+          <CardContent className="py-10 flex flex-col items-center text-center">
+            <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-3">
+              <MessageSquare className="h-6 w-6 text-primary" />
+            </div>
+            <h3 className="font-semibold">No communications logged</h3>
+            <p className="text-sm text-muted-foreground mt-1">Track emails, clarifications, meetings and addendums here.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {[...comms].reverse().map((c: any) => (
+            <Card key={c.id}>
+              <CardContent className="p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Badge variant="outline" className="text-xs">{c.comm_type}</Badge>
+                      {c.comm_date && <span className="text-xs text-muted-foreground">{formatDateTime(c.comm_date)}</span>}
+                    </div>
+                    {c.subject && <div className="font-medium text-sm">{c.subject}</div>}
+                    {(c.from_party || c.to_party) && (
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {c.from_party && <>From: {c.from_party}</>}
+                        {c.from_party && c.to_party && " → "}
+                        {c.to_party && <>To: {c.to_party}</>}
+                      </div>
+                    )}
+                    {c.body && <p className="text-sm mt-1 line-clamp-3 whitespace-pre-wrap">{c.body}</p>}
+                    {c.notes && <p className="text-xs text-muted-foreground mt-1 italic">{c.notes}</p>}
+                  </div>
+                  <Button size="icon" variant="ghost" className="h-7 w-7 text-rose-600 shrink-0" onClick={() => handleDelete(c)}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <Dialog open={showAdd} onOpenChange={setShowAdd}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto scrollbar-thin">
+          <DialogHeader><DialogTitle>Log communication</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <Field2 label="Type">
+                <Select value={form.comm_type} onValueChange={(v) => setForm({ ...form, comm_type: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {COMM_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Field2>
+              <Field2 label="Date & time">
+                <Input type="datetime-local" value={form.comm_date} onChange={(e) => setForm({ ...form, comm_date: e.target.value })} />
+              </Field2>
+            </div>
+            <Field2 label="Subject">
+              <Input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} />
+            </Field2>
+            <div className="grid grid-cols-2 gap-3">
+              <Field2 label="From">
+                <Input value={form.from_party} onChange={(e) => setForm({ ...form, from_party: e.target.value })} />
+              </Field2>
+              <Field2 label="To">
+                <Input value={form.to_party} onChange={(e) => setForm({ ...form, to_party: e.target.value })} />
+              </Field2>
+            </div>
+            <Field2 label="Body">
+              <Textarea value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} rows={4} />
+            </Field2>
+            <Field2 label="Notes">
+              <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} />
+            </Field2>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
+            <Button onClick={handleAdd} disabled={saving}>{saving ? "Saving…" : "Log"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ============== Addendums Section ==============
+function AddendumsSection({ tender, onChanged }: { tender: any; onChanged: () => void }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({ addendum_number: "", title: "", description: "", issued_date: "" });
+  const [file, setFile] = useState<File | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [analyzing, setAnalyzing] = useState<number | null>(null);
+
+  const addendums = tender.addendums || [];
+
+  const handleAdd = async () => {
+    if (!form.title || !file) { toast.error("Title and file are required"); return; }
+    setSaving(true);
+    try {
+      const fd = new FormData();
+      fd.append("title", form.title);
+      fd.append("file", file);
+      if (form.addendum_number) fd.append("addendum_number", form.addendum_number);
+      if (form.description) fd.append("description", form.description);
+      if (form.issued_date) fd.append("issued_date", form.issued_date);
+      await api.createAddendum(tender.id, fd);
+      toast.success("Addendum uploaded");
+      setShowAdd(false);
+      setForm({ addendum_number: "", title: "", description: "", issued_date: "" });
+      setFile(null);
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAnalyze = async (a: any) => {
+    setAnalyzing(a.id);
+    toast.info("Running AI change detection — this may take 30-60 seconds…");
+    try {
+      const result = await api.analyzeAddendum(a.id);
+      if (result._error) {
+        toast.error("AI analysis failed: " + result._error);
+      } else {
+        toast.success("AI analysis complete");
+      }
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Failed");
+    } finally {
+      setAnalyzing(null);
+    }
+  };
+
+  const handleDelete = async (a: any) => {
+    try {
+      await api.deleteAddendum(a.id);
+      toast.success("Addendum deleted");
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Failed");
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-sm">Tender addendums ({addendums.length})</h3>
+        <Button size="sm" onClick={() => setShowAdd(true)}>
+          <Plus className="h-3.5 w-3.5" />
+          Upload addendum
+        </Button>
+      </div>
+
+      {addendums.length === 0 ? (
+        <Card>
+          <CardContent className="py-10 flex flex-col items-center text-center">
+            <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-3">
+              <FileDiff className="h-6 w-6 text-primary" />
+            </div>
+            <h3 className="font-semibold">No addendums uploaded</h3>
+            <p className="text-sm text-muted-foreground mt-1">Upload client addendums and AI will highlight what changed.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        addendums.map((a: any) => (
+          <Card key={a.id}>
+            <CardContent className="p-4">
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    {a.addendum_number && <Badge variant="outline" className="text-xs">{a.addendum_number}</Badge>}
+                    <span className="font-medium text-sm">{a.title}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    {a.issued_date && <>Issued: {formatDate(a.issued_date)} · </>}
+                    Added: {formatDateTime(a.created_at)}
+                    {a.file_path && (
+                      <> · <a href={`/uploads/${a.file_path}?XTransformPort=8000`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Download</a></>
+                    )}
+                  </div>
+                  {a.description && <p className="text-sm mt-1">{a.description}</p>}
+                </div>
+                <Button size="icon" variant="ghost" className="h-7 w-7 text-rose-600" onClick={() => handleDelete(a)}>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+
+              {a.ai_changes ? (
+                <div className="mt-3 border rounded-lg p-3 bg-violet-50/50 dark:bg-violet-950/20">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Sparkles className="h-4 w-4 text-violet-600" />
+                    <span className="text-sm font-semibold">AI Change Detection</span>
+                  </div>
+                  {a.ai_changes._error ? (
+                    <Alert variant="destructive">
+                      <AlertDescription>{a.ai_changes._error}</AlertDescription>
+                    </Alert>
+                  ) : (
+                    <div className="space-y-2 text-xs">
+                      {a.ai_changes.new_requirements?.length > 0 && (
+                        <ChangeList title="New requirements" items={a.ai_changes.new_requirements} color="emerald" />
+                      )}
+                      {a.ai_changes.removed_requirements?.length > 0 && (
+                        <ChangeList title="Removed requirements" items={a.ai_changes.removed_requirements} color="rose" />
+                      )}
+                      {a.ai_changes.changed_dates?.length > 0 && (
+                        <div>
+                          <div className="font-semibold mb-1">Changed dates:</div>
+                          <div className="space-y-1">
+                            {a.ai_changes.changed_dates.map((d: any, i: number) => (
+                              <div key={i} className="flex items-center gap-2">
+                                <span className="font-medium">{d.field}:</span>
+                                <span className="line-through text-muted-foreground">{d.from}</span>
+                                <span>→</span>
+                                <span className="text-emerald-700 font-medium">{d.to}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {a.ai_changes.changed_pricing?.length > 0 && (
+                        <ChangeList title="Changed pricing" items={a.ai_changes.changed_pricing} color="amber" />
+                      )}
+                      {a.ai_changes.changed_scope?.length > 0 && (
+                        <ChangeList title="Changed scope" items={a.ai_changes.changed_scope} color="cyan" />
+                      )}
+                      {a.ai_changes.changed_submission?.length > 0 && (
+                        <ChangeList title="Changed submission" items={a.ai_changes.changed_submission} color="violet" />
+                      )}
+                      {a.ai_changes.other_changes?.length > 0 && (
+                        <ChangeList title="Other changes" items={a.ai_changes.other_changes} color="muted" />
+                      )}
+                      {a.ai_changes.summary && (
+                        <div className="mt-2 p-2 rounded bg-emerald-50 dark:bg-emerald-950/30 text-emerald-900 dark:text-emerald-200">
+                          <strong>Summary:</strong> {a.ai_changes.summary}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-2"
+                  onClick={() => handleAnalyze(a)}
+                  disabled={analyzing === a.id}
+                >
+                  {analyzing === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                  Analyze with AI
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        ))
+      )}
+
+      <Dialog open={showAdd} onOpenChange={setShowAdd}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto scrollbar-thin">
+          <DialogHeader><DialogTitle>Upload addendum</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <Field2 label="Addendum number (optional)">
+                <Input value={form.addendum_number} onChange={(e) => setForm({ ...form, addendum_number: e.target.value })} placeholder="e.g. 1, A" />
+              </Field2>
+              <Field2 label="Issued date">
+                <Input type="date" value={form.issued_date} onChange={(e) => setForm({ ...form, issued_date: e.target.value })} />
+              </Field2>
+            </div>
+            <Field2 label="Title *">
+              <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+            </Field2>
+            <Field2 label="Description">
+              <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} />
+            </Field2>
+            <Field2 label="Addendum file *">
+              <Input type="file" accept=".pdf,.doc,.docx,.txt" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+            </Field2>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
+            <Button onClick={handleAdd} disabled={saving || !file || !form.title}>{saving ? "Uploading…" : "Upload"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function ChangeList({ title, items, color }: { title: string; items: string[]; color: string }) {
+  const colorMap: Record<string, string> = {
+    emerald: "text-emerald-700",
+    rose: "text-rose-700",
+    amber: "text-amber-700",
+    cyan: "text-cyan-700",
+    violet: "text-violet-700",
+    muted: "text-muted-foreground",
+  };
+  return (
+    <div>
+      <div className={cn("font-semibold mb-1", colorMap[color])}>{title}:</div>
+      <ul className="ml-4 space-y-0.5">
+        {items.map((it, i) => (
+          <li key={i} className="list-disc">{it}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// ============== AI Section ==============
+function AISection({ tender, onChanged }: { tender: any; onChanged: () => void }) {
+  const [generatingSummary, setGeneratingSummary] = useState(false);
+
+  const handleGenerateSummary = async () => {
+    setGeneratingSummary(true);
+    toast.info("Generating AI summary…");
+    try {
+      await api.aiTenderSummary(tender.id);
+      toast.success("AI summary generated");
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Failed");
+    } finally {
+      setGeneratingSummary(false);
+    }
+  };
+
+  const extracted = tender.ai_extracted_info;
+
+  return (
+    <div className="space-y-4">
+      {/* AI Extracted Info */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-violet-600" />
+                AI Extracted Information
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Automatically read from your uploaded tender documents
+              </CardDescription>
+            </div>
+            <Button asChild size="sm" variant="outline">
+              <a href={`/uploads/${tender.documents?.[0]?.filename || ""}?XTransformPort=8000`} target="_blank" rel="noopener noreferrer">
+                <FileText className="h-3.5 w-3.5" /> View doc
+              </a>
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {!extracted ? (
+            <div className="text-center py-6 text-sm text-muted-foreground">
+              No AI extraction yet. Go to the Documents tab and click "AI Extract" to read the tender automatically.
+            </div>
+          ) : extracted._error ? (
+            <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription>{extracted._error}</AlertDescription>
+            </Alert>
+          ) : (
+            <div className="space-y-3 text-sm">
+              {extracted.tender_number && <KV k="Tender number" v={extracted.tender_number} />}
+              {extracted.client && <KV k="Client" v={extracted.client} />}
+              {extracted.tender_title && <KV k="Title" v={extracted.tender_title} />}
+              {extracted.closing_date && <KV k="Closing date" v={extracted.closing_date} />}
+              {extracted.closing_time && <KV k="Closing time" v={extracted.closing_time} />}
+              {extracted.contract_period && <KV k="Contract period" v={extracted.contract_period} />}
+              {extracted.site_locations?.length > 0 && <KV k="Site locations" v={extracted.site_locations.join(", ")} />}
+              {extracted.number_of_personnel_guards && <KV k="Personnel/guards required" v={extracted.number_of_personnel_guards} />}
+              {extracted.required_psira_grades?.length > 0 && <KV k="PSIRA grades" v={extracted.required_psira_grades.join(", ")} />}
+              {extracted.scope_of_work && <KV k="Scope of work" v={extracted.scope_of_work} />}
+              {extracted.submission_method && <KV k="Submission method" v={extracted.submission_method} />}
+              {extracted.compulsory_briefing_site_inspection && <KV k="Compulsory briefing" v={extracted.compulsory_briefing_site_inspection} />}
+              {extracted.briefing_date && <KV k="Briefing date" v={`${extracted.briefing_date}${extracted.briefing_time ? " " + extracted.briefing_time : ""}`} />}
+              <ListSection title="Mandatory requirements" items={extracted.mandatory_requirements} />
+              <ListSection title="Functionality requirements" items={extracted.functionality_requirements} />
+              <ListSection title="Evaluation criteria" items={extracted.evaluation_criteria} />
+              <ListSection title="Pricing requirements" items={extracted.pricing_requirements} />
+              <ListSection title="Compulsory documents" items={extracted.compulsory_documents} />
+              <ListSection title="Required qualifications" items={extracted.required_qualifications} />
+              <ListSection title="Required equipment" items={extracted.required_equipment} />
+              <ListSection title="Submission requirements" items={extracted.submission_requirements} />
+              <ListSection title="Important conditions" items={extracted.important_conditions} />
+              <ListSection title="Important deadlines" items={extracted.important_deadlines} />
+              <ListSection title="Disqualification risks" items={extracted.disqualification_requirements} highlight="rose" />
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* AI Summary */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Bot className="h-4 w-4 text-primary" />
+                AI Tender Summary
+              </CardTitle>
+              <CardDescription className="text-xs">
+                A plain-English summary of this tender
+              </CardDescription>
+            </div>
+            <Button size="sm" onClick={handleGenerateSummary} disabled={generatingSummary}>
+              {generatingSummary ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+              {tender.ai_summary ? "Regenerate" : "Generate"}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {tender.ai_summary ? (
+            <pre className="text-sm whitespace-pre-wrap font-sans">{tender.ai_summary}</pre>
+          ) : (
+            <div className="text-center py-6 text-sm text-muted-foreground">
+              No summary yet. Click "Generate" to get a concise overview of this tender.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function KV({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      <div className="text-xs font-medium text-muted-foreground">{k}</div>
+      <div className="col-span-2 text-sm">{v}</div>
+    </div>
+  );
+}
+
+function ListSection({ title, items, highlight }: { title: string; items?: string[]; highlight?: string }) {
+  if (!items || items.length === 0) return null;
+  return (
+    <div>
+      <div className={cn("text-xs font-medium mb-1", highlight === "rose" ? "text-rose-700" : "text-muted-foreground")}>
+        {title}:
+      </div>
+      <ul className={cn("ml-4 space-y-0.5", highlight === "rose" && "text-rose-700")}>
+        {items.map((it, i) => <li key={i} className="list-disc text-sm">{it}</li>)}
+      </ul>
+    </div>
+  );
+}
+
+// ============== Edit Tender Dialog ==============
+function EditTenderDialog({ tender, open, onOpenChange, onSaved }: {
+  tender: any; open: boolean; onOpenChange: (o: boolean) => void; onSaved: () => void;
+}) {
+  const [form, setForm] = useState<any>({});
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setForm({
+        reference_number: tender.reference_number || "",
+        title: tender.title || "",
+        client_company: tender.client_company || "",
+        description: tender.description || "",
+        scope_of_work: tender.scope_of_work || "",
+        category: tender.category || "",
+        location_site: tender.location_site || "",
+        issue_date: tender.issue_date || "",
+        closing_date: tender.closing_date || "",
+        closing_time: tender.closing_time || "",
+        validity_period: tender.validity_period || "",
+        estimated_value: tender.estimated_value?.toString() || "",
+        contract_period: tender.contract_period || "",
+        status: tender.status || "New Opportunity",
+        contact_person: tender.contact_person || "",
+        contact_email: tender.contact_email || "",
+        contact_telephone: tender.contact_telephone || "",
+        submission_method: tender.submission_method || "",
+        person_responsible: tender.person_responsible || "",
+        notes: tender.notes || "",
+        outcome: tender.outcome || "Pending",
+        unsuccessful_reason: tender.unsuccessful_reason || "",
+      });
+    }
+  }, [open, tender]);
+
+  const set = (k: string, v: string) => setForm((f: any) => ({ ...f, [k]: v }));
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.updateTender(tender.id, {
+        ...form,
+        issue_date: form.issue_date || null,
+        closing_date: form.closing_date || null,
+        estimated_value: form.estimated_value ? parseFloat(form.estimated_value) : null,
+      });
+      toast.success("Tender updated");
+      onOpenChange(false);
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message || "Failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto scrollbar-thin">
+        <DialogHeader><DialogTitle>Edit tender</DialogTitle></DialogHeader>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 py-2">
+          <Field2 label="Reference number"><Input value={form.reference_number || ""} onChange={(e) => set("reference_number", e.target.value)} /></Field2>
+          <Field2 label="Title"><Input value={form.title || ""} onChange={(e) => set("title", e.target.value)} /></Field2>
+          <Field2 label="Client"><Input value={form.client_company || ""} onChange={(e) => set("client_company", e.target.value)} /></Field2>
+          <Field2 label="Category"><Input value={form.category || ""} onChange={(e) => set("category", e.target.value)} /></Field2>
+          <Field2 label="Location"><Input value={form.location_site || ""} onChange={(e) => set("location_site", e.target.value)} /></Field2>
+          <Field2 label="Estimated value (ZAR)"><Input type="number" value={form.estimated_value || ""} onChange={(e) => set("estimated_value", e.target.value)} /></Field2>
+          <Field2 label="Issue date"><Input type="date" value={form.issue_date || ""} onChange={(e) => set("issue_date", e.target.value)} /></Field2>
+          <Field2 label="Closing date"><Input type="date" value={form.closing_date || ""} onChange={(e) => set("closing_date", e.target.value)} /></Field2>
+          <Field2 label="Closing time"><Input type="time" value={form.closing_time || ""} onChange={(e) => set("closing_time", e.target.value)} /></Field2>
+          <Field2 label="Validity period"><Input value={form.validity_period || ""} onChange={(e) => set("validity_period", e.target.value)} /></Field2>
+          <Field2 label="Contract period"><Input value={form.contract_period || ""} onChange={(e) => set("contract_period", e.target.value)} /></Field2>
+          <Field2 label="Status">
+            <Select value={form.status || ""} onValueChange={(v) => set("status", v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {TENDER_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </Field2>
+          <Field2 label="Outcome">
+            <Select value={form.outcome || "Pending"} onValueChange={(v) => set("outcome", v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {TENDER_OUTCOMES.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </Field2>
+          <Field2 label="Person responsible"><Input value={form.person_responsible || ""} onChange={(e) => set("person_responsible", e.target.value)} /></Field2>
+          <Field2 label="Contact person"><Input value={form.contact_person || ""} onChange={(e) => set("contact_person", e.target.value)} /></Field2>
+          <Field2 label="Contact email"><Input value={form.contact_email || ""} onChange={(e) => set("contact_email", e.target.value)} /></Field2>
+          <Field2 label="Contact telephone"><Input value={form.contact_telephone || ""} onChange={(e) => set("contact_telephone", e.target.value)} /></Field2>
+          <Field2 label="Submission method"><Input value={form.submission_method || ""} onChange={(e) => set("submission_method", e.target.value)} /></Field2>
+          <div className="sm:col-span-2"><Field2 label="Description"><Textarea value={form.description || ""} onChange={(e) => set("description", e.target.value)} rows={2} /></Field2></div>
+          <div className="sm:col-span-2"><Field2 label="Scope of work"><Textarea value={form.scope_of_work || ""} onChange={(e) => set("scope_of_work", e.target.value)} rows={3} /></Field2></div>
+          <div className="sm:col-span-2"><Field2 label="Notes"><Textarea value={form.notes || ""} onChange={(e) => set("notes", e.target.value)} rows={2} /></Field2></div>
+          {form.outcome === "Unsuccessful" && (
+            <div className="sm:col-span-2"><Field2 label="Unsuccessful reason"><Textarea value={form.unsuccessful_reason || ""} onChange={(e) => set("unsuccessful_reason", e.target.value)} rows={2} /></Field2></div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save changes"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function Field2({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs">{label}</Label>
+      {children}
+    </div>
+  );
+}

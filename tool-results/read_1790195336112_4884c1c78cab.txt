@@ -1,0 +1,192 @@
+     1→# TenderFlow - Tender Management System Worklog
+     2→
+     3→## Project Overview
+     4→Building a full-stack Tender Management System with:
+     5→- **Backend**: Python FastAPI + SQLAlchemy + SQLite (port 8000)
+     6→- **Frontend**: Next.js 16 + TypeScript + shadcn/ui (port 3000)
+     7→- **AI**: z-ai-web-dev-sdk CLI for document reading, assistant, summaries
+     8→
+     9→## Architecture Decisions
+    10→- Python backend runs as a mini-service on port 8000
+    11→- All frontend API requests use `?XTransformPort=8000` to route through Caddy gateway
+    12→- JWT auth with bcrypt password hashing
+    13→- SQLite database stored at `mini-services/tender-api/tender.db`
+    14→- File uploads stored at `mini-services/tender-api/uploads/`
+    15→- AI features: Python backend shells out to `z-ai` CLI (chat + vision)
+    16→
+    17→## Task IDs Plan
+    18→- Task 1: Python backend foundation (myself)
+    19→- Task 2: Python backend API endpoints (myself)
+    20→- Task 3: Frontend foundation - API client, auth context (myself)
+    21→- Task 4-a: Landing page (subagent)
+    22→- Task 4-b: Auth page (subagent)
+    23→- Task 5: Dashboard shell + all tabs (myself + subagents)
+    24→
+    25→---
+    26→Task ID: 0
+    27→Agent: Main Orchestrator
+    28→Task: Initial planning and worklog setup
+    29→
+    30→Work Log:
+    31→- Explored existing Next.js project structure
+    32→- Verified Python 3.12 + FastAPI + uvicorn + pdfplumber + pypdf available
+    33→- Installed sqlalchemy, python-jose, passlib, bcrypt
+    34→- Verified z-ai CLI available at /home/z/my-project/node_modules/.bin/z-ai
+    35→- Created worklog.md
+    36→
+    37→Stage Summary:
+    38→- Environment ready. Starting Python backend build next.
+    39→
+    40→---
+    41→Task ID: 1
+    42→Agent: Main Orchestrator
+    43→Task: Build Python FastAPI backend with SQLAlchemy, JWT auth, all tender management models, AI integration
+    44→
+    45→Work Log:
+    46→- Created mini-services/tender-api/ with package.json
+    47→- database.py: SQLAlchemy models for User, Tender, TenderDocument, ChecklistItem, LibraryDocument, Briefing, PricingVersion, Submission, Communication, Addendum, ReminderSetting
+    48→- auth.py: JWT auth with bcrypt direct (passlib had bcrypt 5.x compat issue)
+    49→- ai_module.py: z-ai CLI subprocess wrappers for extraction, summary, addendum change detection, assistant
+    50→- main.py: Full FastAPI app with all routes - auth, tenders CRUD, documents, checklist, library, briefings, pricing, submissions, communications, addendums, dashboard, AI assistant
+    51→- Started uvicorn on port 8000, verified health endpoint works
+    52→- Verified user registration creates JWT token correctly
+    53→
+    54→Stage Summary:
+    55→- Backend fully operational on port 8000
+    56→- All API endpoints under /api/* prefix
+    57→- File uploads stored in uploads/ subdirectories
+    58→- AI features shell out to z-ai CLI for chat completions
+    59→- DB at mini-services/tender-api/tender.db (fresh, no mock data)
+    60→- Ready for frontend integration. Frontend must use ?XTransformPort=8000 for API calls
+    61→
+    62→---
+    63→Task ID: 4
+    64→Agent: frontend-styling-expert
+    65→Task: Build landing page component
+    66→
+    67→Work Log:
+    68→- Read worklog.md and explored project structure (shadcn/ui components, globals.css emerald theme, package.json deps)
+    69→- Verified framer-motion, lucide-react, and all needed shadcn primitives (Button, Card, Badge, Accordion, Sheet) are available
+    70→- Created /home/z/my-project/src/components/landing-page.tsx — a single self-contained "use client" component implementing the LandingPage({ onGetStarted, onSignIn }) API
+    71→- Built all 12 required sections: sticky nav with mobile Sheet menu, hero with CSS dot-grid background + gradient text + mock dashboard card, stats bar, 16-feature grid, 4-step "How it works" with connecting line, AI-highlight emerald-tinted section with mock extracted JSON card, deadline reminder ladder (30/14/7/3/1 days), testimonial quote card with emerald accent border, 2-tier pricing (Starter/Pro with Most popular badge), 6-Q&A FAQ accordion, emerald gradient final CTA band, multi-column footer with mt-auto
+    72→- Used framer-motion `whileInView` with `viewport={{ once: true }}` for scroll reveals, staggered children for grids
+    73→- All auth-bound buttons call onGetStarted or onSignIn (never anchor links to /auth)
+    74→- Used only emerald/teal/amber/rose accent colors — no indigo or blue anywhere
+    75→- Verified with `bun run lint` — clean, zero errors
+    76→
+    77→Stage Summary:
+    78→- Artifact: /home/z/my-project/src/components/landing-page.tsx (~880 lines)
+    79→- Self-contained: no external image URLs, all visuals built from divs + lucide icons + Tailwind
+    80→- Reuses shadcn/ui Button, Card, Badge, Accordion, Sheet — no new primitives created
+    81→- Sticky-footer layout via `min-h-screen flex flex-col` + `mt-auto` footer
+    82→- Responsive mobile-first; mobile nav uses Sheet with hamburger trigger
+    83→- Ready to be wired into a route (e.g. /) with onGetStarted/onSignIn navigating to /auth
+    84→
+    85→---
+    86→Task ID: 5
+    87→Agent: frontend-styling-expert
+    88→Task: Build auth page component
+    89→
+    90→Work Log:
+    91→- Read worklog.md (Task 4 landing page) to inherit visual language: emerald/teal theme, FileText-in-rounded-square logo, "Tender<span class=text-primary>Flow</span>" wordmark, soft shadows + rounded-2xl cards, framer-motion staggered reveals
+    92→- Audited available shadcn primitives (Button, Card, Input, Label, Tabs, Checkbox, Alert, Tooltip) and confirmed framer-motion, sonner, lucide-react already wired (SonnerToaster mounted in app/layout.tsx)
+    93→- Confirmed useAuth() API surface from src/lib/auth-context.tsx (login, register) — no direct api.ts calls used
+    94→- Created /home/z/my-project/src/components/auth-page.tsx as a single "use client" component implementing the AuthPage({ initialMode, onBack, onSuccess }) API
+    95→- Built split-screen layout: md+ left panel (emerald→teal gradient, dot-grid + 2 blurred floating circles, logo, headline, 3 feature bullets with ScanText/ListChecks/CalendarClock icons, Quote testimonial with mt-auto); right panel centered form card on neutral bg with ghost Back button
+    96→- Sign In form: email (Mail icon) + password (Lock icon, Eye/EyeOff toggle) inside a real <form>; "Forgot password?" rendered as a no-op button wrapped in a Tooltip showing "Coming soon"; inline rose-600 errors with role="alert"
+    97→- Sign Up form: Full name (User), Company name optional (Building2), Email, Password, Confirm password, Terms checkbox (required); all validation (email regex, ≥6 chars, password match, terms required) implemented with controlled-state errors cleared on tab switch
+    98→- Auth integration: handleSignIn / handleSignUp call useAuth().login/register, then onSuccess(); on error show both sonner toast.error AND an Alert component (AnimatePresence height animate) above the form
+    99→- Sign-up success micro-animation: SubmitButton swaps to a spring-animated CheckCircle2 + "Account created" for 800ms (window.setTimeout) before onSuccess() fires — tasteful, not gimmicky
+   100→- Submit buttons carry aria-busy while loading and Loader2 spinners; Enter in any field submits via native form onSubmit
+   101→- Tabs component driven by `mode` state synced with initialMode; switchMode() clears all errors and serverError
+   102→- Trust badge "Secured by JWT · bcrypt password hashing" with ShieldCheck icon under the card
+   103→- Helper subcomponents (IconInput, PasswordInput, FieldWithError, SubmitButton, LeftPanel) keep the main component readable; total ~580 lines
+   104→- Verified with `bun run lint` (clean) and `bunx tsc --noEmit` (only pre-existing errors in gitignored examples/ and skills/ directories — auth-page.tsx is clean)
+   105→
+   106→Stage Summary:
+   107→- Artifact: /home/z/my-project/src/components/auth-page.tsx (~580 lines, single "use client" component)
+   108→- Real backend integration via useAuth() — no mocks, no direct api calls
+   109→- Visual consistency with landing page maintained (same logo treatment, emerald palette, soft shadows, rounded-2xl, framer-motion reveals)
+   110→- Fully responsive (md: split-screen, mobile: form-only), accessible (Label htmlFor everywhere, role="alert" errors, aria-busy buttons, shadcn Tabs for keyboard nav), no external image URLs
+   111→- Ready to be wired into /auth route with <AuthPage initialMode="signin" onBack={() => router.push("/")} onSuccess={() => router.push("/dashboard")} />
+   112→
+   113→---
+   114→Task ID: 7
+   115→Agent: frontend-styling-expert
+   116→Task: Build dashboard overview tab
+   117→
+   118→Work Log:
+   119→- Read worklog.md (Tasks 0–5) to inherit the emerald/teal visual language, soft-shadow cards, and TenderFlow component conventions; audited shared context files (src/lib/api.ts dashboard() return shape, src/lib/dashboard-store.ts helpers: formatDate, formatCurrency, statusColor, deadlineColor, useDashboardStore.setTab/selectTender)
+   120→- Verified all required shadcn primitives are present: Card suite, Button, Badge, Skeleton, Alert, Progress (used Skeleton + Alert for loading/error states)
+   121→- Replaced the stub at src/components/dashboard/tabs/dashboard-tab.tsx with a single "use client" DashboardTab() component that calls api.dashboard() on mount via useEffect, with useState for data/loading/refreshing/error
+   122→- Built page header: "Dashboard" title + subtitle, ghost Refresh button (with spinning RefreshCw while refreshing) that re-fetches, and primary "New Tender" button → setTab("tenders")
+   123→- Built 4 KPI cards in a responsive grid (1/2/4 cols): Active Tenders (FileStack, emerald), Closing This Week (CalendarClock, amber), Documents Expiring (FolderClock, rose, sums docs_expiring_soon + docs_expired), Awarded This Year (Trophy, emerald). Each card has a tinted icon square, big tabular-nums number (en-ZA thousands separators), label, and subtitle. Loading shows 4 KpiSkeleton cards mirroring the layout.
+   124→- Built 3-column responsive layout: left column (lg:col-span-2) stacks Tender Status Breakdown (top 8 statuses from status_counts, horizontal div bars colored via statusBarColor with width proportional to count/maxCount, count column right-aligned), Tenders Closing This Week (max-h-80 overflow-y-auto scrollbar-thin list; each row clickable → openTender(id) which does setTab("tenders") + setTimeout 50ms selectTender(id); shows reference_number + statusColor badge + title + client · closing date + deadline badge colored red ≤1d, amber ≤3d, emerald >3d using deadlineBadgeClass + deadlineLabel; empty state with CheckCircle2 "No tenders closing this week — you're on top of things."), Awarded This Year (list with reference_number, title, client, formatCurrency(estimated_value) in emerald; empty state "No awards yet this year. Keep submitting!")
+   125→- Right column (lg:col-span-1) stacks: Next Deadline card (emerald border highlight when next_deadline exists; tinted emerald countdown box with big tabular-nums days_remaining number colored via deadlineColor, reference_number, title, closing date + deadline label; "Open tender" button → openTender(id); empty state when null), Document Alerts card (max-h-64 scroll list of docs_expiring_list with category badge + name + expiry date + days badge colored rose if expired, amber if ≤30d, emerald otherwise via docExpiryLabel; "Manage library" outline button → setTab("library"); empty state when no docs), Quick Actions card (2x2 grid of outline buttons: New Tender → tenders, Upload Document → library, Upcoming Briefings → briefings, Ask AI → assistant, each with tinted primary icon + label)
+   126→- Built bottom Recent Activity placeholder: dashed-border Card with Sparkles icon in tinted primary square, "Activity feed coming soon" headline, full message "Activity feed coming soon. Use the AI Assistant to ask about your tenders.", and an outline "Ask AI Assistant" button → setTab("assistant")
+   127→- Error state: Alert (variant="destructive") with AlertTriangle, error message, and an outline "Try again" button calling fetchData()
+   128→- Emerald theme throughout (no blue/indigo for chrome — status bar colors do use the semantic palette from statusColor which includes sky/amber/rose for non-emerald statuses, matching the existing helper). Verified with `bun run lint` — the only 2 reported errors are pre-existing in src/app/page.tsx and src/components/dashboard/dashboard-shell.tsx (react-hooks/set-state-in-effect); dashboard-tab.tsx is clean. Also ran `bunx tsc --noEmit` — no errors in the new file.
+   129→
+   130→Stage Summary:
+   131→- Artifact: /home/z/my-project/src/components/dashboard/tabs/dashboard-tab.tsx (~817 lines, single "use client" component, fully self-contained)
+   132→- Real backend integration via api.dashboard() — no mocks
+   133→- Reuses shadcn/ui Card/Button/Badge/Skeleton/Alert + lucide-react icons + Zustand store helpers (formatDate, formatCurrency, statusColor, deadlineColor)
+   134→- Fully responsive (KPI: 1/2/4 cols; body: 1-col stack on mobile, 3-col grid on lg with left col-span-2; all lists use scrollbar-thin with max-heights)
+   135→- Loading state mirrors real layout with Skeletons; error state has retry; empty states for every list with tasteful CheckCircle2/Trophy/FileStack icons
+   136→- Tender navigation matches dashboard-shell pattern: useDashboardStore.getState().setTab("tenders") + setTimeout 50ms selectTender(id)
+   137→- Ready to be rendered by dashboard-shell.tsx (already wired via DashboardTabView import)
+   138→
+   139→---
+   140→Task ID: 9-10
+   141→Agent: frontend-styling-expert
+   142→Task: Build library-tab + briefings-tab
+   143→
+   144→Work Log:
+   145→- Read worklog.md (Tasks 0–7) to inherit the emerald/teal visual language, soft-shadow cards, KPI card pattern, EmptyState helper, and the openTender navigation pattern (setTab("tenders") + setTimeout 50ms selectTender(id)); audited shared context: src/lib/api.ts (LIBRARY_CATEGORIES export, listLibrary/uploadLibraryDocument/updateLibraryDocument/deleteLibraryDocument, listBriefings/createBriefing/updateBriefing/deleteBriefing/listTenders), src/lib/dashboard-store.ts (formatDate, daysUntil, useDashboardStore.getState), and the backend main.py endpoints to confirm exact request/response contracts (library update uses query params and ignores empty-string dates; briefing list returns tender_reference/tender_title/client + ISO date + "HH:MM" time; BriefingUpdate has no tender_id field so tender is read-only in edit mode)
+   146→- Replaced the stub at src/components/dashboard/tabs/library-tab.tsx with a single "use client" LibraryTab() component: fetches all library docs once via api.listLibrary() on mount (no server-side filter params, so stats stay accurate); computes 3 stats from the full list (Total / Expiring Soon ≤30d / Expired) shown as StatCards with Files/CalendarClock/FileWarning icons in emerald/amber/rose tinted squares; client-side category Select filter + search Input (filters name/description/category) with a Clear button; documents grouped by category preserving LIBRARY_CATEGORIES order, each group rendered as a responsive 1/2/3-col grid of DocumentCards; each card shows FileText icon + name + category badge + status badge (Active=emerald/Expiring Soon=amber/Expired=rose), description (line-clamp-2), issued/expires dates with a colored "time left" badge, file size (KB/MB formatted), and Download (anchor to /uploads/{filename}?XTransformPort=8000, new tab)/Edit/Delete actions; Upload/Edit Dialog with name (required) + category Select (required) + description Textarea + issue/expiry date inputs (helper "Leave blank if non-expiring") + notes Textarea + file input (required for new; edit mode shows current filename read-only with note "Delete & re-upload to replace" since the PUT endpoint doesn't accept files); AlertDialog delete confirmation (rose action button); loading skeletons mirror the layout; error Alert + retry; empty state with FolderCheck icon + upload CTA; no-docs-match empty state for filtered views; toast.success/error via sonner; refetch after upload/edit/delete
+   147→- Replaced the stub at src/components/dashboard/tabs/briefings-tab.tsx with a single "use client" BriefingsTab() component: fetches all briefings via api.listBriefings(false, 30) on mount; computes 3 stats from the full list (Total / Upcoming next 30d / Attendance unconfirmed) shown as StatCards with ListChecks/CalendarClock/AlertTriangle icons; Tabs filter "All" | "Upcoming (30 days)" + search Input (filters tender_reference/title/client/location); briefings sorted ascending by date and grouped by date with a heading showing formatted date + relative badge (Today/Tomorrow/In X days/Xd ago, colored rose ≤1d / amber ≤3d / emerald else) + item count; each BriefingCard shows a clickable tender button (MapPin icon + mono reference + title, opens tender via setTab("tenders")+selectTender) + type badge (Briefing=emerald/Site Inspection=amber) + client + a tinted details grid (date/time/location/contact/person attending) + attendance badges (required=emerald/optional=muted; confirmed=emerald check/unconfirmed=muted x) + expandable notes (line-clamp-2 + Show more/less) + Edit/Delete actions; if attendance_required && !attendance_confirmed && date within 7 days, an amber alert strip "Attendance confirmation required!" renders at the top of the card with an amber border; Add/Edit Dialog fetches tenders on open via api.listTenders(), with a tender Select (listed as "REF — Title", disabled save + amber notice when no tenders exist), type Select (Briefing/Site Inspection), date (required) + time inputs, location + contact person inputs, person attending input, attendance_required + attendance_confirmed Switches in a bordered grid, notes Textarea; edit mode shows the tender as read-only info (BriefingUpdate has no tender_id); AlertDialog delete confirmation; loading skeletons; error Alert + retry; empty states (MapPin icon + add CTA; no-match for filter/search); toast feedback; refetch after create/update/delete
+   148→- Both files reuse the dashboard-tab visual language verbatim: StatCard with 11×11 tinted icon square + tabular-nums value, EmptyState with 14×14 rounded-2xl icon, Card hover:shadow-md, emerald primary throughout (no blue/indigo chrome — only semantic amber/rose for warnings/expired states), scrollbar-thin on scrollable/dialog content, AlertDialogAction in rose for destructive confirms, ghost Refresh button with spinning RefreshCw, header with title + subtitle + action buttons
+   149→- Verified with `bun run lint` — the only 2 reported errors are pre-existing in src/app/page.tsx and src/components/dashboard/dashboard-shell.tsx (react-hooks/set-state-in-effect, same as noted in Task 7); library-tab.tsx and briefings-tab.tsx are clean. Also ran `bunx tsc --noEmit` — no errors in either new file.
+   150→
+   151→Stage Summary:
+   152→- Artifacts: /home/z/my-project/src/components/dashboard/tabs/library-tab.tsx (~950 lines) and /home/z/my-project/src/components/dashboard/tabs/briefings-tab.tsx (~1180 lines), both single "use client" components, fully self-contained, already wired into dashboard-shell.tsx via LibraryTab/BriefingsTab imports
+   153→- Real backend integration via the shared api client — no mocks; client-side filtering for instant UX with stats computed from the full unfiltered list
+   154→- Emerald theme throughout (semantic amber/rose only for expiry/warning states); fully responsive (1/2/3-col grids, mobile-first header stacks); accessible (Label htmlFor on every field, sr-only action labels, AlertDialog for destructive ops, Switch with id+Label)
+   155→- Both tabs are ready to use end-to-end: upload/edit/delete compliance docs with file download, and schedule/edit/delete briefings with attendance tracking + tender cross-navigation
+   156→
+   157→---
+   158→Task ID: 11-12
+   159→Agent: frontend-styling-expert
+   160→Task: Build pricing-tab + submissions-tab
+   161→
+   162→Work Log:
+   163→- Read worklog.md (Tasks 0–10) to inherit the emerald/teal visual language, soft-shadow cards, KPI/StatCard pattern, EmptyState helper, and the openTender navigation pattern (setTab("tenders") + setTimeout 50ms selectTender(id)); audited shared context: src/lib/api.ts (listTenders, listPricing, createPricing, deletePricing, saveSubmission, updateTender, TENDER_OUTCOMES export), src/lib/dashboard-store.ts (formatDate, formatDateTime, formatCurrency, statusColor, useDashboardStore.getState), src/components/dashboard/tabs/dashboard-tab.tsx for visual consistency reference, and backend main.py to confirm exact request/response contracts (PricingVersionCreate accepts tender_id + optional version_label + line_items [{category, description, quantity, rate, total}] + optional notes; backend auto-calculates subtotal/VAT(15%)/total and auto-increments version_number; SubmissionCreate accepts all-optional fields with tender_id required and POSTs create-or-update; list_tenders returns tender.submission as null or full submission object — submission_date is ISO date string, submission_time is "HH:MM"; TenderUpdate accepts outcome + unsuccessful_reason as optional fields)
+   164→- Replaced the stub at src/components/dashboard/tabs/pricing-tab.tsx with a single "use client" PricingTab() component: fetches all tenders on mount via api.listTenders({sort:"updated_at", order:"desc"}) and populates a tender Select dropdown ("Select a tender…"); when no tender is selected, shows a dashed-border EmptyState card with Calculator icon + hint "Select a tender to view or create pricing versions"; when a tender is selected, shows an emerald-tinted tender info banner (reference_number, status badge via statusColor, title, client + "New Pricing Version" primary button that opens a Dialog), a 3-card stats row (Pricing Versions count with Hash icon, Latest Version Total with Receipt icon, Sum of All Versions with Calculator icon — all emerald/amber themed with tabular-nums values), and a list of version cards sorted by version_number descending; each VersionCard is collapsible (default first card expanded) with header showing emerald "v{n}" badge + version_label + created datetime (formatDateTime), an expanded body containing a line-items Table (category badge, description, qty, rate via formatCurrency, total via formatCurrency) with subtotal/VAT(15%)/Total in a 3-col grid where the Total is in a bordered emerald box with text-2xl emerald-700, optional notes section, and AlertDialog delete confirmation (rose action button); New Pricing Version Dialog contains version_label optional input, a line items editor Table with Select per row (Labour/Equipment/Consumables/Transport/Other), Description Input, Qty + Rate number inputs that auto-calc total = qty × rate (lineTotal helper with 2-decimal rounding), a remove X button per row (disabled when only 1 row), an "Add line item" outline button, a live Subtotal/VAT(15%)/Total preview in the same emerald-bordered style, optional Notes textarea, and a Save button with Loader2 spinner + hasAnyItem validation (filters out empty rows on save); after create/delete refetches versions via fetchVersions(selectedTenderId); toast.success/error feedback; loading skeletons (header + tender Select + 3 stats + 2 version card skeletons); error Alert + retry; tender-empty Alert if no tenders exist
+   165→- Replaced the stub at src/components/dashboard/tabs/submissions-tab.tsx with a single "use client" SubmissionsTab() component: fetches all tenders via api.listTenders on mount, then filters client-side via isSubmissionTracked helper (tender.submission !== null OR status in Submitted/Awarded/Unsuccessful/Withdrawn OR outcome not Pending); 4-card stats row (Total Submitted/FileStack-emerald, Pending Outcome/Hourglass-amber, Awarded/Trophy-emerald, Unsuccessful/XCircle-rose — all tabular-nums with sublabels); filter bar with search Input (filters reference_number/title/client_company/submission.submitted_by/submission.confirmation_reference) + outcome Select (All + TENDER_OUTCOMES from api.ts); submissions list shows count "Showing X of Y submissions" then SubmissionCard per tender; each SubmissionCard has a header row with clickable mono reference_number (opens tender via setTab("tenders")+selectTender) + status badge (statusColor) + clickable title + client + an outcome Badge (Awarded=emerald-600/solid, Unsuccessful=rose, Withdrawn=muted, Pending=amber, each with an OutcomeIconRender icon) and right-aligned final_pricing in emerald via formatCurrency with "final pricing" sublabel; a 2×4 details grid (Submitted date+time, Method, Submitted by, Days since with amber color when >60d) inside a muted/20 bordered box; a confirmation_reference row with a CopyButton (clipboard + toast + Check icon feedback); an optional notes row with TooltipProvider/Tooltip for overflow; an expandable unsuccessful_reason panel (rose-tinted border, line-clamp-2 with "Show more/less" when >100 chars); and an actions row with "Set Outcome" (Settings2 icon) + "Edit Submission" (Pencil icon) outline buttons; Edit Submission Dialog pre-fills from tender.submission (or tender.person_responsible for submitted_by fallback) with date/time inputs, method Select (Email/Online Portal/Physical Delivery/Courier/E-procurement portal/Other), submitted_by Input, confirmation_reference Input, final_pricing number Input, notes Textarea, Save button with Loader2 spinner — calls api.saveSubmission(tenderId, payload) with undefined for empty fields; Set Outcome Dialog shows current outcome Badge, outcome Select (Pending/Awarded/Unsuccessful/Withdrawn), Unsuccessful requires reason textarea (rose border + error toast if empty), Awarded has optional award value notes field (clearly noted "not stored on the tender" since TenderUpdate has no dedicated award_value field) — calls api.updateTender(id, {outcome, unsuccessful_reason}); both dialogs refetch via fetchTenders(true) on success; loading skeletons (header + 4 stats + 3 submission card skeletons); error Alert + retry; empty states for no-tenders-at-all (Send icon) vs no-filter-match (Search icon)
+   166→- Both files reuse the dashboard-tab visual language verbatim: StatCard with 11×11 tinted icon square + tabular-nums value, EmptyState with 14×14 rounded-2xl icon, Card hover:shadow-md, emerald primary throughout (no blue/indigo chrome — only semantic amber/rose for warning/unsuccessful states), scrollbar-thin on dialog content, AlertDialogAction in rose for destructive confirms, ghost Refresh button with spinning RefreshCw, header with title + subtitle + Refresh action button. Refactored the outcome-icon lookup from a `const OutcomeIcon = outcomeIcon(outcome)` function-call pattern to a dedicated `<OutcomeIconRender outcome={outcome} className=... />` subcomponent declared outside the main component to satisfy the react-hooks/static-components rule (avoids "Cannot create components during render"). Also made outcomeBadgeClass/normalizeOutcome/OutcomeIconRender accept `string | null | undefined` to handle the nullable `tender.outcome` field cleanly
+   167→- Verified with `bun run lint` — the only 2 reported errors are pre-existing in src/app/page.tsx and src/components/dashboard/dashboard-shell.tsx (react-hooks/set-state-in-effect, same as noted in Tasks 7 and 9-10); pricing-tab.tsx and submissions-tab.tsx are clean. Also ran `bunx tsc --noEmit` — no errors in either new file.
+   168→
+   169→Stage Summary:
+   170→- Artifacts: /home/z/my-project/src/components/dashboard/tabs/pricing-tab.tsx (~720 lines) and /home/z/my-project/src/components/dashboard/tabs/submissions-tab.tsx (~780 lines), both single "use client" components, fully self-contained, already wired into dashboard-shell.tsx via PricingTab/SubmissionsTab imports
+   171→- Real backend integration via the shared api client — no mocks; client-side filtering for submissions (include tender if has submission record OR status is Submitted/Awarded/Unsuccessful/Withdrawn OR outcome is not Pending)
+   172→- Emerald theme throughout (semantic amber for Pending, rose for Unsuccessful, emerald for Awarded, muted for Withdrawn); fully responsive (stats: 1/2/4 cols on submissions, 1/3 cols on pricing; dialogs max-w-2xl/4xl with overflow-y-auto + scrollbar-thin); accessible (Label htmlFor on every field, sr-only-style icon-only buttons with aria-label, AlertDialog for destructive deletes, Tooltip for long notes)
+   173→- Both tabs are ready to use end-to-end: build multi-version pricing sheets with live VAT totals per tender, and record/edit submissions + set outcomes (Awarded/Unsuccessful/Withdrawn with required reason) with copy-to-clipboard confirmation references and days-since tracking
+   174→
+   175→---
+   176→Task ID: 13-14
+   177→Agent: frontend-styling-expert
+   178→Task: Build clarifications-tab + addendums-tab
+   179→
+   180→Work Log:
+   181→- Read worklog.md (Tasks 0–12) to inherit the emerald/teal visual language, soft-shadow cards, StatCard/EmptyState patterns, and the openTender navigation pattern (setTab("tenders") + setTimeout 50ms selectTender(id)); audited shared context: src/lib/api.ts (listTenders, createCommunication, deleteCommunication, createAddendum, analyzeAddendum, deleteAddendum), src/lib/dashboard-store.ts (formatDate, formatDateTime, useDashboardStore.getState), src/components/dashboard/tabs/dashboard-tab.tsx + pricing-tab.tsx + submissions-tab.tsx for visual consistency reference, and backend main.py + ai_module.py to confirm exact request/response contracts (tender_to_dict serializes communications without tender_id and addendums without tender_id/file_path — so both must be enriched during flattening on the client; CommunicationCreate accepts tender_id + optional subject/body/comm_date/from_party/to_party/notes + required comm_type; create_addendum uses Form fields addendum_number?, title (req), description?, issued_date?, file (req); ai_analyze_addendum returns the raw changes dict from detect_addendum_changes which may include _error on failure; ADDENDUM_SYSTEM JSON schema matches the task spec)
+   182→- Replaced the stub at src/components/dashboard/tabs/clarifications-tab.tsx with a single "use client" ClarificationsTab() component: fetches all tenders via api.listTenders({sort:"updated_at", order:"desc"}) on mount, flattens each tender's communications[] array into a single list while attaching tender_id + tender_reference + tender_title; sorts newest-first by comm_date then id; 4-card stats row (Total Communications/MessageSquare-emerald, Clarification Requests/HelpCircle-amber, Meetings/Users-cyan, Extensions/Clock-orange) all tabular-nums; filter bar with type Select (All + the 10 COMM_TYPES) + search Input (filters subject/body/tender reference+title/from+to parties); vertical timeline list where each entry has an absolute-positioned 9×9 tinted circular icon node (color varies by type via commTypeIconClass) connected by a 1px vertical line (skipped on the last entry), a Card with header row showing the comm type badge (commTypeBadgeClass) + subject, a clickable tender reference button (Building2 icon + mono reference + truncated title → openTender), date+parties row, expandable body (line-clamp ~240 chars with Show more/less toggle), optional dashed notes box, and an AlertDialog delete confirmation (rose action button); Log Communication Dialog with tender Select (required, renders "REF — Title" items), type Select (required, all 10 COMM_TYPES), datetime-local date input defaulting to now, subject Input, from/to Inputs, body Textarea (5 rows), notes Textarea (3 rows), Save button with Loader2 spinner + tender-required validation; after create/delete refetches via fetchTenders(true); toast.success/error feedback; loading skeletons (header + 4 stats + filter bar + 4 timeline cards); error Alert + retry; empty states for no-tenders (MessageSquare icon) vs no-communications (MessageSquare icon + Log CTA) vs no-filter-match (Search icon); toDatetimeLocalValue helper for the date input
+   183→- Replaced the stub at src/components/dashboard/tabs/addendums-tab.tsx with a single "use client" AddendumsTab() component: fetches all tenders via api.listTenders on mount, flattens each tender's addendums[] array into a single list while attaching tender_id + tender_reference + tender_title + tender_status; sorts newest-first by created_at→issued_date→id; 3-card stats row (Total Addendums/FileStack-emerald, Analyzed/Sparkles-teal counting those with ai_changes and no _error, Pending Analysis/Hourglass-amber counting those without ai_changes) all tabular-nums; search Input (filters title/description/addendum_number/tender reference+title); addendums list of AddendumCard components, each with a header row showing addendum_number badge (emerald solid) + title + Analyzed/Analysis-failed status badge, a clickable tender reference button (Building2 icon + mono reference + truncated title → openTender), a meta row with issued date + uploaded datetime + Download link (only when file_path present, `/uploads/{file_path}?XTransformPort=8000`, new tab), optional description, and an AI Changes section that branches on ai_changes state: (a) if ai_changes exists with _error → destructive Alert with the error message + "Retry analysis" outline button calling api.analyzeAddendum(id); (b) if ai_changes exists without _error → emerald-tinted panel with a Sparkles header and a responsive 1/2-col grid of ChangeList sections: new_requirements (emerald checkmarks), removed_requirements (rose x marks), changed_pricing (amber neutral bullets), changed_scope (fuchsia neutral bullets), changed_submission (cyan neutral bullets), other_changes (muted bullets); a Changed dates Table with Field/From/ArrowRight/To columns where the To cell is emerald; and a summary box in an emerald-tinted rounded panel; (c) if no ai_changes → a dashed bordered box with Wand2 icon + "Not analyzed yet" message + a Tooltip-wrapped "Analyze with AI" primary button that calls api.analyzeAddendum(id) with a loading spinner and is disabled while analyzing (TooltipContent: "This may take 30–60 seconds"); AlertDialog delete confirmation (rose action button); Upload Addendum Dialog with tender Select (required, "REF — Title" items), addendum_number Input (optional), title Input (required), description Textarea (optional), issued_date date input (optional), and a custom file upload dropzone label (rounded dashed border, emerald hover, shows FileDiff icon + filename + size when selected or Upload icon + "Click to upload / PDF, DOC, DOCX, TXT" when empty) with a hidden Input type=file accept=".pdf,.doc,.docx,.txt"; Save button with Loader2 spinner + tender/title/file validation; build FormData with the typed fields + file and POST via api.createAddendum; after create/delete/analyze refetches via fetchTenders(true); toast feedback including a loading toast ("Running AI change detection…" with "This may take 30–60 seconds" description) that resolves to success/error based on the analyzeAddendum result; loading skeletons; error Alert + retry; empty states for no-tenders (FileDiff icon) vs no-addendums (FileDiff icon + Upload CTA) vs no-filter-match (Search icon)
+   184→- Refactored the communication type icon lookup from a `const Icon = commTypeIcon(...)` then `<Icon />` pattern (which tripped react-hooks/static-components — "Cannot create components during render") to a dedicated `<CommTypeIconRender type={...} className={...} />` subcomponent declared outside the main component, mirroring the OutcomeIconRender pattern used in submissions-tab.tsx (Task 11-12). The addendums-tab file did not have this issue (its icons are static lucide imports used directly)
+   185→- Both files reuse the dashboard-tab/pricing-tab/submissions-tab visual language verbatim: StatCard with 11×11 tinted icon square + tabular-nums value, EmptyState with 14×14 rounded-2xl icon, Card hover:shadow-md, emerald primary throughout (no blue/indigo chrome — semantic amber/rose/orange/cyan only for type-coded badges and warning states), scrollbar-thin on dialog content, AlertDialogAction in rose for destructive confirms, ghost Refresh button with spinning RefreshCw, header with title + subtitle + Refresh + primary action button. Verified with `bun run lint` — the only 2 reported errors are pre-existing in src/app/page.tsx and src/components/dashboard/dashboard-shell.tsx (react-hooks/set-state-in-effect, same as noted in Tasks 7, 9-10, 11-12); clarifications-tab.tsx and addendums-tab.tsx are clean. Also ran `bunx tsc --noEmit` — no errors in either new file (remaining errors are in gitignored examples/, skills/, and unrelated dashboard-shell.tsx TendersTab/AssistantTab imports).
+   186→
+   187→Stage Summary:
+   188→- Artifacts: /home/z/my-project/src/components/dashboard/tabs/clarifications-tab.tsx (~720 lines) and /home/z/my-project/src/components/dashboard/tabs/addendums-tab.tsx (~750 lines), both single "use client" components, fully self-contained, already wired into dashboard-shell.tsx via ClarificationsTab/AddendumsTab imports
+   189→- Real backend integration via the shared api client — no mocks; flatten-on-client strategy (fetch all tenders, concat their communications/addendums arrays) since there is no dedicated list endpoint for either resource
+   190→- Emerald theme throughout (semantic amber/rose for warnings, cyan/teal/violet/fuchsia/orange only for type-coded badges); fully responsive (stats: 1/2/4 cols on clarifications, 1/3 cols on addendums; dialogs max-w-2xl with overflow-y-auto + scrollbar-thin; timeline cards and addendum cards stack gracefully on mobile); accessible (Label htmlFor on every field, sr-only-style icon-only buttons with aria-label, AlertDialog for destructive deletes, Tooltip on the AI Analyze button explaining the 30-60s wait)
+   191→- Both tabs are ready to use end-to-end: log emails/clarifications/meetings/extensions against any tender with full audit trail + delete; upload addendum PDFs/DOCs with structured metadata, run AI change detection that surfaces new/removed requirements, changed dates (with from→to table), changed pricing/scope/submission and a plain-English summary, with retry on failure
+   192→

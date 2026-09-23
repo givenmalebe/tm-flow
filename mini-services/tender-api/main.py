@@ -1,0 +1,1387 @@
+"""
+TenderFlow - Main FastAPI Application
+Tender Management System API
+"""
+import os
+import shutil
+import uuid
+from datetime import datetime, date, timedelta
+from typing import List, Optional, Any
+from pathlib import Path
+
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Query, Header
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_, and_, desc, asc
+
+from database import (
+    Base, engine, get_db, init_db,
+    User, Tender, TenderDocument, ChecklistItem, LibraryDocument,
+    Briefing, PricingVersion, Submission, Communication, Addendum, ReminderSetting
+)
+from auth import (
+    hash_password, verify_password, create_access_token, get_current_user
+)
+import ai_module
+
+# Initialize DB on import
+init_db()
+
+# Upload directory
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+app = FastAPI(title="TenderFlow API", version="1.0.0")
+
+# CORS - allow the Next.js frontend (and preview origin)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Serve uploaded files
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
+# Available tender statuses
+TENDER_STATUSES = [
+    "New Opportunity", "Under Review", "Interested", "Not Interested",
+    "Preparing", "Documents Outstanding", "Pricing in Progress",
+    "Awaiting Information", "Ready for Submission", "Submitted",
+    "Clarification Requested", "Clarification Submitted", "Shortlisted",
+    "Interview/Presentation", "Negotiation", "Awarded", "Unsuccessful",
+    "Cancelled", "Withdrawn", "Expired",
+]
+
+CHECKLIST_CATEGORIES = [
+    "Company profile", "CIPC documents", "SARS documents",
+    "B-BBEE certificate/affidavit", "PSIRA documents", "COIDA",
+    "Financial statements", "References", "Organogram", "Methodology",
+    "Risk assessment", "SOPs", "POPIA documents", "Signed declarations",
+    "Pricing schedule", "Technical proposal", "Forms required by the client",
+    "Other tender-specific documents",
+]
+
+LIBRARY_CATEGORIES = [
+    "CIPC", "SARS", "B-BBEE", "PSIRA", "COIDA", "Financial statements",
+    "Company profile", "References", "Policies", "Certificates",
+    "Insurance documents", "Organograms", "Standard declarations",
+    "Standard methodologies", "Standard SOPs", "Other",
+]
+
+
+# ---------------------- Pydantic Schemas ----------------------
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    full_name: str
+    company_name: Optional[str] = None
+    password: str = Field(min_length=6)
+
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class UserOut(BaseModel):
+    id: int
+    email: str
+    full_name: str
+    company_name: Optional[str]
+    role: str
+    class Config:
+        from_attributes = True
+
+
+class TokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut
+
+
+# ---- Tender ----
+class TenderBase(BaseModel):
+    reference_number: str
+    title: str
+    client_company: str
+    description: Optional[str] = None
+    scope_of_work: Optional[str] = None
+    category: Optional[str] = None
+    location_site: Optional[str] = None
+    issue_date: Optional[date] = None
+    closing_date: Optional[date] = None
+    closing_time: Optional[str] = None  # "HH:MM"
+    validity_period: Optional[str] = None
+    estimated_value: Optional[float] = None
+    contract_period: Optional[str] = None
+    status: str = "New Opportunity"
+    contact_person: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_telephone: Optional[str] = None
+    submission_method: Optional[str] = None
+    person_responsible: Optional[str] = None
+    notes: Optional[str] = None
+    outcome: Optional[str] = None
+    unsuccessful_reason: Optional[str] = None
+
+
+class TenderCreate(TenderBase):
+    pass
+
+
+class TenderUpdate(BaseModel):
+    reference_number: Optional[str] = None
+    title: Optional[str] = None
+    client_company: Optional[str] = None
+    description: Optional[str] = None
+    scope_of_work: Optional[str] = None
+    category: Optional[str] = None
+    location_site: Optional[str] = None
+    issue_date: Optional[date] = None
+    closing_date: Optional[date] = None
+    closing_time: Optional[str] = None
+    validity_period: Optional[str] = None
+    estimated_value: Optional[float] = None
+    contract_period: Optional[str] = None
+    status: Optional[str] = None
+    contact_person: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_telephone: Optional[str] = None
+    submission_method: Optional[str] = None
+    person_responsible: Optional[str] = None
+    notes: Optional[str] = None
+    outcome: Optional[str] = None
+    unsuccessful_reason: Optional[str] = None
+
+
+class TenderOut(TenderBase):
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    ai_extracted_info: Optional[Any] = None
+    ai_summary: Optional[str] = None
+    documents: List[Any] = []
+    checklist_items: List[Any] = []
+    briefings: List[Any] = []
+    pricing_versions: List[Any] = []
+    submission: Optional[Any] = None
+    communications: List[Any] = []
+    addendums: List[Any] = []
+
+    class Config:
+        from_attributes = True
+
+
+# ---- Checklist ----
+class ChecklistItemBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    status: str = "Outstanding"
+    linked_library_doc_id: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class ChecklistItemCreate(ChecklistItemBase):
+    tender_id: int
+
+
+class ChecklistItemUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+    linked_library_doc_id: Optional[int] = None
+    notes: Optional[str] = None
+
+
+# ---- Library Document ----
+class LibraryDocumentBase(BaseModel):
+    name: str
+    category: str
+    description: Optional[str] = None
+    issue_date: Optional[date] = None
+    expiry_date: Optional[date] = None
+    notes: Optional[str] = None
+
+
+class LibraryDocumentOut(LibraryDocumentBase):
+    id: int
+    filename: str
+    file_size: Optional[int] = None
+    uploaded_at: datetime
+    class Config:
+        from_attributes = True
+
+
+# ---- Briefing ----
+class BriefingBase(BaseModel):
+    briefing_type: str = "Briefing"
+    date: date
+    time: Optional[str] = None
+    location: Optional[str] = None
+    contact_person: Optional[str] = None
+    attendance_required: bool = True
+    attendance_confirmed: bool = False
+    person_attending: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class BriefingCreate(BriefingBase):
+    tender_id: int
+
+
+class BriefingUpdate(BaseModel):
+    briefing_type: Optional[str] = None
+    date: Optional[date] = None
+    time: Optional[str] = None
+    location: Optional[str] = None
+    contact_person: Optional[str] = None
+    attendance_required: Optional[bool] = None
+    attendance_confirmed: Optional[bool] = None
+    person_attending: Optional[str] = None
+    notes: Optional[str] = None
+
+
+# ---- Pricing ----
+class PricingLineItem(BaseModel):
+    category: str = "Labour"
+    description: str = ""
+    quantity: float = 1
+    rate: float = 0
+    total: float = 0
+
+
+class PricingVersionCreate(BaseModel):
+    tender_id: int
+    version_label: Optional[str] = None
+    line_items: List[PricingLineItem] = []
+    notes: Optional[str] = None
+
+
+class PricingVersionOut(BaseModel):
+    id: int
+    tender_id: int
+    version_number: int
+    version_label: Optional[str]
+    line_items: Optional[Any]
+    subtotal: float
+    vat: float
+    total: float
+    notes: Optional[str]
+    created_at: datetime
+    class Config:
+        from_attributes = True
+
+
+# ---- Submission ----
+class SubmissionBase(BaseModel):
+    submission_date: Optional[date] = None
+    submission_time: Optional[str] = None
+    submission_method: Optional[str] = None
+    submitted_by: Optional[str] = None
+    confirmation_reference: Optional[str] = None
+    final_pricing: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class SubmissionCreate(SubmissionBase):
+    tender_id: int
+
+
+class SubmissionUpdate(SubmissionBase):
+    pass
+
+
+# ---- Communication ----
+class CommunicationBase(BaseModel):
+    comm_type: str
+    subject: Optional[str] = None
+    body: Optional[str] = None
+    comm_date: Optional[datetime] = None
+    from_party: Optional[str] = None
+    to_party: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class CommunicationCreate(CommunicationBase):
+    tender_id: int
+
+
+# ---- Addendum ----
+class AddendumBase(BaseModel):
+    addendum_number: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    issued_date: Optional[date] = None
+
+
+class AddendumCreate(AddendumBase):
+    tender_id: int
+
+
+# ---- AI ----
+class AIQuestion(BaseModel):
+    question: str
+    tender_id: Optional[int] = None
+
+
+# ---------------------- Helpers ----------------------
+
+def _serialize_tender(t: Tender) -> dict:
+    """Serialize a Tender ORM object to dict (for API output)."""
+    return {
+        "id": t.id,
+        "reference_number": t.reference_number,
+        "title": t.title,
+        "client_company": t.client_company,
+        "description": t.description,
+        "scope_of_work": t.scope_of_work,
+        "category": t.category,
+        "location_site": t.location_site,
+        "issue_date": t.issue_date.isoformat() if t.issue_date else None,
+        "closing_date": t.closing_date.isoformat() if t.closing_date else None,
+        "closing_time": t.closing_time.strftime("%H:%M") if t.closing_time else None,
+        "validity_period": t.validity_period,
+        "estimated_value": t.estimated_value,
+        "contract_period": t.contract_period,
+        "status": t.status,
+        "contact_person": t.contact_person,
+        "contact_email": t.contact_email,
+        "contact_telephone": t.contact_telephone,
+        "submission_method": t.submission_method,
+        "person_responsible": t.person_responsible,
+        "notes": t.notes,
+        "outcome": t.outcome,
+        "unsuccessful_reason": t.unsuccessful_reason,
+        "created_at": t.created_at.isoformat() if t.created_at else None,
+        "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+        "ai_extracted_info": t.ai_extracted_info,
+        "ai_summary": t.ai_summary,
+        "documents": [
+            {
+                "id": d.id, "filename": d.original_filename,
+                "file_type": d.file_type, "file_size": d.file_size,
+                "uploaded_at": d.uploaded_at.isoformat() if d.uploaded_at else None,
+                "is_primary": d.is_primary,
+            } for d in t.documents
+        ],
+        "checklist_items": [
+            {
+                "id": c.id, "name": c.name, "description": c.description,
+                "status": c.status, "notes": c.notes,
+                "linked_library_doc_id": c.linked_library_doc_id,
+            } for c in t.checklist_items
+        ],
+        "briefings": [
+            {
+                "id": b.id, "briefing_type": b.briefing_type,
+                "date": b.date.isoformat() if b.date else None,
+                "time": b.time.strftime("%H:%M") if b.time else None,
+                "location": b.location, "contact_person": b.contact_person,
+                "attendance_required": b.attendance_required,
+                "attendance_confirmed": b.attendance_confirmed,
+                "person_attending": b.person_attending,
+                "notes": b.notes,
+            } for b in t.briefings
+        ],
+        "pricing_versions": [
+            {
+                "id": p.id, "version_number": p.version_number,
+                "version_label": p.version_label,
+                "line_items": p.line_items,
+                "subtotal": p.subtotal, "vat": p.vat, "total": p.total,
+                "notes": p.notes,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+            } for p in t.pricing_versions
+        ],
+        "submission": (
+            {
+                "id": t.submission.id,
+                "submission_date": t.submission.submission_date.isoformat() if t.submission.submission_date else None,
+                "submission_time": t.submission.submission_time.strftime("%H:%M") if t.submission.submission_time else None,
+                "submission_method": t.submission.submission_method,
+                "submitted_by": t.submission.submitted_by,
+                "confirmation_reference": t.submission.confirmation_reference,
+                "final_pricing": t.submission.final_pricing,
+                "notes": t.submission.notes,
+            } if t.submission else None
+        ),
+        "communications": [
+            {
+                "id": c.id, "comm_type": c.comm_type, "subject": c.subject,
+                "body": c.body,
+                "comm_date": c.comm_date.isoformat() if c.comm_date else None,
+                "from_party": c.from_party, "to_party": c.to_party,
+                "notes": c.notes,
+            } for c in t.communications
+        ],
+        "addendums": [
+            {
+                "id": a.id, "addendum_number": a.addendum_number,
+                "title": a.title, "description": a.description,
+                "issued_date": a.issued_date.isoformat() if a.issued_date else None,
+                "ai_changes": a.ai_changes,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+            } for a in t.addendums
+        ],
+    }
+
+
+def _parse_time(s: Optional[str]):
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s, "%H:%M").time()
+    except Exception:
+        return None
+
+
+def _parse_datetime(s: Optional[str]):
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _save_upload(upload: UploadFile, subdir: str = "") -> str:
+    """Save an uploaded file to UPLOAD_DIR/subdir and return relative path."""
+    target_dir = os.path.join(UPLOAD_DIR, subdir) if subdir else UPLOAD_DIR
+    os.makedirs(target_dir, exist_ok=True)
+    safe_name = f"{uuid.uuid4().hex}_{Path(upload.filename).name}"
+    target_path = os.path.join(target_dir, safe_name)
+    with open(target_path, "wb") as out:
+        shutil.copyfileobj(upload.file, out)
+    return os.path.relpath(target_path, UPLOAD_DIR)
+
+
+def _build_default_checklist(tender_id: int, db: Session):
+    """Create default checklist items for a tender."""
+    for name in CHECKLIST_CATEGORIES:
+        db.add(ChecklistItem(tender_id=tender_id, name=name, status="Outstanding"))
+
+
+def _checklist_from_extracted(tender_id: int, extracted: dict, db: Session):
+    """Create checklist from AI-extracted compulsory documents + defaults, then mark library matches."""
+    compulsory = extracted.get("compulsory_documents", []) if extracted else []
+    suggestions = extracted.get("checklist_suggestions", []) if extracted else []
+    combined = list(dict.fromkeys(CHECKLIST_CATEGORIES + compulsory + suggestions))
+    for name in combined:
+        db.add(ChecklistItem(tender_id=tender_id, name=name[:500], status="Outstanding"))
+
+
+# ---------------------- Auth Routes ----------------------
+
+@app.post("/api/auth/register", response_model=TokenOut)
+def register(payload: UserCreate, db: Session = Depends(get_db)):
+    existing = db.query(User).filter(User.email == payload.email.lower()).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    user = User(
+        email=payload.email.lower(),
+        full_name=payload.full_name,
+        company_name=payload.company_name,
+        hashed_password=hash_password(payload.password),
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    token = create_access_token({"sub": str(user.id)})
+    return TokenOut(access_token=token, user=UserOut.model_validate(user))
+
+
+@app.post("/api/auth/login", response_model=TokenOut)
+def login(payload: UserLogin, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == payload.email.lower()).first()
+    if not user or not verify_password(payload.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    token = create_access_token({"sub": str(user.id)})
+    return TokenOut(access_token=token, user=UserOut.model_validate(user))
+
+
+@app.get("/api/auth/me", response_model=UserOut)
+def me(user: User = Depends(get_current_user)):
+    return user
+
+
+# ---------------------- Tender Routes ----------------------
+
+@app.get("/api/tenders")
+def list_tenders(
+    search: Optional[str] = None,
+    status: Optional[str] = None,
+    category: Optional[str] = None,
+    person_responsible: Optional[str] = None,
+    outcome: Optional[str] = None,
+    sort: str = "updated_at",
+    order: str = "desc",
+    skip: int = 0,
+    limit: int = 200,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    q = db.query(Tender)
+    if search:
+        like = f"%{search}%"
+        q = q.filter(or_(
+            Tender.reference_number.ilike(like),
+            Tender.title.ilike(like),
+            Tender.client_company.ilike(like),
+            Tender.location_site.ilike(like),
+            Tender.person_responsible.ilike(like),
+        ))
+    if status:
+        q = q.filter(Tender.status == status)
+    if category:
+        q = q.filter(Tender.category == category)
+    if person_responsible:
+        q = q.filter(Tender.person_responsible == person_responsible)
+    if outcome:
+        q = q.filter(Tender.outcome == outcome)
+    # Sorting
+    sort_col = {
+        "updated_at": Tender.updated_at,
+        "created_at": Tender.created_at,
+        "closing_date": Tender.closing_date,
+        "estimated_value": Tender.estimated_value,
+        "reference_number": Tender.reference_number,
+        "title": Tender.title,
+    }.get(sort, Tender.updated_at)
+    q = q.order_by(asc(sort_col) if order == "asc" else desc(sort_col))
+    total = q.count()
+    tenders = q.offset(skip).limit(limit).all()
+    return {"items": [_serialize_tender(t) for t in tenders], "total": total}
+
+
+@app.post("/api/tenders")
+def create_tender(payload: TenderCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    t = Tender(
+        reference_number=payload.reference_number,
+        title=payload.title,
+        client_company=payload.client_company,
+        description=payload.description,
+        scope_of_work=payload.scope_of_work,
+        category=payload.category,
+        location_site=payload.location_site,
+        issue_date=payload.issue_date,
+        closing_date=payload.closing_date,
+        closing_time=_parse_time(payload.closing_time),
+        validity_period=payload.validity_period,
+        estimated_value=payload.estimated_value,
+        contract_period=payload.contract_period,
+        status=payload.status,
+        contact_person=payload.contact_person,
+        contact_email=payload.contact_email,
+        contact_telephone=payload.contact_telephone,
+        submission_method=payload.submission_method,
+        person_responsible=payload.person_responsible,
+        notes=payload.notes,
+        outcome=payload.outcome,
+        unsuccessful_reason=payload.unsuccessful_reason,
+        created_by=user.id,
+    )
+    db.add(t)
+    db.commit()
+    db.refresh(t)
+    _build_default_checklist(t.id, db)
+    db.commit()
+    db.refresh(t)
+    return _serialize_tender(t)
+
+
+@app.get("/api/tenders/{tender_id}")
+def get_tender(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    t = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tender not found")
+    return _serialize_tender(t)
+
+
+@app.put("/api/tenders/{tender_id}")
+def update_tender(tender_id: int, payload: TenderUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    t = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tender not found")
+    data = payload.model_dump(exclude_unset=True)
+    if "closing_time" in data:
+        data["closing_time"] = _parse_time(data["closing_time"])
+    for k, v in data.items():
+        setattr(t, k, v)
+    t.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(t)
+    return _serialize_tender(t)
+
+
+@app.delete("/api/tenders/{tender_id}")
+def delete_tender(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    t = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tender not found")
+    db.delete(t)
+    db.commit()
+    return {"deleted": True, "id": tender_id}
+
+
+@app.post("/api/tenders/{tender_id}/archive")
+def archive_tender(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    t = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tender not found")
+    t.status = "Withdrawn"
+    t.updated_at = datetime.utcnow()
+    db.commit()
+    return _serialize_tender(t)
+
+
+@app.post("/api/tenders/{tender_id}/documents")
+async def upload_tender_document(
+    tender_id: int,
+    file: UploadFile = File(...),
+    is_primary: bool = Form(False),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    t = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tender not found")
+    rel_path = _save_upload(file, subdir=f"tenders/{tender_id}")
+    file_size = os.path.getsize(os.path.join(UPLOAD_DIR, rel_path))
+    doc = TenderDocument(
+        tender_id=tender_id,
+        filename=rel_path,
+        original_filename=file.filename,
+        file_path=rel_path,
+        file_type=file.content_type,
+        file_size=file_size,
+        is_primary=is_primary,
+    )
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+    return {
+        "id": doc.id, "filename": doc.original_filename,
+        "file_type": doc.file_type, "file_size": doc.file_size,
+        "uploaded_at": doc.uploaded_at, "is_primary": doc.is_primary,
+    }
+
+
+@app.delete("/api/tenders/{tender_id}/documents/{doc_id}")
+def delete_tender_document(tender_id: int, doc_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    doc = db.query(TenderDocument).filter(TenderDocument.id == doc_id, TenderDocument.tender_id == tender_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    full_path = os.path.join(UPLOAD_DIR, doc.file_path)
+    if os.path.exists(full_path):
+        try:
+            os.unlink(full_path)
+        except OSError:
+            pass
+    db.delete(doc)
+    db.commit()
+    return {"deleted": True}
+
+
+@app.post("/api/tenders/{tender_id}/ai-extract")
+def ai_extract_tender(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Run AI extraction on the tender's documents and update the tender record."""
+    t = db.query(TenderDocument).filter(TenderDocument.tender_id == tender_id)  # placeholder
+    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not tender:
+        raise HTTPException(status_code=404, detail="Tender not found")
+    if not tender.documents:
+        raise HTTPException(status_code=400, detail="No documents uploaded for this tender")
+    # Concatenate text from all documents
+    combined_text = ""
+    for doc in tender.documents:
+        full_path = os.path.join(UPLOAD_DIR, doc.file_path)
+        if os.path.exists(full_path):
+            combined_text += f"\n\n=== {doc.original_filename} ===\n"
+            combined_text += ai_module.extract_text_from_file(full_path, doc.original_filename)
+    if len(combined_text.strip()) < 50:
+        raise HTTPException(status_code=400, detail="Could not extract text from documents")
+    extracted = ai_module.extract_tender_info(combined_text, tender.reference_number)
+    tender.ai_extracted_info = extracted
+    # Auto-fill tender fields from extraction if missing
+    if extracted.get("tender_number") and not tender.reference_number:
+        tender.reference_number = extracted["tender_number"]
+    if extracted.get("client") and not tender.client_company:
+        tender.client_company = extracted["client"]
+    if extracted.get("tender_title") and not tender.title:
+        tender.title = extracted["tender_title"]
+    if extracted.get("closing_date") and not tender.closing_date:
+        try:
+            tender.closing_date = date.fromisoformat(extracted["closing_date"][:10])
+        except Exception:
+            pass
+    if extracted.get("closing_time") and not tender.closing_time:
+        tender.closing_time = _parse_time(extracted["closing_time"][:5])
+    if extracted.get("scope_of_work") and not tender.scope_of_work:
+        tender.scope_of_work = extracted["scope_of_work"]
+    if extracted.get("contract_period") and not tender.contract_period:
+        tender.contract_period = extracted["contract_period"]
+    if extracted.get("submission_method") and not tender.submission_method:
+        tender.submission_method = extracted["submission_method"]
+    if extracted.get("site_locations") and not tender.location_site:
+        tender.location_site = "; ".join(extracted["site_locations"])
+    # Reset checklist and rebuild from extracted compulsory documents
+    db.query(ChecklistItem).filter(ChecklistItem.tender_id == tender_id).delete()
+    _checklist_from_extracted(tender_id, extracted, db)
+    tender.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(tender)
+    return _serialize_tender(tender)
+
+
+@app.post("/api/tenders/{tender_id}/ai-summary")
+def ai_tender_summary(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not tender:
+        raise HTTPException(status_code=404, detail="Tender not found")
+    tender_data = _serialize_tender(tender)
+    summary = ai_module.generate_tender_summary(tender_data, tender.ai_extracted_info or {})
+    tender.ai_summary = summary
+    tender.updated_at = datetime.utcnow()
+    db.commit()
+    return {"summary": summary}
+
+
+# ---------------------- Checklist Routes ----------------------
+
+@app.post("/api/tenders/{tender_id}/checklist")
+def add_checklist_item(tender_id: int, item: ChecklistItemBase, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if not db.query(Tender).filter(Tender.id == tender_id).first():
+        raise HTTPException(status_code=404, detail="Tender not found")
+    c = ChecklistItem(
+        tender_id=tender_id, name=item.name, description=item.description,
+        status=item.status, linked_library_doc_id=item.linked_library_doc_id,
+        notes=item.notes,
+    )
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return {"id": c.id, "name": c.name, "status": c.status}
+
+
+@app.put("/api/checklist/{item_id}")
+def update_checklist_item(item_id: int, payload: ChecklistItemUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    c = db.query(ChecklistItem).filter(ChecklistItem.id == item_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Checklist item not found")
+    data = payload.model_dump(exclude_unset=True)
+    for k, v in data.items():
+        setattr(c, k, v)
+    c.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(c)
+    return {"id": c.id, "name": c.name, "status": c.status, "notes": c.notes}
+
+
+@app.delete("/api/checklist/{item_id}")
+def delete_checklist_item(item_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    c = db.query(ChecklistItem).filter(ChecklistItem.id == item_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Checklist item not found")
+    db.delete(c)
+    db.commit()
+    return {"deleted": True}
+
+
+# ---------------------- Library Document Routes ----------------------
+
+@app.get("/api/library")
+def list_library(
+    category: Optional[str] = None,
+    search: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    q = db.query(LibraryDocument)
+    if category:
+        q = q.filter(LibraryDocument.category == category)
+    if search:
+        like = f"%{search}%"
+        q = q.filter(or_(
+            LibraryDocument.name.ilike(like),
+            LibraryDocument.description.ilike(like),
+        ))
+    docs = q.order_by(LibraryDocument.category, LibraryDocument.name).all()
+    today = date.today()
+    result = []
+    for d in docs:
+        days_to_expiry = None
+        status = "Active"
+        if d.expiry_date:
+            days_to_expiry = (d.expiry_date - today).days
+            if days_to_expiry < 0:
+                status = "Expired"
+            elif days_to_expiry <= 30:
+                status = "Expiring Soon"
+        result.append({
+            "id": d.id, "name": d.name, "category": d.category,
+            "description": d.description, "filename": d.filename,
+            "file_size": d.file_size,
+            "issue_date": d.issue_date.isoformat() if d.issue_date else None,
+            "expiry_date": d.expiry_date.isoformat() if d.expiry_date else None,
+            "notes": d.notes,
+            "uploaded_at": d.uploaded_at.isoformat() if d.uploaded_at else None,
+            "days_to_expiry": days_to_expiry,
+            "status": status,
+        })
+    return {"items": result}
+
+
+@app.post("/api/library")
+async def upload_library_document(
+    name: str = Form(...),
+    category: str = Form(...),
+    description: Optional[str] = Form(None),
+    issue_date: Optional[str] = Form(None),
+    expiry_date: Optional[str] = Form(None),
+    notes: Optional[str] = Form(None),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    rel_path = _save_upload(file, subdir="library")
+    file_size = os.path.getsize(os.path.join(UPLOAD_DIR, rel_path))
+    doc = LibraryDocument(
+        name=name, category=category, description=description,
+        filename=rel_path, file_path=rel_path,
+        file_type=file.content_type, file_size=file_size,
+        issue_date=date.fromisoformat(issue_date) if issue_date else None,
+        expiry_date=date.fromisoformat(expiry_date) if expiry_date else None,
+        notes=notes, created_by=user.id,
+    )
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+    return {"id": doc.id, "name": doc.name, "category": doc.category}
+
+
+@app.put("/api/library/{doc_id}")
+def update_library_document(
+    doc_id: int,
+    name: Optional[str] = None,
+    category: Optional[str] = None,
+    description: Optional[str] = None,
+    issue_date: Optional[str] = None,
+    expiry_date: Optional[str] = None,
+    notes: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    d = db.query(LibraryDocument).filter(LibraryDocument.id == doc_id).first()
+    if not d:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if name is not None: d.name = name
+    if category is not None: d.category = category
+    if description is not None: d.description = description
+    if issue_date is not None and issue_date != "":
+        d.issue_date = date.fromisoformat(issue_date)
+    if expiry_date is not None and expiry_date != "":
+        d.expiry_date = date.fromisoformat(expiry_date)
+    if notes is not None: d.notes = notes
+    db.commit()
+    return {"id": d.id, "name": d.name, "category": d.category}
+
+
+@app.delete("/api/library/{doc_id}")
+def delete_library_document(doc_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    d = db.query(LibraryDocument).filter(LibraryDocument.id == doc_id).first()
+    if not d:
+        raise HTTPException(status_code=404, detail="Document not found")
+    full_path = os.path.join(UPLOAD_DIR, d.file_path)
+    if os.path.exists(full_path):
+        try:
+            os.unlink(full_path)
+        except OSError:
+            pass
+    db.delete(d)
+    db.commit()
+    return {"deleted": True}
+
+
+# ---------------------- Briefing Routes ----------------------
+
+@app.post("/api/tenders/{tender_id}/briefings")
+def create_briefing(tender_id: int, payload: BriefingCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if payload.tender_id != tender_id:
+        payload.tender_id = tender_id
+    if not db.query(Tender).filter(Tender.id == tender_id).first():
+        raise HTTPException(status_code=404, detail="Tender not found")
+    b = Briefing(
+        tender_id=tender_id,
+        briefing_type=payload.briefing_type,
+        date=payload.date,
+        time=_parse_time(payload.time),
+        location=payload.location,
+        contact_person=payload.contact_person,
+        attendance_required=payload.attendance_required,
+        attendance_confirmed=payload.attendance_confirmed,
+        person_attending=payload.person_attending,
+        notes=payload.notes,
+    )
+    db.add(b)
+    db.commit()
+    db.refresh(b)
+    return {"id": b.id, "briefing_type": b.briefing_type, "date": b.date.isoformat() if b.date else None}
+
+
+@app.get("/api/briefings")
+def list_briefings(
+    upcoming_only: bool = False,
+    days: int = 30,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    q = db.query(Briefing).join(Tender, Briefing.tender_id == Tender.id)
+    if upcoming_only:
+        cutoff = date.today() + timedelta(days=days)
+        q = q.filter(Briefing.date >= date.today(), Briefing.date <= cutoff)
+    briefings = q.order_by(Briefing.date).all()
+    result = []
+    for b in briefings:
+        result.append({
+            "id": b.id, "tender_id": b.tender_id,
+            "tender_reference": b.tender.reference_number if b.tender else None,
+            "tender_title": b.tender.title if b.tender else None,
+            "client": b.tender.client_company if b.tender else None,
+            "briefing_type": b.briefing_type,
+            "date": b.date.isoformat() if b.date else None,
+            "time": b.time.strftime("%H:%M") if b.time else None,
+            "location": b.location,
+            "contact_person": b.contact_person,
+            "attendance_required": b.attendance_required,
+            "attendance_confirmed": b.attendance_confirmed,
+            "person_attending": b.person_attending,
+            "notes": b.notes,
+        })
+    return {"items": result}
+
+
+@app.put("/api/briefings/{briefing_id}")
+def update_briefing(briefing_id: int, payload: BriefingUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    b = db.query(Briefing).filter(Briefing.id == briefing_id).first()
+    if not b:
+        raise HTTPException(status_code=404, detail="Briefing not found")
+    data = payload.model_dump(exclude_unset=True)
+    if "time" in data:
+        data["time"] = _parse_time(data["time"])
+    for k, v in data.items():
+        setattr(b, k, v)
+    db.commit()
+    return {"id": b.id, "updated": True}
+
+
+@app.delete("/api/briefings/{briefing_id}")
+def delete_briefing(briefing_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    b = db.query(Briefing).filter(Briefing.id == briefing_id).first()
+    if not b:
+        raise HTTPException(status_code=404, detail="Briefing not found")
+    db.delete(b)
+    db.commit()
+    return {"deleted": True}
+
+
+# ---------------------- Pricing Routes ----------------------
+
+@app.post("/api/tenders/{tender_id}/pricing")
+def create_pricing_version(tender_id: int, payload: PricingVersionCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if not db.query(Tender).filter(Tender.id == tender_id).first():
+        raise HTTPException(status_code=404, detail="Tender not found")
+    count = db.query(PricingVersion).filter(PricingVersion.tender_id == tender_id).count()
+    line_items = [li.model_dump() for li in payload.line_items]
+    # Calculate totals
+    subtotal = sum(li.get("total") or (li.get("quantity", 0) * li.get("rate", 0)) for li in line_items)
+    vat = round(subtotal * 0.15, 2)
+    total = round(subtotal + vat, 2)
+    pv = PricingVersion(
+        tender_id=tender_id,
+        version_number=count + 1,
+        version_label=payload.version_label or f"v{count + 1}",
+        line_items=line_items,
+        subtotal=round(subtotal, 2),
+        vat=vat,
+        total=total,
+        notes=payload.notes,
+    )
+    db.add(pv)
+    db.commit()
+    db.refresh(pv)
+    return {
+        "id": pv.id, "version_number": pv.version_number,
+        "subtotal": pv.subtotal, "vat": pv.vat, "total": pv.total,
+    }
+
+
+@app.get("/api/tenders/{tender_id}/pricing")
+def list_pricing_versions(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    versions = db.query(PricingVersion).filter(PricingVersion.tender_id == tender_id).order_by(PricingVersion.version_number).all()
+    return {"items": [
+        {
+            "id": p.id, "version_number": p.version_number, "version_label": p.version_label,
+            "line_items": p.line_items, "subtotal": p.subtotal, "vat": p.vat, "total": p.total,
+            "notes": p.notes,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        } for p in versions
+    ]}
+
+
+@app.delete("/api/pricing/{version_id}")
+def delete_pricing_version(version_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    pv = db.query(PricingVersion).filter(PricingVersion.id == version_id).first()
+    if not pv:
+        raise HTTPException(status_code=404, detail="Pricing version not found")
+    db.delete(pv)
+    db.commit()
+    return {"deleted": True}
+
+
+# ---------------------- Submission Routes ----------------------
+
+@app.post("/api/tenders/{tender_id}/submission")
+def create_or_update_submission(tender_id: int, payload: SubmissionCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if not db.query(Tender).filter(Tender.id == tender_id).first():
+        raise HTTPException(status_code=404, detail="Tender not found")
+    sub = db.query(Submission).filter(Submission.tender_id == tender_id).first()
+    if sub:
+        sub.submission_date = payload.submission_date
+        sub.submission_time = _parse_time(payload.submission_time)
+        sub.submission_method = payload.submission_method
+        sub.submitted_by = payload.submitted_by
+        sub.confirmation_reference = payload.confirmation_reference
+        sub.final_pricing = payload.final_pricing
+        sub.notes = payload.notes
+    else:
+        sub = Submission(
+            tender_id=tender_id,
+            submission_date=payload.submission_date,
+            submission_time=_parse_time(payload.submission_time),
+            submission_method=payload.submission_method,
+            submitted_by=payload.submitted_by,
+            confirmation_reference=payload.confirmation_reference,
+            final_pricing=payload.final_pricing,
+            notes=payload.notes,
+        )
+        db.add(sub)
+    # Auto-update tender status to Submitted
+    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+    if tender and tender.status not in ("Submitted", "Awarded", "Unsuccessful", "Withdrawn"):
+        tender.status = "Submitted"
+    db.commit()
+    db.refresh(sub)
+    return {"id": sub.id, "tender_id": sub.tender_id}
+
+
+# ---------------------- Communication Routes ----------------------
+
+@app.post("/api/tenders/{tender_id}/communications")
+def create_communication(tender_id: int, payload: CommunicationCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if not db.query(Tender).filter(Tender.id == tender_id).first():
+        raise HTTPException(status_code=404, detail="Tender not found")
+    c = Communication(
+        tender_id=tender_id,
+        comm_type=payload.comm_type,
+        subject=payload.subject,
+        body=payload.body,
+        comm_date=payload.comm_date,
+        from_party=payload.from_party,
+        to_party=payload.to_party,
+        notes=payload.notes,
+    )
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return {"id": c.id, "comm_type": c.comm_type}
+
+
+@app.delete("/api/communications/{comm_id}")
+def delete_communication(comm_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    c = db.query(Communication).filter(Communication.id == comm_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Communication not found")
+    db.delete(c)
+    db.commit()
+    return {"deleted": True}
+
+
+# ---------------------- Addendum Routes ----------------------
+
+@app.post("/api/tenders/{tender_id}/addendums")
+async def create_addendum(
+    tender_id: int,
+    addendum_number: Optional[str] = Form(None),
+    title: str = Form(...),
+    description: Optional[str] = Form(None),
+    issued_date: Optional[str] = Form(None),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not tender:
+        raise HTTPException(status_code=404, detail="Tender not found")
+    rel_path = _save_upload(file, subdir=f"tenders/{tender_id}/addendums")
+    addendum = Addendum(
+        tender_id=tender_id,
+        addendum_number=addendum_number,
+        title=title,
+        description=description,
+        file_path=rel_path,
+        issued_date=date.fromisoformat(issued_date) if issued_date else None,
+    )
+    db.add(addendum)
+    db.commit()
+    db.refresh(addendum)
+    return {"id": addendum.id, "title": addendum.title}
+
+
+@app.post("/api/addendums/{addendum_id}/ai-analyze")
+def ai_analyze_addendum(addendum_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    addendum = db.query(Addendum).filter(Addendum.id == addendum_id).first()
+    if not addendum:
+        raise HTTPException(status_code=404, detail="Addendum not found")
+    tender = addendum.tender
+    # Get original tender text
+    original_text = ""
+    for doc in tender.documents:
+        full_path = os.path.join(UPLOAD_DIR, doc.file_path)
+        if os.path.exists(full_path):
+            original_text += ai_module.extract_text_from_file(full_path, doc.original_filename) + "\n"
+    # Get addendum text
+    addendum_path = os.path.join(UPLOAD_DIR, addendum.file_path)
+    addendum_text = ""
+    if os.path.exists(addendum_path):
+        addendum_text = ai_module.extract_text_from_file(addendum_path, addendum.title)
+    if len(addendum_text.strip()) < 50:
+        raise HTTPException(status_code=400, detail="Could not extract addendum text")
+    changes = ai_module.detect_addendum_changes(original_text, addendum_text)
+    addendum.ai_changes = changes
+    db.commit()
+    return changes
+
+
+@app.delete("/api/addendums/{addendum_id}")
+def delete_addendum(addendum_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    a = db.query(Addendum).filter(Addendum.id == addendum_id).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="Addendum not found")
+    full_path = os.path.join(UPLOAD_DIR, a.file_path)
+    if os.path.exists(full_path):
+        try:
+            os.unlink(full_path)
+        except OSError:
+            pass
+    db.delete(a)
+    db.commit()
+    return {"deleted": True}
+
+
+# ---------------------- Dashboard Route ----------------------
+
+@app.get("/api/dashboard")
+def dashboard(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    today = date.today()
+    week_end = today + timedelta(days=7)
+    month_end = today + timedelta(days=30)
+    all_tenders = db.query(Tender).all()
+    active_statuses = {"New Opportunity", "Under Review", "Interested", "Preparing",
+                       "Documents Outstanding", "Pricing in Progress", "Awaiting Information",
+                       "Ready for Submission", "Submitted", "Clarification Requested",
+                       "Clarification Submitted", "Shortlisted", "Interview/Presentation",
+                       "Negotiation"}
+    active = [t for t in all_tenders if t.status in active_statuses]
+    preparing = [t for t in all_tenders if t.status in {"Preparing", "Documents Outstanding", "Pricing in Progress", "Awaiting Information"}]
+    ready = [t for t in all_tenders if t.status == "Ready for Submission"]
+    submitted = [t for t in all_tenders if t.status == "Submitted"]
+    # Closing soon (next 7 days, not closed)
+    closing_this_week = []
+    closing_this_month = []
+    for t in all_tenders:
+        if t.closing_date and t.status not in {"Awarded", "Unsuccessful", "Withdrawn", "Cancelled", "Expired"}:
+            delta = (t.closing_date - today).days
+            if 0 <= delta <= 7:
+                closing_this_week.append(t)
+            if 0 <= delta <= 30:
+                closing_this_month.append(t)
+    next_deadline = None
+    upcoming = sorted([t for t in all_tenders if t.closing_date and t.closing_date >= today and t.status in active_statuses], key=lambda x: x.closing_date)
+    if upcoming:
+        n = upcoming[0]
+        next_deadline = {
+            "id": n.id, "reference_number": n.reference_number,
+            "title": n.title, "closing_date": n.closing_date.isoformat(),
+            "days_remaining": (n.closing_date - today).days,
+        }
+    # Documents
+    library_docs = db.query(LibraryDocument).all()
+    docs_expiring_soon = []
+    docs_expired = []
+    for d in library_docs:
+        if d.expiry_date:
+            delta = (d.expiry_date - today).days
+            if delta < 0:
+                docs_expired.append(d)
+            elif delta <= 30:
+                docs_expiring_soon.append(d)
+    # Documents missing across active tenders
+    docs_missing = 0
+    for t in active:
+        for c in t.checklist_items:
+            if c.status == "Outstanding":
+                docs_missing += 1
+    # Awarded this year
+    awarded_this_year = [t for t in all_tenders if t.outcome == "Awarded" and t.updated_at and t.updated_at.year == today.year]
+    unsuccessful = [t for t in all_tenders if t.outcome == "Unsuccessful"]
+
+    # Status breakdown
+    status_counts = {}
+    for t in all_tenders:
+        status_counts[t.status] = status_counts.get(t.status, 0) + 1
+
+    return {
+        "active_count": len(active),
+        "preparing_count": len(preparing),
+        "ready_count": len(ready),
+        "submitted_count": len(submitted),
+        "closing_this_week": len(closing_this_week),
+        "closing_this_month": len(closing_this_month),
+        "next_deadline": next_deadline,
+        "docs_missing": docs_missing,
+        "docs_expiring_soon": len(docs_expiring_soon),
+        "docs_expired": len(docs_expired),
+        "awarded_this_year": len(awarded_this_year),
+        "unsuccessful_count": len(unsuccessful),
+        "total_tenders": len(all_tenders),
+        "status_counts": status_counts,
+        "closing_this_week_list": [
+            {"id": t.id, "reference_number": t.reference_number, "title": t.title,
+             "client_company": t.client_company,
+             "closing_date": t.closing_date.isoformat(), "status": t.status,
+             "days_remaining": (t.closing_date - today).days}
+            for t in sorted(closing_this_week, key=lambda x: x.closing_date)
+        ],
+        "docs_expiring_list": [
+            {"id": d.id, "name": d.name, "category": d.category,
+             "expiry_date": d.expiry_date.isoformat(),
+             "days_to_expiry": (d.expiry_date - today).days}
+            for d in sorted(docs_expiring_soon + docs_expired, key=lambda x: x.expiry_date)
+        ],
+        "awarded_this_year_list": [
+            {"id": t.id, "reference_number": t.reference_number, "title": t.title,
+             "client_company": t.client_company,
+             "estimated_value": t.estimated_value}
+            for t in awarded_this_year
+        ],
+    }
+
+
+# ---------------------- AI Assistant ----------------------
+
+@app.post("/api/ai/assistant")
+def ai_assistant(payload: AIQuestion, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    question = payload.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question is required")
+    # Build context: all tenders (summarized) + optionally focused tender
+    all_tenders = db.query(Tender).all()
+    tender_summaries = []
+    for t in all_tenders:
+        tender_summaries.append({
+            "id": t.id,
+            "reference_number": t.reference_number,
+            "title": t.title,
+            "client_company": t.client_company,
+            "status": t.status,
+            "outcome": t.outcome,
+            "closing_date": t.closing_date.isoformat() if t.closing_date else None,
+            "category": t.category,
+            "location_site": t.location_site,
+            "person_responsible": t.person_responsible,
+            "estimated_value": t.estimated_value,
+            "contract_period": t.contract_period,
+            "unsuccessful_reason": t.unsuccessful_reason,
+            "ai_extracted_info": t.ai_extracted_info,
+            "missing_checklist": [
+                {"name": c.name} for c in t.checklist_items if c.status == "Outstanding"
+            ],
+            "has_briefing": len(t.briefings) > 0,
+            "briefings": [
+                {"date": b.date.isoformat() if b.date else None, "attendance_required": b.attendance_required}
+                for b in t.briefings
+            ],
+            "submission": (
+                {"submission_date": t.submission.submission_date.isoformat() if t.submission.submission_date else None,
+                 "submitted_by": t.submission.submitted_by}
+                if t.submission else None
+            ),
+        })
+    context = {
+        "user": {"full_name": user.full_name, "company_name": user.company_name},
+        "total_tenders": len(all_tenders),
+        "tenders": tender_summaries,
+    }
+    if payload.tender_id:
+        t = db.query(Tender).filter(Tender.id == payload.tender_id).first()
+        if t:
+            context["focus_tender"] = _serialize_tender(t)
+    answer = ai_module.assistant_answer(question, context)
+    return {"answer": answer, "context_tenders": len(tender_summaries)}
+
+
+# ---------------------- Search/Filter helper ----------------------
+
+@app.get("/api/tenders/search")
+def search_tenders(
+    q: str = "",
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Quick search for typeahead."""
+    if not q:
+        return {"items": []}
+    like = f"%{q}%"
+    tenders = db.query(Tender).filter(or_(
+        Tender.reference_number.ilike(like),
+        Tender.title.ilike(like),
+        Tender.client_company.ilike(like),
+    )).limit(20).all()
+    return {"items": [
+        {"id": t.id, "label": f"{t.reference_number} - {t.title}", "client": t.client_company}
+        for t in tenders
+    ]}
+
+
+# ---------------------- Reminder Settings ----------------------
+
+@app.get("/api/reminders")
+def get_reminders(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return {"items": [{"id": r.id, "days_before": r.days_before, "enabled": r.enabled} for r in db.query(ReminderSetting).all()]}
+
+
+@app.put("/api/reminders/{reminder_id}")
+def update_reminder(reminder_id: int, enabled: bool = True, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    r = db.query(ReminderSetting).filter(ReminderSetting.id == reminder_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    r.enabled = enabled
+    db.commit()
+    return {"id": r.id, "enabled": r.enabled}
+
+
+# ---------------------- Health ----------------------
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok", "service": "tenderflow-api", "version": "1.0.0"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -440,3 +440,49 @@ Stage Summary:
 - Knows SA procurement specifics (PSIRA grades, B-BBEE, CIPC, SARS, COIDA, 80/20 evaluation)
 - Flags deadlines, missing documents, expired compliance docs, and disqualification risks
 - Left rail shows AI Knowledge Base stats: Tenders / Documents / Library counts
+
+---
+Task ID: 22
+Agent: Main Orchestrator
+Task: Build dedicated AI Tender Document Reader feature — upload any document, AI extracts all 23 fields + summary
+
+Work Log:
+- Added 2 new backend endpoints in main.py:
+  * POST /api/ai/read-document — standalone reader: upload any PDF/DOCX/TXT, AI extracts all fields + generates summary, returns result without creating a tender
+  * POST /api/ai/read-document-and-create — same as above but also creates a new tender in the database with all extracted fields auto-filled, attaches the document, builds checklist from compulsory documents, generates AI summary
+- The extraction schema (already in ai_module.py EXTRACTION_SYSTEM) covers ALL 23 fields the user requested:
+  tender_number, client, tender_title, closing_date, closing_time, scope_of_work, contract_period, site_locations, number_of_personnel_guards, required_qualifications, required_psira_grades, required_equipment, mandatory_requirements, functionality_requirements, evaluation_criteria, pricing_requirements, compulsory_documents, compulsory_briefing_site_inspection, briefing_date, briefing_time, submission_requirements, submission_method, important_conditions, important_deadlines, disqualification_requirements
+- Added readDocument() and readDocumentAndCreate() methods to frontend api.ts
+- Added "reader" to DashboardTab type in dashboard-store.ts
+- Added "AI Document Reader" nav item (ScanText icon) to dashboard-shell.tsx sidebar, between Discover Tenders and Compliance Library
+- Created reader-tab.tsx (~450 lines) with:
+  * Header explaining the feature
+  * "What the AI extracts" card showing all 23 field badges
+  * Drag-and-drop upload zone (accepts PDF/DOCX/TXT/CSV/MD, max 20MB)
+  * Animated loading state with pulsing ScanText icon
+  * Success banner with file info + "Create Tender from This" + "Read Another" buttons
+  * AI Tender Summary card (with copy-to-clipboard button)
+  * Extracted Information card with:
+    - Key fields grid (12 fields in 3-col responsive grid with icons)
+    - Scope of work section
+    - Compulsory briefing section (amber highlighted)
+    - 9 list sections: mandatory requirements, functionality, evaluation criteria, pricing, compulsory documents (emerald), submission requirements, important conditions, important deadlines (amber), disqualification requirements (rose)
+  * Document text preview (first 2000 chars)
+  * Bottom CTA to create tender
+- Verified with Agent Browser:
+  * Navigated to AI Document Reader tab
+  * Uploaded sample-tender.txt
+  * Clicked "Read Document with AI"
+  * AI extracted ALL fields: E137/2025, City of Cape Town, 45 guards, PSIRA grades C/B/A, 8 compulsory documents, 4 disqualification requirements, briefing on 2025-11-20, evaluation criteria (60/40), etc.
+  * AI summary showed full tender summary in the specified format
+  * Clicked "Create Tender from This" — tender was created with all fields auto-filled, document attached, checklist built
+  * Navigated to the new tender's detail page → AI tab showed all extracted info
+  * No errors, lint clean, all API calls 200
+
+Stage Summary:
+- AI Tender Document Reader is a dedicated feature in the sidebar
+- Upload ANY tender document (PDF/DOCX/TXT) → AI reads it and extracts all 23 important fields automatically
+- AI generates a plain-English summary so you don't have to read the entire document
+- One click to create a tender record with all info auto-filled + checklist built from compulsory documents
+- Also works standalone (read without creating) for quick document evaluation
+- All 23 fields from the spec are covered

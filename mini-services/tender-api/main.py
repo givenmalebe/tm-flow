@@ -751,6 +751,185 @@ def ai_tender_summary(tender_id: int, db: Session = Depends(get_db), user: User 
     return {"summary": summary}
 
 
+# ---------------------- Standalone AI Document Reading ----------------------
+
+@app.post("/api/ai/read-document")
+async def ai_read_document(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+):
+    """
+    Standalone AI document reader. Upload ANY tender document (PDF/DOCX/TXT)
+    and get back the full AI extraction + summary — without needing to create
+    a tender first.
+    """
+    # Save the uploaded file temporarily
+    rel_path = _save_upload(file, subdir="ai_reader")
+    full_path = os.path.join(UPLOAD_DIR, rel_path)
+    file_size = os.path.getsize(full_path)
+
+    # Extract text
+    document_text = ai_module.extract_text_from_file(full_path, file.filename)
+    if not document_text or len(document_text.strip()) < 50:
+        # Clean up the file
+        try:
+            os.unlink(full_path)
+        except OSError:
+            pass
+        raise HTTPException(
+            status_code=400,
+            detail="Could not extract text from this document. Please ensure it is a valid PDF, DOCX, or text file with readable content.",
+        )
+
+    # Run AI extraction
+    extracted = ai_module.extract_tender_info(document_text, file.filename)
+
+    # Generate a summary from the extracted info
+    summary = ""
+    if extracted and not extracted.get("_error"):
+        try:
+            summary = ai_module.generate_tender_summary(
+                {"reference_number": extracted.get("tender_number"),
+                 "title": extracted.get("tender_title"),
+                 "client_company": extracted.get("client"),
+                 "closing_date": extracted.get("closing_date"),
+                 "contract_period": extracted.get("contract_period"),
+                 "location_site": "; ".join(extracted.get("site_locations", []) or []),
+                 "scope_of_work": extracted.get("scope_of_work"),
+                 "status": "New Opportunity"},
+                extracted
+            )
+        except Exception:
+            summary = ""
+
+    # Clean up the temporary file (we don't keep it)
+    try:
+        os.unlink(full_path)
+    except OSError:
+        pass
+
+    return {
+        "filename": file.filename,
+        "file_size": file_size,
+        "extracted_text_preview": document_text[:2000] + ("...[truncated]" if len(document_text) > 2000 else ""),
+        "extraction": extracted,
+        "summary": summary,
+    }
+
+
+@app.post("/api/ai/read-document-and-create")
+async def ai_read_document_and_create(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Upload a tender document, run AI extraction, AND create a new tender in the
+    database with all the extracted fields auto-filled. Returns the new tender.
+    """
+    rel_path = _save_upload(file, subdir=f"tenders/ai_created")
+    full_path = os.path.join(UPLOAD_DIR, rel_path)
+    file_size = os.path.getsize(full_path)
+
+    document_text = ai_module.extract_text_from_file(full_path, file.filename)
+    if not document_text or len(document_text.strip()) < 50:
+        try:
+            os.unlink(full_path)
+        except OSError:
+            pass
+        raise HTTPException(
+            status_code=400,
+            detail="Could not extract text from this document. Please ensure it is a valid PDF, DOCX, or text file.",
+        )
+
+    extracted = ai_module.extract_tender_info(document_text, file.filename)
+
+    # Generate reference number if not extracted
+    ref = extracted.get("tender_number") or f"TENDER-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    title = extracted.get("tender_title") or file.filename.rsplit(".", 1)[0]
+
+    # Create the tender
+    t = Tender(
+        reference_number=ref,
+        title=title[:500],
+        client_company=extracted.get("client") or "Unknown",
+        description=extracted.get("scope_of_work"),
+        scope_of_work=extracted.get("scope_of_work"),
+        category="Security Services" if extracted.get("required_psira_grades") else None,
+        location_site="; ".join(extracted.get("site_locations", []) or []) or None,
+        closing_date=date.fromisoformat(extracted["closing_date"][:10]) if extracted.get("closing_date") else None,
+        closing_time=_parse_time(extracted["closing_time"][:5]) if extracted.get("closing_time") else None,
+        contract_period=extracted.get("contract_period"),
+        submission_method=extracted.get("submission_method"),
+        status="New Opportunity",
+        person_responsible=user.full_name,
+        notes=f"Created via AI Document Reader. Source file: {file.filename}",
+        ai_extracted_info=extracted,
+        created_by=user.id,
+    )
+    # Try to parse estimated value from pricing requirements
+    import re as _re
+    pricing = extracted.get("pricing_requirements", [])
+    pricing_text = " ".join(pricing) if isinstance(pricing, list) else str(pricing)
+    nums = _re.findall(r"R?\s*([\d,.]+)\s*(?:million|mil)?", pricing_text, _re.I)
+    if nums:
+        try:
+            val = float(nums[0].replace(",", ""))
+            if "million" in pricing_text.lower() or "mil" in pricing_text.lower():
+                val *= 1_000_000
+            t.estimated_value = val
+        except (ValueError, IndexError):
+            pass
+
+    db.add(t)
+    db.commit()
+    db.refresh(t)
+
+    # Attach the document to the new tender
+    # Move the file to the tender's directory
+    new_rel_path = os.path.join(UPLOAD_DIR, f"tenders/{t.id}", os.path.basename(rel_path))
+    new_dir = os.path.dirname(new_rel_path)
+    if not os.path.exists(new_dir):
+        os.makedirs(new_dir, exist_ok=True)
+    try:
+        os.rename(full_path, new_rel_path)
+    except OSError:
+        new_rel_path = full_path  # keep original if rename fails
+
+    doc = TenderDocument(
+        tender_id=t.id,
+        filename=os.path.relpath(new_rel_path, UPLOAD_DIR),
+        original_filename=file.filename,
+        file_path=os.path.relpath(new_rel_path, UPLOAD_DIR),
+        file_type=file.content_type,
+        file_size=file_size,
+        is_primary=True,
+    )
+    db.add(doc)
+
+    # Build checklist from extracted compulsory documents
+    _checklist_from_extracted(t.id, extracted, db)
+
+    # Generate and save AI summary
+    if extracted and not extracted.get("_error"):
+        try:
+            summary = ai_module.generate_tender_summary(
+                {"reference_number": t.reference_number, "title": t.title,
+                 "client_company": t.client_company, "closing_date": t.closing_date.isoformat() if t.closing_date else None,
+                 "contract_period": t.contract_period, "location_site": t.location_site,
+                 "scope_of_work": t.scope_of_work, "status": t.status},
+                extracted
+            )
+            t.ai_summary = summary
+        except Exception:
+            pass
+
+    t.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(t)
+    return _serialize_tender(t)
+
+
 # ---------------------- Checklist Routes ----------------------
 
 @app.post("/api/tenders/{tender_id}/checklist")

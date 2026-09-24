@@ -308,6 +308,29 @@ export const api = {
     });
   },
 
+  // ---- AI Document Reader (standalone) ----
+  async readDocument(file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    return request<{
+      filename: string;
+      file_size: number;
+      extracted_text_preview: string;
+      extraction: any;
+      summary: string;
+    }>(`/ai/read-document`, { method: "POST", body: form, isForm: true });
+  },
+
+  async readDocumentAndCreate(file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    return request<any>(`/ai/read-document-and-create`, {
+      method: "POST",
+      body: form,
+      isForm: true,
+    });
+  },
+
   // ---- AI Assistant ----
   async askAssistant(question: string, tenderId?: number) {
     return request<{

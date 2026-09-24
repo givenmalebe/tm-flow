@@ -6,6 +6,7 @@ export type DashboardTab =
   | "dashboard"
   | "tenders"
   | "discover"
+  | "reader"
   | "library"
   | "briefings"
   | "pricing"

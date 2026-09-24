@@ -21,6 +21,7 @@ import {
   Building,
   FileSignature,
   CalendarClock,
+  ClipboardCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -47,6 +48,7 @@ import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { DashboardTab as DashboardTabView } from "./tabs/dashboard-tab";
 import { TendersTab } from "./tabs/tenders-tab";
+import { PreparationTab } from "./tabs/preparation-tab";
 import { DiscoverTab } from "./tabs/discover-tab";
 import { ReaderTab } from "./tabs/reader-tab";
 import { LibraryTab } from "./tabs/library-tab";
@@ -70,6 +72,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, description: "Overview & alerts" },
   { id: "tenders", label: "Tenders", icon: FileStack, description: "Tender register" },
+  { id: "preparation", label: "Preparation", icon: ClipboardCheck, description: "Completion tracking" },
   { id: "discover", label: "Discover Tenders", icon: Radar, description: "AI tender finder" },
   { id: "reader", label: "AI Document Reader", icon: ScanText, description: "Read & extract tenders" },
   { id: "deadlines", label: "Deadlines", icon: CalendarClock, description: "Track & remind" },
@@ -346,6 +349,7 @@ export function DashboardShell() {
           <div className="p-4 lg:p-6 max-w-[1600px] mx-auto animate-fade-in">
             {activeTab === "dashboard" && <DashboardTabView />}
             {activeTab === "tenders" && <TendersTab />}
+            {activeTab === "preparation" && <PreparationTab />}
             {activeTab === "discover" && <DiscoverTab />}
             {activeTab === "reader" && <ReaderTab />}
             {activeTab === "deadlines" && <DeadlinesTab />}

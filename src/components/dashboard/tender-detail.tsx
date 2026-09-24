@@ -36,6 +36,8 @@ import {
   Copy,
   Check,
   FileCheck,
+  ClipboardCheck,
+  TrendingUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -91,7 +93,7 @@ interface TenderDetailProps {
   onBack: () => void;
 }
 
-type SubTab = "overview" | "documents" | "checklist" | "briefings" | "pricing" | "submission" | "communications" | "addendums" | "generated" | "ai";
+type SubTab = "overview" | "preparation" | "documents" | "checklist" | "briefings" | "pricing" | "submission" | "communications" | "addendums" | "generated" | "ai";
 
 export function TenderDetail({ tenderId, onBack }: TenderDetailProps) {
   const { refresh } = useDashboardStore();
@@ -236,6 +238,7 @@ export function TenderDetail({ tenderId, onBack }: TenderDetailProps) {
       <Tabs value={tab} onValueChange={(v) => setTab(v as SubTab)}>
         <TabsList className="w-full flex-wrap h-auto justify-start overflow-x-auto scrollbar-thin">
           <TabsTrigger value="overview" className="text-xs"><FileText className="h-3.5 w-3.5 mr-1" />Overview</TabsTrigger>
+          <TabsTrigger value="preparation" className="text-xs"><ClipboardCheck className="h-3.5 w-3.5 mr-1" />Preparation</TabsTrigger>
           <TabsTrigger value="documents" className="text-xs"><FileStack className="h-3.5 w-3.5 mr-1" />Documents</TabsTrigger>
           <TabsTrigger value="checklist" className="text-xs"><ListChecks className="h-3.5 w-3.5 mr-1" />Checklist</TabsTrigger>
           <TabsTrigger value="briefings" className="text-xs"><MapPin className="h-3.5 w-3.5 mr-1" />Briefings</TabsTrigger>
@@ -249,6 +252,9 @@ export function TenderDetail({ tenderId, onBack }: TenderDetailProps) {
 
         <TabsContent value="overview" className="mt-4">
           <OverviewSection tender={tender} />
+        </TabsContent>
+        <TabsContent value="preparation" className="mt-4">
+          <PreparationSection tender={tender} onChanged={fetch} />
         </TabsContent>
         <TabsContent value="documents" className="mt-4">
           <DocumentsSection tender={tender} onChanged={fetch} />
@@ -288,6 +294,268 @@ export function TenderDetail({ tenderId, onBack }: TenderDetailProps) {
           fetch();
         }}
       />
+    </div>
+  );
+}
+
+// ============== Preparation Section ==============
+function PreparationSection({ tender, onChanged }: { tender: any; onChanged: () => void }) {
+  const checklist = tender.checklist_items || [];
+  const [updating, setUpdating] = useState<number | null>(null);
+
+  // Calculate completion stats
+  const total = checklist.length;
+  const complete = checklist.filter((c: any) => c.status === "Complete").length;
+  const outstanding = checklist.filter((c: any) => c.status === "Outstanding").length;
+  const expired = checklist.filter((c: any) => c.status === "Expired").length;
+  const na = checklist.filter((c: any) => c.status === "Not Applicable").length;
+  // Percentage: complete / (total - N/A) to exclude N/A items from the denominator
+  const eligible = total - na;
+  const pct = eligible > 0 ? Math.round((complete / eligible) * 100) : 0;
+
+  // Group by category
+  const categoryOrder = ["Compliance", "Company", "Technical", "Methodology", "Pricing", "Forms", "Personnel", "References", "Other"];
+  const grouped = checklist.reduce((acc: any, item: any) => {
+    const cat = item.category || "Other";
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(item);
+    return acc;
+  }, {});
+  const categories = Object.keys(grouped).sort((a, b) => {
+    const ia = categoryOrder.indexOf(a);
+    const ib = categoryOrder.indexOf(b);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+
+  const handleToggle = async (item: any) => {
+    setUpdating(item.id);
+    const newStatus = item.status === "Complete" ? "Outstanding" : "Complete";
+    try {
+      await api.updateChecklistItem(item.id, { status: newStatus });
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Update failed");
+    } finally {
+      setUpdating(null);
+    }
+  };
+
+  // Status icon
+  const StatusIcon = ({ status }: { status: string }) => {
+    if (status === "Complete") return <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />;
+    if (status === "Expired") return <XCircle className="h-5 w-5 text-rose-600 shrink-0" />;
+    if (status === "Not Applicable") return <X className="h-5 w-5 text-muted-foreground shrink-0" />;
+    return <Clock className="h-5 w-5 text-amber-500 shrink-0" />;
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Big progress card */}
+      <Card className={cn(
+        "border-2",
+        pct === 100 ? "border-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/20"
+        : pct >= 50 ? "border-amber-300 dark:border-amber-800"
+        : "border-rose-300 dark:border-rose-800"
+      )}>
+        <CardContent className="p-6">
+          <div className="flex flex-col lg:flex-row items-center gap-6">
+            {/* Circular progress */}
+            <div className="relative shrink-0">
+              <svg className="h-32 w-32 -rotate-90" viewBox="0 0 120 120">
+                <circle cx="60" cy="60" r="52" fill="none" stroke="currentColor" strokeWidth="10" className="text-muted/30" />
+                <circle
+                  cx="60" cy="60" r="52" fill="none" strokeWidth="10" strokeLinecap="round"
+                  className={pct === 100 ? "text-emerald-500" : pct >= 50 ? "text-amber-500" : "text-rose-500"}
+                  strokeDasharray={`${2 * Math.PI * 52}`}
+                  strokeDashoffset={`${2 * Math.PI * 52 * (1 - pct / 100)}`}
+                  style={{ transition: "stroke-dashoffset 0.5s ease" }}
+                />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className={cn(
+                  "text-3xl font-bold tabular-nums",
+                  pct === 100 ? "text-emerald-600" : pct >= 50 ? "text-amber-600" : "text-rose-600"
+                )}>
+                  {pct}%
+                </span>
+                <span className="text-xs text-muted-foreground">complete</span>
+              </div>
+            </div>
+
+            {/* Stats */}
+            <div className="flex-1 w-full">
+              <h3 className="font-semibold text-lg flex items-center gap-2 mb-3">
+                <ClipboardCheck className="h-5 w-5 text-primary" />
+                Tender Preparation Status
+              </h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                {pct === 100
+                  ? "🎉 All preparation items complete — ready for submission!"
+                  : `${outstanding} item${outstanding === 1 ? "" : "s"} still outstanding${expired > 0 ? `, ${expired} expired` : ""}`}
+              </p>
+              <div className="grid grid-cols-4 gap-3">
+                <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 p-3 text-center">
+                  <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">{complete}</div>
+                  <div className="text-xs text-muted-foreground">Complete ✓</div>
+                </div>
+                <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 p-3 text-center">
+                  <div className="text-2xl font-bold text-amber-700 dark:text-amber-400 tabular-nums">{outstanding}</div>
+                  <div className="text-xs text-muted-foreground">Outstanding</div>
+                </div>
+                <div className="rounded-lg bg-rose-50 dark:bg-rose-950/30 p-3 text-center">
+                  <div className="text-2xl font-bold text-rose-700 dark:text-rose-400 tabular-nums">{expired}</div>
+                  <div className="text-xs text-muted-foreground">Expired</div>
+                </div>
+                <div className="rounded-lg bg-muted p-3 text-center">
+                  <div className="text-2xl font-bold text-muted-foreground tabular-nums">{na}</div>
+                  <div className="text-xs text-muted-foreground">N/A</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Preparation checklist by category */}
+      {checklist.length === 0 ? (
+        <Card>
+          <CardContent className="py-12 flex flex-col items-center text-center">
+            <div className="h-14 w-14 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
+              <ClipboardCheck className="h-7 w-7 text-primary" />
+            </div>
+            <h3 className="font-semibold">No preparation items yet</h3>
+            <p className="text-sm text-muted-foreground mt-1 max-w-sm">
+              Upload and run AI extraction on the tender document to automatically generate a preparation checklist.
+              Or go to the Checklist tab to add items manually.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {categories.map((cat) => {
+            const items = grouped[cat];
+            const catComplete = items.filter((i: any) => i.status === "Complete").length;
+            const catEligible = items.filter((i: any) => i.status !== "Not Applicable").length;
+            const catPct = catEligible > 0 ? Math.round((catComplete / catEligible) * 100) : 0;
+            return (
+              <Card key={cat}>
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2 text-sm">
+                      <CategoryIcon category={cat} />
+                      {cat}
+                    </CardTitle>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="text-xs">
+                        {catComplete}/{catEligible} done
+                      </Badge>
+                      <div className="w-20 h-2 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className={cn(
+                            "h-full transition-all",
+                            catPct === 100 ? "bg-emerald-500" : catPct >= 50 ? "bg-amber-500" : "bg-rose-500"
+                          )}
+                          style={{ width: `${catPct}%` }}
+                        />
+                      </div>
+                      <span className="text-xs font-medium text-muted-foreground tabular-nums w-8 text-right">
+                        {catPct}%
+                      </span>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div className="space-y-1">
+                    {items.map((item: any) => (
+                      <button
+                        key={item.id}
+                        onClick={() => handleToggle(item)}
+                        disabled={updating === item.id || item.status === "Not Applicable" || item.status === "Expired"}
+                        className={cn(
+                          "w-full flex items-center gap-3 p-2.5 rounded-lg text-left transition-colors",
+                          item.status === "Not Applicable" || item.status === "Expired"
+                            ? "cursor-not-allowed opacity-60"
+                            : "hover:bg-muted/50 cursor-pointer"
+                        )}
+                      >
+                        {updating === item.id ? (
+                          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground shrink-0" />
+                        ) : (
+                          <StatusIcon status={item.status} />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className={cn(
+                              "text-sm font-medium",
+                              item.status === "Complete" && "line-through text-muted-foreground"
+                            )}>
+                              {item.name}
+                            </span>
+                            {item.mandatory === false && (
+                              <Badge variant="outline" className="text-[10px] bg-muted">Optional</Badge>
+                            )}
+                            {item.mandatory === true && (
+                              <Badge variant="outline" className="text-[10px] bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300">Mandatory</Badge>
+                            )}
+                          </div>
+                          {item.description && (
+                            <p className="text-xs text-muted-foreground mt-0.5">{item.description}</p>
+                          )}
+                          {item.linked_library_doc_id && (
+                            <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5 flex items-center gap-1">
+                              <Link2 className="h-3 w-3" />
+                              Linked to compliance library
+                            </p>
+                          )}
+                        </div>
+                        <span className="text-xs text-muted-foreground shrink-0 hidden sm:block">
+                          {item.status === "Complete" ? "Click to undo" : "Click to complete"}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Summary banner */}
+      {checklist.length > 0 && (
+        <Card className={cn(
+          "border-2",
+          pct === 100 ? "border-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/20"
+          : pct >= 50 ? "border-amber-300 dark:border-amber-800 bg-amber-50/30 dark:bg-amber-950/10"
+          : "border-rose-300 dark:border-rose-800 bg-rose-50/30 dark:bg-rose-950/10"
+        )}>
+          <CardContent className="p-4 flex items-center gap-3">
+            <div className={cn(
+              "flex h-10 w-10 shrink-0 items-center justify-center rounded-full",
+              pct === 100 ? "bg-emerald-100 dark:bg-emerald-950"
+              : pct >= 50 ? "bg-amber-100 dark:bg-amber-950"
+              : "bg-rose-100 dark:bg-rose-950"
+            )}>
+              {pct === 100 ? <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+              : pct >= 50 ? <TrendingUp className="h-5 w-5 text-amber-600" />
+              : <AlertTriangle className="h-5 w-5 text-rose-600" />}
+            </div>
+            <div>
+              <div className="font-semibold text-sm">
+                {pct === 100
+                  ? "Ready for submission!"
+                  : pct >= 50
+                  ? "More than halfway there"
+                  : "Significant work remaining"}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {complete} of {eligible} items complete · {outstanding} outstanding{expired > 0 ? ` · ${expired} expired` : ""}
+                {na > 0 ? ` · ${na} not applicable` : ""}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

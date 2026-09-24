@@ -767,3 +767,48 @@ Stage Summary:
 - Urgency levels: TODAY, CRITICAL (≤1 day), URGENT (≤3 days), SOON (≤7 days), NORMAL (>7 days)
 - Certificate upload auto-marks attendance as confirmed
 - Summary dashboard with 6 stat cards
+
+---
+Task ID: 28
+Agent: Main Orchestrator
+Task: Build Tender Preparation — progress tracker with clear percentage of completion
+
+Work Log:
+- Added "preparation" sub-tab to tender detail (ClipboardCheck icon) — positioned right after Overview as a key view
+- Added "preparation" to DashboardTab type and main dashboard sidebar navigation
+- Created PreparationSection in tender-detail.tsx (~260 lines):
+  * Big circular progress indicator (SVG circle with animated stroke-dashoffset) showing X% complete
+  * Color-coded: emerald (100%), amber (≥50%), rose (<50%)
+  * 4 stat boxes: Complete ✓ / Outstanding / Expired / N/A
+  * Smart completion message: "All items complete — ready for submission!" or "X items still outstanding"
+  * Checklist items grouped by category (Compliance, Company, Technical, Methodology, Pricing, Forms, Personnel, References, Other)
+  * Each category card has: icon, title, completion count badge, mini progress bar, percentage
+  * Each item is a clickable button — one click to toggle Complete/Outstanding
+  * Items show: status icon (✓ emerald, ❌ rose, clock amber, X muted), name, Mandatory/Optional badge, description, library link status
+  * Completed items have line-through styling
+  * Disabled state for Expired and N/A items
+  * Bottom summary banner with readiness assessment
+- Created preparation-tab.tsx (~260 lines) for main dashboard:
+  * 6 summary stat cards: Tenders, Avg complete %, Ready (100%), Outstanding items, Expired items, Total items
+  * Tenders sorted by completion % ascending (least complete first = most urgent)
+  * Each tender card shows: mini circular progress, reference, status, closing date countdown, title, client, progress bar, completion stats, readiness badge (Ready/In progress/Needs work)
+  * Category breakdown mini-stats per tender (e.g. "Compliance: 2/7, Company: 1/2")
+  * Click any tender → opens tender detail Preparation tab
+  * Info banner explaining how preparation tracking works
+- Verified with Agent Browser:
+  * Preparation tab in sidebar shows all 4 tenders with circular progress indicators, percentages, and readiness badges
+  * Summary stats show correct counts
+  * Clicked a tender → opened detail → clicked Preparation sub-tab
+  * Saw "Tender Preparation Status" with circular % indicator, 4 stat boxes, and all checklist items grouped by category
+  * Each item was clickable — clicked "Company profile" and it toggled from "Click to complete" to "Click to undo"
+  * The PUT /api/checklist/54 call returned 200 and the tender was refreshed
+  * No errors, lint clean
+
+Stage Summary:
+- Tender Preparation is fully operational at two levels:
+  1. Main dashboard "Preparation" tab: shows ALL tenders with their completion percentages, sorted by urgency (least complete first), with summary stats and readiness badges
+  2. Tender detail "Preparation" sub-tab: shows a detailed progress tracker for a single tender with circular % indicator, 4 stat boxes, items grouped by category with per-category progress bars, and one-click toggle to complete/undo items
+- Clear percentage of completion: (complete items / eligible items) × 100, excluding N/A items
+- Color coding: emerald (100% ready), amber (≥50% in progress), rose (<50% needs work)
+- One-click toggle: click any item to mark it Complete ✓ or Outstanding
+- Matches the user's example format: items with ✓/❌ status and a clear percentage

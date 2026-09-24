@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawn, execSync } from "child_process";
-import { existsSync, mkdirSync } from "fs";
+import { execSync } from "child_process";
 
 const BACKEND_PORT = 8000;
 const BACKEND_HOST = "127.0.0.1";
 const BACKEND_URL = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
 const BACKEND_DIR = "/home/z/my-project/mini-services/tender-api";
-const PYTHON_BIN = "python3";
+// Use the venv Python which has all required packages installed.
+// The system /usr/bin/python3 does NOT have sqlalchemy/uvicorn/etc.
+const PYTHON_BIN = "/home/z/.venv/bin/python3";
 
 // Global state to track backend startup and avoid concurrent starts
 let backendStarting: Promise<boolean> | null = null;
@@ -48,28 +49,23 @@ async function startBackend(): Promise<boolean> {
       } catch {
         // ignore
       }
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 800));
 
-      // Spawn uvicorn detached so it survives
-      const logs = `${BACKEND_DIR}/api.log`;
-      const result = spawn(
-        PYTHON_BIN,
-        ["-m", "uvicorn", "main:app", "--host", "0.0.0.0", `--port`, String(BACKEND_PORT)],
-        {
-          cwd: BACKEND_DIR,
-          detached: true,
-          stdio: ["ignore", "ignore", "ignore"],
-          env: { ...process.env, PYTHONUNBUFFERED: "1" },
-        }
-      );
-      result.unref();
+      // Start uvicorn fully detached using setsid + nohup so it survives
+      // even when the sandbox reaps child processes of the Node server.
+      const logFile = `${BACKEND_DIR}/api.log`;
+      const startCmd = `cd ${BACKEND_DIR} && setsid nohup ${PYTHON_BIN} -m uvicorn main:app --host 0.0.0.0 --port ${BACKEND_PORT} >> ${logFile} 2>&1 < /dev/null &`;
+      execSync(startCmd, {
+        timeout: 5000,
+        env: { ...process.env, PYTHONUNBUFFERED: "1" },
+      });
 
-      // Wait for the backend to become ready (up to 15 seconds)
-      for (let i = 0; i < 30; i++) {
+      // Wait for the backend to become ready (up to 25 seconds)
+      for (let i = 0; i < 50; i++) {
         await new Promise((r) => setTimeout(r, 500));
         try {
           const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 1500);
+          const timeout = setTimeout(() => controller.abort(), 2000);
           const res = await fetch(`${BACKEND_URL}/api/health`, {
             signal: controller.signal,
           });

@@ -254,3 +254,34 @@ Stage Summary:
 - Auto-restarting proxy keeps backend alive in sandbox environment
 - No mock data — everything persisted to SQLite via real API calls
 - All 16 requirements from the spec implemented
+
+---
+Task ID: 17
+Agent: Main Orchestrator
+Task: Resume after sandbox reset — fix backend auto-start and verify all features
+
+Work Log:
+- Detected sandbox environment was reset (Python packages uninstalled, backend killed)
+- Reinstalled Python packages: sqlalchemy, python-jose, passlib, bcrypt
+- Verified database file (tender.db) and all code files were preserved
+- Fixed critical bug in Next.js API proxy: was using /usr/bin/python3 (system) which lacks packages; updated to /home/z/.venv/bin/python3 (venv) which has all packages
+- Improved proxy start logic: uses setsid + nohup for full process detachment, 25-second startup wait
+- Started backend, verified existing data intact (E137 tender with AI extraction)
+- Verified with Agent Browser:
+  * Landing page renders correctly
+  * Sign-in with existing account (sarah.new@mthembusec.co.za) works
+  * Dashboard loads with KPI cards and sidebar navigation
+  * Tenders tab shows E137 tender
+  * Tender detail page opens with all 9 sub-tabs (Overview, Documents, Checklist, Briefings, Pricing, Submission, Comms, Addendums, AI)
+  * AI tab shows extracted data: PSIRA grades (C/B/A), 45 guards, mandatory requirements, disqualification risks
+  * AI summary with full spec format is intact
+  * Checklist tab shows 27 items with Outstanding status
+  * AI Assistant answered "What tenders do we currently have open?" correctly with E137 details
+- Lint passes clean, all API calls return 200, no browser errors
+
+Stage Summary:
+- All services running: Next.js (3000) + Python FastAPI (8000, auto-started on demand)
+- Critical fix: proxy now uses venv Python path (/home/z/.venv/bin/python3)
+- All data preserved across sandbox reset
+- All 16 tender management features verified working
+- AI document extraction, AI summary, and AI assistant all functional

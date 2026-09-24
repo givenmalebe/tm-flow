@@ -769,6 +769,81 @@ def create_tender(payload: TenderCreate, db: Session = Depends(get_db), user: Us
     return _serialize_tender(t)
 
 
+@app.get("/api/tenders/export")
+def export_tenders(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Export the complete tender register as CSV (spreadsheet format).
+    Includes all 16 required fields for every tender — including historical records."""
+    import csv
+    import io
+    from fastapi.responses import StreamingResponse
+
+    all_tenders = db.query(Tender).order_by(desc(Tender.created_at)).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # Header row with all required fields
+    writer.writerow([
+        "Tender/RFP Number",
+        "Client/Organisation",
+        "Tender Description",
+        "Date Received",
+        "Closing Date",
+        "Closing Time",
+        "Region/Site",
+        "Tender Value (ZAR)",
+        "Person Responsible",
+        "Submission Status",
+        "Outcome",
+        "Reason for Unsuccessful Bid",
+        "Tender Validity Period",
+        "Contract Period",
+        "Category",
+        "Required Documents (Complete)",
+        "Outstanding Documents",
+        "Notes and Comments",
+        "Created At",
+        "Last Updated",
+    ])
+
+    for t in all_tenders:
+        checklist = t.checklist_items or []
+        complete_docs = [c.name for c in checklist if c.status == "Complete"]
+        outstanding_docs = [c.name for c in checklist if c.status == "Outstanding"]
+
+        writer.writerow([
+            t.reference_number or "",
+            t.client_company or "",
+            t.description or t.title or "",
+            t.issue_date.isoformat() if t.issue_date else (t.created_at.isoformat() if t.created_at else ""),
+            t.closing_date.isoformat() if t.closing_date else "",
+            t.closing_time.strftime("%H:%M") if t.closing_time else "",
+            t.location_site or "",
+            f"{t.estimated_value:.2f}" if t.estimated_value else "",
+            t.person_responsible or "",
+            t.status or "",
+            t.outcome or "Pending",
+            t.unsuccessful_reason or "",
+            t.validity_period or "",
+            t.contract_period or "",
+            t.category or "",
+            "; ".join(complete_docs) if complete_docs else "",
+            "; ".join(outstanding_docs) if outstanding_docs else "",
+            t.notes or "",
+            t.created_at.isoformat() if t.created_at else "",
+            t.updated_at.isoformat() if t.updated_at else "",
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename=tender_register_{date.today().isoformat()}.csv"
+        }
+    )
+
+
 @app.get("/api/tenders/{tender_id}")
 def get_tender(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     t = db.query(Tender).filter(Tender.id == tender_id).first()

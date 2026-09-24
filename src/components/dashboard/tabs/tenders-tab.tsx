@@ -17,6 +17,7 @@ import {
   Trash2,
   SlidersHorizontal,
   X,
+  Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -162,6 +163,29 @@ export function TendersTab() {
           <Button variant="ghost" size="sm" onClick={fetchTenders} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
             <span className="hidden sm:inline">Refresh</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              try {
+                const blob = await api.exportTendersCsv();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `tender_register_${new Date().toISOString().slice(0, 10)}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                toast.success("Tender register exported as CSV");
+              } catch (e: any) {
+                toast.error(e.message || "Export failed");
+              }
+            }}
+          >
+            <Download className="h-4 w-4" />
+            <span className="hidden sm:inline">Export CSV</span>
           </Button>
           <Button onClick={() => setShowCreate(true)} size="sm">
             <Plus className="h-4 w-4" />
@@ -355,9 +379,27 @@ export function TendersTab() {
         </Alert>
       )}
 
-      {/* Results count */}
-      <div className="text-sm text-muted-foreground">
-        {loading ? "Loading…" : `${tenders.length} tender${tenders.length === 1 ? "" : "s"} found`}
+      {/* Results count + register stats */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="text-sm text-muted-foreground">
+          {loading ? "Loading…" : `${tenders.length} tender${tenders.length === 1 ? "" : "s"} in register`}
+        </div>
+        {!loading && tenders.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className="text-xs">
+              {tenders.filter((t) => t.status === "Submitted").length} Submitted
+            </Badge>
+            <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+              {tenders.filter((t) => t.outcome === "Awarded").length} Awarded
+            </Badge>
+            <Badge variant="outline" className="text-xs bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300">
+              {tenders.filter((t) => t.outcome === "Unsuccessful").length} Unsuccessful
+            </Badge>
+            <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+              {tenders.filter((t) => t.outcome === "Pending" || !t.outcome).length} Pending
+            </Badge>
+          </div>
+        )}
       </div>
 
       {/* List */}

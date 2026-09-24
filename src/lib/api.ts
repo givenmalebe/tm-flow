@@ -144,6 +144,16 @@ export const api = {
     return request<any>(`/tenders/${id}`);
   },
 
+  async exportTendersCsv() {
+    const url = `/api/tenders/export?XTransformPort=8000`;
+    const headers: Record<string, string> = {};
+    const token = getToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch(url, { headers, credentials: "include" });
+    if (!res.ok) throw new Error("Export failed");
+    return res.blob();
+  },
+
   async createTender(payload: any) {
     return request<any>(`/tenders`, { method: "POST", body: payload });
   },

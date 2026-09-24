@@ -1403,3 +1403,63 @@ Stage Summary:
 - One central system to manage every tender from discovery to final outcome
 - AI helps identify requirements, missing documents, deadlines, risks and outstanding work
 - Tender tracking spreadsheet/register: every tender captured and tracked automatically, remains as historical record
+
+---
+Task ID: 41
+Agent: Main Orchestrator
+Task: Verify Tender Tracking Spreadsheet — all 16 fields, automatic updates, historical records, CSV export
+
+Work Log:
+- Verified Tender model contains all 16 required fields:
+  1. Tender/RFP number → reference_number ✓
+  2. Client/organisation → client_company ✓
+  3. Tender description → description ✓
+  4. Date received → issue_date / created_at ✓
+  5. Closing date and time → closing_date / closing_time ✓
+  6. Region/site → location_site ✓
+  7. Tender value → estimated_value ✓
+  8. Person responsible → person_responsible ✓
+  9. Submission status → status ✓
+  10. Outcome → outcome (Awarded/Unsuccessful/Pending/Withdrawn) ✓
+  11. Reason for unsuccessful bid → unsuccessful_reason ✓
+  12. Tender validity period → validity_period ✓
+  13. Important deadlines → closing_date + briefings + deadlines tab ✓
+  14. Required documents → checklist_items ✓
+  15. Outstanding documents → checklist_items (status=Outstanding) ✓
+  16. Notes and comments → notes ✓
+- Added GET /api/tenders/export endpoint — exports the complete tender register as CSV with all 16+ fields:
+  * Tender/RFP Number, Client/Organisation, Tender Description, Date Received, Closing Date, Closing Time, Region/Site, Tender Value (ZAR), Person Responsible, Submission Status, Outcome, Reason for Unsuccessful Bid, Tender Validity Period, Contract Period, Category, Required Documents (Complete), Outstanding Documents, Notes and Comments, Created At, Last Updated
+  * Exports ALL tenders including historical records (unsuccessful, withdrawn)
+  * Returns as a downloadable CSV file
+- Moved the export route before /{tender_id} to avoid route conflict
+- Added exportTendersCsv() to frontend api.ts
+- Added "Export CSV" button to the Tenders tab header
+- Added register statistics badges: Submitted count, Awarded count, Unsuccessful count, Pending count
+- Changed "found" text to "in register" to emphasize the register concept
+- Verified automatic updates:
+  * When a tender is created → automatically in the register ✓
+  * When status changes → automatically reflected in the register ✓
+  * When checklist items are updated → automatically reflected ✓
+  * When a submission is recorded → status auto-updates to "Submitted" ✓
+  * When outcome is set → reflected in the register ✓
+  * No manual maintenance needed — everything is automatic ✓
+- Verified historical records:
+  * Archive sets status to "Withdrawn" but keeps the record ✓
+  * Unsuccessful tenders remain with outcome + reason ✓
+  * Delete is available but optional (user can keep historical records) ✓
+  * CSV export includes ALL tenders regardless of status ✓
+- Verified via API: CSV export returned 4 rows (1 header + 3 tenders) with all fields populated
+- Verified in browser: Tenders tab shows "Export CSV" button, "3 tenders in register", and outcome stats badges
+- No errors, lint clean
+
+Stage Summary:
+- Tender Tracking Spreadsheet/Register fully operational:
+  ✅ Every tender automatically captured and tracked in central database
+  ✅ Complete tender register for all tenders handled by the company
+  ✅ Each tender has its own record with all 16 required fields
+  ✅ Automatically updated as the tender progresses (no manual maintenance)
+  ✅ Every tender remains as a historical record (including unsuccessful and withdrawn)
+  ✅ CSV export for spreadsheet use (Excel/Google Sheets compatible)
+  ✅ Register statistics badges (Submitted, Awarded, Unsuccessful, Pending)
+  ✅ Search and filtering by all 11 criteria
+  ✅ Sorting by 9 fields

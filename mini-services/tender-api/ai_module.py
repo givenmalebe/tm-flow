@@ -250,8 +250,14 @@ Respond with ONLY a JSON object:
   "changed_scope": [string],
   "changed_submission": [string],
   "other_changes": [string],
+  "checklist_additions": [string],
+  "checklist_removals": [string],
   "summary": string
-}"""
+}
+
+The "checklist_additions" field should list new documents or requirements that should be added to the submission checklist based on the addendum.
+The "checklist_removals" field should list items that are no longer required due to the addendum.
+Be specific and actionable in all fields."""
 
 
 def detect_addendum_changes(original_text: str, addendum_text: str) -> Dict[str, Any]:

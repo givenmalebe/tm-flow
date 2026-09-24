@@ -3,6 +3,7 @@ TenderFlow - Main FastAPI Application
 Tender Management System API
 """
 import os
+import json
 import shutil
 import uuid
 from datetime import datetime, date, timedelta
@@ -1873,16 +1874,77 @@ def ai_analyze_addendum(addendum_id: int, db: Session = Depends(get_db), user: U
         full_path = os.path.join(UPLOAD_DIR, doc.file_path)
         if os.path.exists(full_path):
             original_text += ai_module.extract_text_from_file(full_path, doc.original_filename) + "\n"
+    # Also include the AI-extracted info for comparison
+    if tender.ai_extracted_info:
+        original_text += "\n\nAI EXTRACTED INFO:\n" + json.dumps(tender.ai_extracted_info, indent=2, default=str)[:5000]
     # Get addendum text
     addendum_path = os.path.join(UPLOAD_DIR, addendum.file_path)
     addendum_text = ""
     if os.path.exists(addendum_path):
-        addendum_text = ai_module.extract_text_from_file(addendum_path, addendum.title)
+        # Use the actual filename from the file path for extension detection
+        addendum_filename = os.path.basename(addendum.file_path)
+        addendum_text = ai_module.extract_text_from_file(addendum_path, addendum_filename)
     if len(addendum_text.strip()) < 50:
         raise HTTPException(status_code=400, detail="Could not extract addendum text")
     changes = ai_module.detect_addendum_changes(original_text, addendum_text)
     addendum.ai_changes = changes
+    # Auto-update the tender checklist based on detected changes
+    checklist_updated = False
+    if changes and not changes.get("_error"):
+        # Add new checklist items from checklist_additions
+        additions = changes.get("checklist_additions", [])
+        if isinstance(additions, list):
+            for item_name in additions:
+                if item_name and isinstance(item_name, str):
+                    # Check if an item with the same name already exists
+                    existing = db.query(ChecklistItem).filter(
+                        ChecklistItem.tender_id == tender.id,
+                        ChecklistItem.name == item_name[:500]
+                    ).first()
+                    if not existing:
+                        db.add(ChecklistItem(
+                            tender_id=tender.id,
+                            name=item_name[:500],
+                            description=f"Added by addendum: {addendum.title}",
+                            category="Other",
+                            mandatory=True,
+                            status="Outstanding",
+                            notes=f"New requirement from addendum #{addendum.addendum_number or ''}",
+                        ))
+                        checklist_updated = True
+        # Mark items as Not Applicable if they're in checklist_removals
+        removals = changes.get("checklist_removals", [])
+        if isinstance(removals, list):
+            for item_name in removals:
+                if item_name and isinstance(item_name, str):
+                    # Find matching checklist items (partial match)
+                    matching = db.query(ChecklistItem).filter(
+                        ChecklistItem.tender_id == tender.id,
+                        ChecklistItem.status != "Not Applicable"
+                    ).all()
+                    for ci in matching:
+                        if item_name.lower() in ci.name.lower() or ci.name.lower() in item_name.lower():
+                            ci.status = "Not Applicable"
+                            ci.notes = (ci.notes or "") + f"\nMarked N/A by addendum: {addendum.title}"
+                            checklist_updated = True
+                            break
+        # If dates changed, update the tender's closing date if mentioned
+        changed_dates = changes.get("changed_dates", [])
+        if isinstance(changed_dates, list):
+            for cd in changed_dates:
+                if isinstance(cd, dict):
+                    field = (cd.get("field") or "").lower()
+                    to_val = cd.get("to", "")
+                    if "closing" in field and to_val:
+                        try:
+                            new_date = date.fromisoformat(str(to_val)[:10])
+                            tender.closing_date = new_date
+                            checklist_updated = True
+                        except (ValueError, TypeError):
+                            pass
     db.commit()
+    if checklist_updated:
+        changes["checklist_updated"] = True
     return changes
 
 

@@ -1040,3 +1040,58 @@ Stage Summary:
 - AI addendum search: searches the web for addendums related to active tenders
 - Meeting-specific fields: meeting_date and meeting_location for Meeting Invitation/Notes types
 - 4 stats cards, type filter, search, timeline view
+
+---
+Task ID: 34
+Agent: Main Orchestrator
+Task: Enhance Tender Addendums — AI change detection with all 7 categories + auto-update checklist
+
+Work Log:
+- Enhanced ADDENDUM_SYSTEM prompt in ai_module.py to include 2 new fields:
+  * checklist_additions — new documents/requirements to add to the submission checklist
+  * checklist_removals — items no longer required due to the addendum
+- Added `import json` to main.py (was missing, caused NameError)
+- Enhanced ai_analyze_addendum endpoint to:
+  * Include the tender's AI-extracted info in the comparison text (for better change detection)
+  * Use the actual file path basename for extension detection (fixed text extraction failing on addendums)
+  * Auto-update the tender checklist based on detected changes:
+    - Add new checklist items from checklist_additions (with "Added by addendum" notes)
+    - Mark items as "Not Applicable" from checklist_removals (with "Marked N/A by addendum" notes)
+    - Auto-update the tender's closing_date if changed_dates mentions a closing date
+  * Return `checklist_updated: True` flag when checklist was modified
+- All 7 change categories verified working:
+  1. New requirements ✓ (ISO 9001, BBBEE affidavit)
+  2. Removed requirements ✓ (Compulsory briefing attendance)
+  3. Changed dates ✓ (Closing date: 2025-12-15 → 2026-01-22)
+  4. Changed pricing requirements ✓ (Weekend rates 25% premium)
+  5. Changed scope ✓ (Guards 45→55, two new sites)
+  6. Changed submission requirements ✓ (Physical → e-procurement portal)
+  7. Other important changes ✓ (captured in summary)
+- Verified with API test:
+  * Created tender via AI Document Reader (17 checklist items)
+  * Uploaded addendum with 8 changes
+  * AI analyzed and detected ALL changes correctly
+  * Checklist auto-updated: 17 → 19 items (2 new items added: ISO 9001, BBBEE affidavit)
+  * Closing date auto-updated: 2025-12-15 → 2026-01-22
+  * checklist_updated: True returned
+- Verified with Agent Browser:
+  * Addendums tab shows "AI Change Detection" section with all 7 categories
+  * New requirements, removed requirements, changed dates, changed pricing, changed scope, changed submission all visible
+  * Summary text with full explanation
+  * No errors, lint clean
+
+Stage Summary:
+- Tender Addendums fully operational with all 7 required change detection categories:
+  1. New requirements ✓
+  2. Removed requirements ✓
+  3. Changed dates ✓
+  4. Changed pricing requirements ✓
+  5. Changed scope ✓
+  6. Changed submission requirements ✓
+  7. Other important changes ✓
+- AI auto-updates the tender checklist where appropriate:
+  - Adds new checklist items from checklist_additions
+  - Marks removed items as "Not Applicable" from checklist_removals
+  - Auto-updates the tender's closing date if changed
+- Upload addendums to any tender, AI reads and compares with original tender document
+- Change detection results displayed in a structured view with color-coded categories

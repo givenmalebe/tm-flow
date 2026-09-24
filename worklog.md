@@ -1095,3 +1095,77 @@ Stage Summary:
   - Auto-updates the tender's closing date if changed
 - Upload addendums to any tender, AI reads and compares with original tender document
 - Change detection results displayed in a structured view with color-coded categories
+
+---
+Task ID: 35
+Agent: frontend-styling-expert
+Task: Rebuild dashboard-tab with 3 sections: Active Tenders, Upcoming Deadlines, Documents
+
+Work Log:
+- Read worklog.md, api.ts, dashboard-store.ts, deadlines-tab.tsx (for visual consistency), dashboard-shell.tsx, and existing dashboard-tab.tsx to understand the data shape, store helpers (setTab, selectTender, formatDate, formatCurrency, statusColor), and the existing component patterns
+- Designed a clear 3-section command-center layout (Active Tenders / Upcoming Deadlines / Documents) plus a bottom row with Quick Actions and Awarded This Year cards
+- Built reusable `SectionHeading` (icon + title + description) and `StatCard` (clickable, accessible, hover lift + border highlight) components to keep the 3 sections visually consistent
+- Implemented the 5 Active Tenders stat cards (Total Active / Being Prepared / Ready for Submission / Submitted / Closing Soon) wired to setTab navigation or to the Closing-This-Week dialog
+- Implemented the Tender Status Breakdown as a horizontal bar chart driven by `status_counts` (top 8 statuses), using solid color bars that match the global statusColor map
+- Implemented the Upcoming Deadlines section with 3 stat cards and a prominent Next Deadline card featuring a large countdown number with urgency coloring (rose ≤3 days, amber ≤7 days, emerald otherwise) plus the full Tenders Closing This Week list with clickable rows
+- Implemented the Documents section with 3 stat cards (Missing / Expiring Soon / Expired) and a Document Alerts list showing each document's name, category badge, expiry date, and an Expired/Expiring Soon status badge with rose/amber coloring
+- Built two dialogs (Closing This Week list and Awarded This Year list) with ScrollArea and clickable tender rows that navigate to the tender via selectTender
+- Added loading state (skeletons for each section) and error state (destructive Alert with retry)
+- Removed unused `deadlineColor` import and the unused `Sparkles` activity-feed placeholder from the original; kept emerald theme throughout (no blue/indigo accents on the primary actions)
+- Verified with `bun run lint` (clean, no errors) and `tsc --noEmit` (only pre-existing errors in other files — none in dashboard-tab.tsx)
+
+Stage Summary:
+- Overwrote `/home/z/my-project/src/components/dashboard/tabs/dashboard-tab.tsx` (1185 lines, single file)
+- Dashboard is now organized into 3 clearly-headed sections matching the spec, with clickable KPI cards, prominent Next Deadline countdown, document alerts, quick actions, awarded-this-year panel, and two detail dialogs
+- Lint clean; TypeScript clean for this file (only pre-existing errors in other files remain)
+
+---
+Task ID: 36
+Agent: Main Orchestrator
+Task: Verify Tender Dashboard — 3 sections (Active Tenders, Upcoming Deadlines, Documents) + tender management
+
+Work Log:
+- Verified backend /api/dashboard endpoint already returns all required metrics:
+  * ACTIVE TENDERS: active_count, preparing_count, ready_count, submitted_count, closing_this_week
+  * UPCOMING DEADLINES: closing_this_week, closing_this_month, next_deadline (with id, reference, title, closing_date, days_remaining)
+  * DOCUMENTS: docs_missing, docs_expiring_soon, docs_expired (with lists)
+- Delegated rebuild of dashboard-tab.tsx to subagent (Task 35) — 1185 lines with 3 clear sections:
+  1. ACTIVE TENDERS: 5 clickable stat cards (Total Active, Being Prepared, Ready for Submission, Submitted, Closing Soon) + Tender Status Breakdown bar chart
+  2. UPCOMING DEADLINES: 3 stat cards (Closing This Week, Closing This Month, Next Deadline) + prominent Next Deadline card with countdown + Tenders Closing This Week list
+  3. DOCUMENTS: 3 stat cards (Documents Missing, Expiring Soon, Expired) + Document Alerts list
+  Plus: Quick Actions card (New Tender, Upload Document, View Deadlines, Ask AI) + Awarded This Year card
+- Verified tender management actions already exist:
+  * Add new tenders: CreateTenderDialog in tenders-tab (click "New Tender" on dashboard → tenders tab → "New Tender" button)
+  * Edit existing tenders: EditTenderDialog in tender-detail (open any tender → "Edit" button)
+  * Delete tenders: AlertDialog confirm in tenders-tab (trash icon per tender)
+  * Archive tenders: archive endpoint + archive button in tenders-tab
+  * Any changes reflected throughout the system automatically (dashboard, deadlines, preparation, etc. all fetch fresh data)
+- Verified with Agent Browser:
+  * Dashboard shows all 3 sections with correct metrics
+  * ACTIVE TENDERS: Total Active=3, Being Prepared=0, Ready=0, Submitted=0, Closing Soon=0
+  * DOCUMENTS: Documents Missing=55, Expiring Soon=0, Expired=0
+  * Quick Actions: New Tender, Upload Document, View Deadlines, Ask AI buttons all present
+  * Clicked "Total Active" card → navigated to Tenders tab ✓
+  * "New Tender" button present in header and Quick Actions
+  * No errors, lint clean
+
+Stage Summary:
+- Tender Dashboard fully operational with all required sections and metrics:
+  ACTIVE TENDERS:
+  - Number of active tenders ✓
+  - Tenders currently being prepared ✓
+  - Tenders ready for submission ✓
+  - Tenders submitted ✓
+  - Tenders closing soon ✓
+  UPCOMING DEADLINES:
+  - Tenders closing this week ✓
+  - Tenders closing this month ✓
+  - Next tender deadline ✓
+  DOCUMENTS:
+  - Documents missing ✓
+  - Documents expiring soon ✓
+  - Expired documents ✓
+- Tender management: manually add, edit, delete, and archive tenders — changes reflected throughout the system automatically
+- All stat cards are clickable → navigate to relevant tab or open dialog
+- Quick Actions for one-click access to common tasks
+- Awarded This Year section for tracking wins

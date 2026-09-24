@@ -285,3 +285,33 @@ Stage Summary:
 - All data preserved across sandbox reset
 - All 16 tender management features verified working
 - AI document extraction, AI summary, and AI assistant all functional
+
+---
+Task ID: 18
+Agent: Main Orchestrator
+Task: Make dashboard KPI cards clickable — navigate to relevant tab or show detail dialog
+
+Work Log:
+- Updated KpiCard component in dashboard-tab.tsx to accept onClick + hint props
+- Cards now render as <button> when clickable (asChild pattern), with cursor-pointer, hover lift effect, border highlight, and a "Click to view" hint with chevron icon
+- Wired up all 4 KPI cards:
+  * Active Tenders → navigates to Tenders tab (setTab("tenders"))
+  * Closing This Week → opens a Dialog showing the closing_this_week_list with tender reference, title, client, status badge, deadline countdown; clicking a tender in the dialog opens it
+  * Documents Expiring → navigates to Compliance Library tab (setTab("library"))
+  * Awarded This Year → opens a Dialog showing the awarded_this_year_list with reference, title, client, estimated value; clicking a tender opens it
+- Added Dialog + ScrollArea imports from shadcn/ui
+- Added showClosingWeek and showAwarded state to control the dialogs
+- Both dialogs have empty states with appropriate messaging
+- Verified with Agent Browser:
+  * Active Tenders click → navigated to Tenders tab ✓
+  * Closing This Week click → opened "Tenders Closing This Week" dialog ✓
+  * Documents Expiring click → navigated to Compliance Library tab ✓
+  * Awarded This Year click → opened "Tenders Awarded This Year" dialog ✓
+  * Escape closes dialogs ✓
+  * No browser errors ✓
+- Lint passes clean
+
+Stage Summary:
+- All 4 KPI cards are now interactive and lead to real information
+- Two cards navigate to tabs (Active Tenders → Tenders, Documents Expiring → Library)
+- Two cards open detail dialogs (Closing This Week, Awarded This Year) with clickable tender rows that open the tender detail

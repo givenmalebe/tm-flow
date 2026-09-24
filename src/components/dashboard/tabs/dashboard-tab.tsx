@@ -19,6 +19,7 @@ import {
   ExternalLink,
   FileWarning,
   Hourglass,
+  ChevronRight,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -32,6 +33,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { api } from "@/lib/api";
 import {
   useDashboardStore,
@@ -151,28 +160,48 @@ interface KpiCardProps {
   value: number;
   label: string;
   subtitle: string;
+  onClick?: () => void;
+  hint?: string;
 }
 
-function KpiCard({ icon: Icon, iconClass, value, label, subtitle }: KpiCardProps) {
+function KpiCard({ icon: Icon, iconClass, value, label, subtitle, onClick, hint }: KpiCardProps) {
+  const clickable = !!onClick;
+  const CardTag = clickable ? "button" : "div";
   return (
-    <Card className="transition-shadow hover:shadow-md">
-      <CardContent className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-3xl font-bold tracking-tight tabular-nums text-foreground">
-            {formatNumber(value)}
+    <Card
+      asChild={clickable}
+      className={cn(
+        "text-left transition-all",
+        clickable
+          ? "cursor-pointer hover:shadow-md hover:border-primary/40 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          : ""
+      )}
+    >
+      <CardTag onClick={onClick} type={clickable ? "button" : undefined}>
+        <CardContent className="flex items-start justify-between gap-3 p-5">
+          <div className="min-w-0">
+            <div className="text-3xl font-bold tracking-tight tabular-nums text-foreground">
+              {formatNumber(value)}
+            </div>
+            <div className="mt-1 text-sm font-medium text-foreground">{label}</div>
+            <div className="text-xs text-muted-foreground mt-0.5">{subtitle}</div>
+            {clickable && (
+              <div className="mt-2 inline-flex items-center gap-0.5 text-[11px] font-medium text-primary">
+                {hint || "Click to view"}
+                <ChevronRight className="h-3 w-3" />
+              </div>
+            )}
           </div>
-          <div className="mt-1 text-sm font-medium text-foreground">{label}</div>
-          <div className="text-xs text-muted-foreground mt-0.5">{subtitle}</div>
-        </div>
-        <div
-          className={cn(
-            "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl",
-            iconClass
-          )}
-        >
-          <Icon className="h-5 w-5" />
-        </div>
-      </CardContent>
+          <div
+            className={cn(
+              "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl",
+              iconClass
+            )}
+          >
+            <Icon className="h-5 w-5" />
+          </div>
+        </CardContent>
+      </CardTag>
     </Card>
   );
 }
@@ -223,6 +252,8 @@ export function DashboardTab() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showClosingWeek, setShowClosingWeek] = useState(false);
+  const [showAwarded, setShowAwarded] = useState(false);
 
   const fetchData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -384,6 +415,8 @@ export function DashboardTab() {
           value={data.active_count}
           label="Active Tenders"
           subtitle="In progress"
+          onClick={() => goToTab("tenders")}
+          hint="View all tenders"
         />
         <KpiCard
           icon={CalendarClock}
@@ -391,6 +424,8 @@ export function DashboardTab() {
           value={data.closing_this_week}
           label="Closing This Week"
           subtitle="Urgent"
+          onClick={() => setShowClosingWeek(true)}
+          hint="See which tenders"
         />
         <KpiCard
           icon={FolderClock}
@@ -398,6 +433,8 @@ export function DashboardTab() {
           value={docsExpiringTotal}
           label="Documents Expiring"
           subtitle="Need attention"
+          onClick={() => goToTab("library")}
+          hint="Open compliance library"
         />
         <KpiCard
           icon={Trophy}
@@ -405,6 +442,8 @@ export function DashboardTab() {
           value={data.awarded_this_year}
           label="Awarded This Year"
           subtitle="Wins"
+          onClick={() => setShowAwarded(true)}
+          hint="See awarded tenders"
         />
       </div>
 
@@ -812,6 +851,150 @@ export function DashboardTab() {
           </Button>
         </CardContent>
       </Card>
+
+      {/* ---- Closing This Week dialog ---- */}
+      <Dialog open={showClosingWeek} onOpenChange={setShowClosingWeek}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CalendarClock className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+              Tenders Closing This Week
+            </DialogTitle>
+            <DialogDescription>
+              {data.closing_this_week > 0
+                ? `${formatNumber(data.closing_this_week)} tender${
+                    data.closing_this_week === 1 ? "" : "s"
+                  } closing within the next 7 days. Click any tender to open it.`
+                : "No tenders are closing this week. You're on top of things."}
+            </DialogDescription>
+          </DialogHeader>
+          {data.closing_this_week_list.length === 0 ? (
+            <div className="py-8">
+              <EmptyState
+                icon={CheckCircle2}
+                message="No tenders closing this week — you're on top of things."
+                iconClass="bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+              />
+            </div>
+          ) : (
+            <ScrollArea className="max-h-[60vh] pr-2">
+              <div className="space-y-1">
+                {data.closing_this_week_list.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => {
+                      setShowClosingWeek(false);
+                      openTender(t.id);
+                    }}
+                    className="group w-full rounded-lg border border-transparent px-3 py-2.5 text-left transition-colors hover:border-border hover:bg-accent/50"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-semibold text-primary">
+                            {t.reference_number}
+                          </span>
+                          <span
+                            className={cn(
+                              "inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium",
+                              statusColor(t.status)
+                            )}
+                          >
+                            {t.status}
+                          </span>
+                        </div>
+                        <div className="mt-0.5 truncate text-sm font-medium text-foreground">
+                          {t.title}
+                        </div>
+                        <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                          {t.client_company || "—"} · Closes{" "}
+                          {formatDate(t.closing_date)}
+                        </div>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "shrink-0 tabular-nums",
+                          deadlineBadgeClass(t.days_remaining)
+                        )}
+                      >
+                        <Clock className="h-3 w-3" />
+                        {deadlineLabel(t.days_remaining)}
+                      </Badge>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </ScrollArea>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ---- Awarded This Year dialog ---- */}
+      <Dialog open={showAwarded} onOpenChange={setShowAwarded}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Trophy className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+              Tenders Awarded This Year
+            </DialogTitle>
+            <DialogDescription>
+              {data.awarded_this_year > 0
+                ? `${formatNumber(data.awarded_this_year)} tender${
+                    data.awarded_this_year === 1 ? "" : "s"
+                  } awarded this year. Click any tender to open it.`
+                : "No tenders have been awarded yet this year. Keep submitting!"}
+            </DialogDescription>
+          </DialogHeader>
+          {data.awarded_this_year_list.length === 0 ? (
+            <div className="py-8">
+              <EmptyState
+                icon={Trophy}
+                message="No awards yet this year. Keep submitting!"
+                iconClass="bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+              />
+            </div>
+          ) : (
+            <ScrollArea className="max-h-[60vh] pr-2">
+              <div className="space-y-1">
+                {data.awarded_this_year_list.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => {
+                      setShowAwarded(false);
+                      openTender(t.id);
+                    }}
+                    className="group flex w-full items-center justify-between gap-3 rounded-lg border border-transparent px-3 py-2.5 text-left transition-colors hover:border-border hover:bg-accent/50"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-semibold text-primary">
+                          {t.reference_number}
+                        </span>
+                        <Trophy className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                      </div>
+                      <div className="mt-0.5 truncate text-sm font-medium text-foreground">
+                        {t.title}
+                      </div>
+                      <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                        {t.client_company || "—"}
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <div className="text-sm font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">
+                        {formatCurrency(t.estimated_value)}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">
+                        est. value
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </ScrollArea>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -66,7 +66,9 @@ interface TenderOption {
 }
 
 // ---- Suggested questions ----
+// All 15 questions from the user's spec + additional helpful questions
 const SUGGESTED_QUESTIONS: { q: string; label: string }[] = [
+  // The user's 15 example questions (in order)
   {
     q: "Which tenders are closing this week?",
     label: "Closing this week",
@@ -76,12 +78,44 @@ const SUGGESTED_QUESTIONS: { q: string; label: string }[] = [
     label: "Open tenders",
   },
   {
-    q: "What documents are missing across all active tenders?",
-    label: "Missing documents",
+    q: "What documents are missing for Tender E137?",
+    label: "Missing docs (E137)",
   },
   {
     q: "Which tenders require a compulsory briefing?",
     label: "Compulsory briefings",
+  },
+  {
+    q: "What are the requirements for Tender E137?",
+    label: "Requirements (E137)",
+  },
+  {
+    q: "Summarise this tender for me.",
+    label: "Summarise tender",
+  },
+  {
+    q: "What are the potential disqualification requirements?",
+    label: "Disqualifications",
+  },
+  {
+    q: "What PSIRA grades are required?",
+    label: "PSIRA grades",
+  },
+  {
+    q: "How many guards are required?",
+    label: "Guards required",
+  },
+  {
+    q: "What is the closing date?",
+    label: "Closing date",
+  },
+  {
+    q: "What is the evaluation criteria?",
+    label: "Evaluation criteria",
+  },
+  {
+    q: "Which of our documents are going to expire before this tender closes?",
+    label: "Expiring before close",
   },
   {
     q: "Show me all tenders that we have submitted and are still waiting for an outcome.",
@@ -95,29 +129,14 @@ const SUGGESTED_QUESTIONS: { q: string; label: string }[] = [
     q: "Which tenders were unsuccessful and why?",
     label: "Unsuccessful & why",
   },
+  // Additional helpful questions
   {
-    q: "What are the potential disqualification requirements for my tenders?",
-    label: "Disqualifications",
-  },
-  {
-    q: "Summarise my most urgent tender.",
-    label: "Most urgent",
-  },
-  {
-    q: "What PSIRA grades are required for my tenders?",
-    label: "PSIRA grades",
-  },
-  {
-    q: "How many guards are required for my tenders?",
-    label: "Guards required",
+    q: "What should I do next to win my most urgent tender? Give me a prioritized action plan.",
+    label: "Help me win",
   },
   {
     q: "What's in the tender document I uploaded? Give me the key details.",
     label: "Tender document",
-  },
-  {
-    q: "What are the evaluation criteria for my tenders?",
-    label: "Evaluation criteria",
   },
   {
     q: "What's our pricing for each tender?",
@@ -130,10 +149,6 @@ const SUGGESTED_QUESTIONS: { q: string; label: string }[] = [
   {
     q: "Which of our compliance documents are expiring soon?",
     label: "Expiring docs",
-  },
-  {
-    q: "What should I do next to win my most urgent tender? Give me a prioritized action plan.",
-    label: "Help me win",
   },
 ];
 

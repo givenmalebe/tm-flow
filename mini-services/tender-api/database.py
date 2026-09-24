@@ -91,6 +91,7 @@ class Tender(Base):
     submission = relationship("Submission", back_populates="tender", uselist=False, cascade="all, delete-orphan")
     communications = relationship("Communication", back_populates="tender", cascade="all, delete-orphan")
     addendums = relationship("Addendum", back_populates="tender", cascade="all, delete-orphan")
+    generated_documents = relationship("GeneratedDocument", back_populates="tender", cascade="all, delete-orphan")
 
 
 class TenderDocument(Base):
@@ -225,6 +226,45 @@ class ReminderSetting(Base):
     id = Column(Integer, primary_key=True, index=True)
     days_before = Column(Integer, nullable=False)  # 30, 14, 7, 3, 1
     enabled = Column(Boolean, default=True)
+
+
+class CompanyProfile(Base):
+    """Company branding/profile for generating tender documents on letterhead."""
+    __tablename__ = "company_profile"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    company_name = Column(String(500), nullable=False)
+    registration_number = Column(String(100), nullable=True)  # CIPC registration
+    vat_number = Column(String(50), nullable=True)
+    psira_number = Column(String(50), nullable=True)
+    bbbbee_level = Column(String(50), nullable=True)  # e.g. "Level 2"
+    address = Column(Text, nullable=True)
+    phone = Column(String(100), nullable=True)
+    email = Column(String(255), nullable=True)
+    website = Column(String(255), nullable=True)
+    # Branding
+    logo_path = Column(String(1000), nullable=True)  # path in uploads
+    primary_color = Column(String(20), default="#0f766e")  # emerald-700
+    font_family = Column(String(100), default="Arial, sans-serif")
+    letterhead_tagline = Column(String(500), nullable=True)
+    director_name = Column(String(255), nullable=True)  # for signatures
+    director_title = Column(String(255), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class GeneratedDocument(Base):
+    """AI-generated tender-specific documents (method statements, implementation plans, etc.)."""
+    __tablename__ = "generated_documents"
+    id = Column(Integer, primary_key=True, index=True)
+    tender_id = Column(Integer, ForeignKey("tenders.id", ondelete="CASCADE"), nullable=False, index=True)
+    doc_type = Column(String(100), nullable=False)  # method_statement, implementation_plan, technical_proposal, risk_assessment, sops, table_of_contents
+    title = Column(String(500), nullable=False)
+    content = Column(Text, nullable=False)  # the full generated document (markdown/text)
+    table_of_contents = Column(Text, nullable=True)  # for documents with TOC
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    tender = relationship("Tender", back_populates="generated_documents")
+
 
 
 def init_db():

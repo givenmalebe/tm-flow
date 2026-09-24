@@ -19,7 +19,8 @@ from sqlalchemy import or_, and_, desc, asc
 from database import (
     Base, engine, get_db, init_db,
     User, Tender, TenderDocument, ChecklistItem, LibraryDocument,
-    Briefing, PricingVersion, Submission, Communication, Addendum, ReminderSetting
+    Briefing, PricingVersion, Submission, Communication, Addendum, ReminderSetting,
+    CompanyProfile, GeneratedDocument
 )
 from auth import (
     hash_password, verify_password, create_access_token, get_current_user
@@ -432,6 +433,14 @@ def _serialize_tender(t: Tender) -> dict:
                 "ai_changes": a.ai_changes,
                 "created_at": a.created_at.isoformat() if a.created_at else None,
             } for a in t.addendums
+        ],
+        "generated_documents": [
+            {
+                "id": g.id, "doc_type": g.doc_type, "title": g.title,
+                "content": g.content, "table_of_contents": g.table_of_contents,
+                "created_at": g.created_at.isoformat() if g.created_at else None,
+                "updated_at": g.updated_at.isoformat() if g.updated_at else None,
+            } for g in t.generated_documents
         ],
     }
 
@@ -1578,6 +1587,243 @@ def dashboard(db: Session = Depends(get_db), user: User = Depends(get_current_us
             for t in awarded_this_year
         ],
     }
+
+
+# ---------------------- Company Profile (Branding) ----------------------
+
+@app.get("/api/company-profile")
+def get_company_profile(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Get the company profile/branding settings for the current user."""
+    profile = db.query(CompanyProfile).filter(CompanyProfile.user_id == user.id).first()
+    if not profile:
+        # Return defaults
+        return {
+            "company_name": user.company_name or user.full_name,
+            "registration_number": None,
+            "vat_number": None,
+            "psira_number": None,
+            "bbbbee_level": None,
+            "address": None,
+            "phone": None,
+            "email": user.email,
+            "website": None,
+            "logo_path": None,
+            "primary_color": "#0f766e",
+            "font_family": "Arial, sans-serif",
+            "letterhead_tagline": None,
+            "director_name": user.full_name,
+            "director_title": "Director",
+        }
+    return {
+        "id": profile.id,
+        "company_name": profile.company_name,
+        "registration_number": profile.registration_number,
+        "vat_number": profile.vat_number,
+        "psira_number": profile.psira_number,
+        "bbbbee_level": profile.bbbbee_level,
+        "address": profile.address,
+        "phone": profile.phone,
+        "email": profile.email,
+        "website": profile.website,
+        "logo_path": profile.logo_path,
+        "primary_color": profile.primary_color,
+        "font_family": profile.font_family,
+        "letterhead_tagline": profile.letterhead_tagline,
+        "director_name": profile.director_name,
+        "director_title": profile.director_title,
+    }
+
+
+@app.put("/api/company-profile")
+def update_company_profile(
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Create or update the company profile/branding settings."""
+    profile = db.query(CompanyProfile).filter(CompanyProfile.user_id == user.id).first()
+    if not profile:
+        profile = CompanyProfile(
+            user_id=user.id,
+            company_name=payload.get("company_name", user.company_name or user.full_name),
+        )
+        db.add(profile)
+    # Update all fields
+    for field in ["company_name", "registration_number", "vat_number", "psira_number",
+                  "bbbbee_level", "address", "phone", "email", "website",
+                  "logo_path", "primary_color", "font_family",
+                  "letterhead_tagline", "director_name", "director_title"]:
+        if field in payload:
+            setattr(profile, field, payload[field])
+    db.commit()
+    db.refresh(profile)
+    return {"id": profile.id, "company_name": profile.company_name, "updated": True}
+
+
+@app.post("/api/company-profile/logo")
+async def upload_company_logo(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Upload a company logo for the letterhead."""
+    rel_path = _save_upload(file, subdir="company")
+    profile = db.query(CompanyProfile).filter(CompanyProfile.user_id == user.id).first()
+    if not profile:
+        profile = CompanyProfile(
+            user_id=user.id,
+            company_name=user.company_name or user.full_name,
+            logo_path=rel_path,
+        )
+        db.add(profile)
+    else:
+        profile.logo_path = rel_path
+    db.commit()
+    return {"logo_path": rel_path, "url": f"/uploads/{rel_path}?XTransformPort=8000"}
+
+
+# ---------------------- AI Document Generation ----------------------
+
+@app.get("/api/tenders/{tender_id}/documents/generated")
+def list_generated_documents(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """List all AI-generated documents for a tender."""
+    docs = db.query(GeneratedDocument).filter(GeneratedDocument.tender_id == tender_id).all()
+    return {"items": [
+        {
+            "id": g.id, "doc_type": g.doc_type, "title": g.title,
+            "created_at": g.created_at.isoformat() if g.created_at else None,
+            "updated_at": g.updated_at.isoformat() if g.updated_at else None,
+            "content_length": len(g.content) if g.content else 0,
+        } for g in docs
+    ]}
+
+
+@app.post("/api/tenders/{tender_id}/documents/generate")
+def generate_document(
+    tender_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Generate a tender-specific document using AI.
+    payload: { doc_type: 'method_statement' | 'implementation_plan' | 'technical_proposal' | 'risk_assessment' | 'sops' | 'table_of_contents' }
+    """
+    doc_type = payload.get("doc_type")
+    if not doc_type or doc_type not in ai_module.DOCUMENT_GENERATORS:
+        raise HTTPException(status_code=400, detail=f"Invalid doc_type. Must be one of: {list(ai_module.DOCUMENT_GENERATORS.keys())}")
+
+    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not tender:
+        raise HTTPException(status_code=404, detail="Tender not found")
+
+    # Get company profile
+    profile = db.query(CompanyProfile).filter(CompanyProfile.user_id == user.id).first()
+    company = {
+        "company_name": profile.company_name if profile else (user.company_name or user.full_name),
+        "registration_number": profile.registration_number if profile else None,
+        "vat_number": profile.vat_number if profile else None,
+        "psira_number": profile.psira_number if profile else None,
+        "bbbbee_level": profile.bbbbee_level if profile else None,
+        "address": profile.address if profile else None,
+        "phone": profile.phone if profile else None,
+        "email": profile.email if profile else user.email,
+        "website": profile.website if profile else None,
+        "director_name": profile.director_name if profile else user.full_name,
+        "director_title": profile.director_title if profile else "Director",
+    }
+
+    tender_data = {
+        "reference_number": tender.reference_number,
+        "title": tender.title,
+        "client_company": tender.client_company,
+        "location_site": tender.location_site,
+        "contract_period": tender.contract_period,
+        "scope_of_work": tender.scope_of_work,
+        "estimated_value": tender.estimated_value,
+    }
+    extracted = tender.ai_extracted_info or {}
+
+    # Generate the document
+    generator = ai_module.DOCUMENT_GENERATORS[doc_type]
+    content = generator(tender_data, extracted, company)
+
+    doc_info = ai_module.DOCUMENT_TYPE_INFO[doc_type]
+    title = f"{doc_info['title']} — {tender.reference_number}"
+
+    # Check if a doc of this type already exists — replace it
+    existing = db.query(GeneratedDocument).filter(
+        GeneratedDocument.tender_id == tender_id,
+        GeneratedDocument.doc_type == doc_type,
+    ).first()
+
+    if existing:
+        existing.title = title
+        existing.content = content
+        existing.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(existing)
+        return {
+            "id": existing.id, "doc_type": existing.doc_type, "title": existing.title,
+            "content": existing.content,
+            "created_at": existing.created_at.isoformat() if existing.created_at else None,
+            "updated_at": existing.updated_at.isoformat() if existing.updated_at else None,
+        }
+    else:
+        new_doc = GeneratedDocument(
+            tender_id=tender_id,
+            doc_type=doc_type,
+            title=title,
+            content=content,
+        )
+        db.add(new_doc)
+        db.commit()
+        db.refresh(new_doc)
+        return {
+            "id": new_doc.id, "doc_type": new_doc.doc_type, "title": new_doc.title,
+            "content": new_doc.content,
+            "created_at": new_doc.created_at.isoformat() if new_doc.created_at else None,
+            "updated_at": new_doc.updated_at.isoformat() if new_doc.updated_at else None,
+        }
+
+
+@app.get("/api/tenders/{tender_id}/documents/generated/{doc_id}")
+def get_generated_document(tender_id: int, doc_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Get the full content of a generated document."""
+    doc = db.query(GeneratedDocument).filter(
+        GeneratedDocument.id == doc_id,
+        GeneratedDocument.tender_id == tender_id,
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {
+        "id": doc.id, "doc_type": doc.doc_type, "title": doc.title,
+        "content": doc.content, "table_of_contents": doc.table_of_contents,
+        "created_at": doc.created_at.isoformat() if doc.created_at else None,
+        "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+    }
+
+
+@app.delete("/api/tenders/{tender_id}/documents/generated/{doc_id}")
+def delete_generated_document(tender_id: int, doc_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Delete a generated document."""
+    doc = db.query(GeneratedDocument).filter(
+        GeneratedDocument.id == doc_id,
+        GeneratedDocument.tender_id == tender_id,
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    db.delete(doc)
+    db.commit()
+    return {"deleted": True}
+
+
+@app.get("/api/document-types")
+def list_document_types():
+    """List all available AI document types that can be generated."""
+    return {"types": [
+        {"key": k, "title": v["title"], "description": v["description"]}
+        for k, v in ai_module.DOCUMENT_TYPE_INFO.items()
+    ]}
 
 
 # ---------------------- AI Tender Discovery ----------------------

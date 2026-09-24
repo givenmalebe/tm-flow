@@ -583,3 +583,318 @@ Return ONLY the JSON array as specified. Exclude non-tender results."""
         "web_search_count": len(web_search_results),
     }
 
+
+# ---- AI Document Generation (tender-specific documents on company letterhead) ----
+
+DOC_GEN_SYSTEM = """You are a professional tender document writer for South African companies.
+You generate formal, submission-ready tender documents that are specific to each tender.
+Your documents must be:
+1. Professional and formal in tone
+2. Specific to the tender (reference the tender number, client, scope)
+3. Comprehensive and detailed
+4. Structured with clear headings and sections
+5. Ready to be placed on company letterhead
+
+Output format: Use plain text with clear section headings in UPPERCASE, numbered sections, and bullet points where appropriate.
+Do NOT use markdown formatting (no **, no ##, no `). Use plain text only.
+Start each document with a formal header block:
+
+[COMPANY NAME]
+[Company Address]
+[Phone] | [Email] | [Website]
+Registration No: [Reg Number] | VAT: [VAT] | PSIRA: [PSIRA No]
+
+Then the document title, reference, and date.
+Then the table of contents (if applicable).
+Then the body content.
+End with a signature block for the director/authorized signatory."""
+
+
+def _build_company_header(company: Dict[str, Any]) -> str:
+    """Build a company letterhead header string from company profile data."""
+    lines = []
+    if company.get("company_name"):
+        lines.append(company["company_name"].upper())
+    if company.get("address"):
+        lines.append(company["address"])
+    contact_parts = []
+    if company.get("phone"):
+        contact_parts.append(f"Tel: {company['phone']}")
+    if company.get("email"):
+        contact_parts.append(f"Email: {company['email']}")
+    if company.get("website"):
+        contact_parts.append(f"Web: {company['website']}")
+    if contact_parts:
+        lines.append(" | ".join(contact_parts))
+    reg_parts = []
+    if company.get("registration_number"):
+        reg_parts.append(f"Reg No: {company['registration_number']}")
+    if company.get("vat_number"):
+        reg_parts.append(f"VAT: {company['vat_number']}")
+    if company.get("psira_number"):
+        reg_parts.append(f"PSIRA: {company['psira_number']}")
+    if reg_parts:
+        lines.append(" | ".join(reg_parts))
+    if company.get("bbbbee_level"):
+        lines.append(f"B-BBEE: {company['bbbbee_level']}")
+    return "\n".join(lines) if lines else "[COMPANY NAME]"
+
+
+def generate_method_statement(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+    """Generate a tender-specific Method Statement on company letterhead."""
+    header = _build_company_header(company)
+    prompt = f"""Generate a comprehensive METHOD STATEMENT for the following tender.
+This must be a formal, detailed document that explains HOW the company will deliver the services.
+
+COMPANY PROFILE:
+{header}
+Director: {company.get('director_name', '[Director Name]')}, {company.get('director_title', 'Director')}
+
+TENDER DETAILS:
+- Reference: {tender.get('reference_number', 'N/A')}
+- Title: {tender.get('title', 'N/A')}
+- Client: {tender.get('client_company', 'N/A')}
+- Location: {tender.get('location_site', 'N/A')}
+- Contract Period: {tender.get('contract_period', 'N/A')}
+
+AI-EXTRACTED TENDER INFO:
+{json.dumps(extracted, default=str, indent=2)[:8000]}
+
+The Method Statement must include:
+1. Introduction and project understanding
+2. Scope of work (specific to this tender)
+3. Methodology and approach
+4. Personnel and staffing plan (including PSIRA grades if security tender)
+5. Equipment and resources
+6. Operational procedures
+7. Quality assurance
+8. Health and safety
+9. Supervision and management
+10. Reporting and communication
+
+Make it specific to THIS tender — reference the client, the scope, the personnel requirements.
+Generate at least 2000 words. Be detailed and professional."""
+    try:
+        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=6000)
+    except RuntimeError as e:
+        return f"Document generation failed: {e}"
+
+
+def generate_implementation_plan(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+    """Generate a tender-specific Implementation Plan on company letterhead."""
+    header = _build_company_header(company)
+    prompt = f"""Generate a comprehensive IMPLEMENTATION PLAN for the following tender.
+This must be a formal, detailed document that explains the step-by-step plan for implementing the contract.
+
+COMPANY PROFILE:
+{header}
+
+TENDER DETAILS:
+- Reference: {tender.get('reference_number', 'N/A')}
+- Title: {tender.get('title', 'N/A')}
+- Client: {tender.get('client_company', 'N/A')}
+- Contract Period: {tender.get('contract_period', 'N/A')}
+
+AI-EXTRACTED TENDER INFO:
+{json.dumps(extracted, default=str, indent=2)[:8000]}
+
+The Implementation Plan must include:
+1. Project initiation and mobilization
+2. Phase 1: Setup and preparation (first 30 days)
+3. Phase 2: Full deployment (day 31-60)
+4. Phase 3: Steady-state operations (ongoing)
+5. Timeline with milestones (use a week-by-week breakdown for the first 90 days)
+6. Resource allocation per phase
+7. Key deliverables and deadlines
+8. Risk mitigation during implementation
+9. Transition and handover plan
+10. Monitoring and review schedule
+
+Make it specific to THIS tender. Generate at least 2000 words."""
+    try:
+        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=6000)
+    except RuntimeError as e:
+        return f"Document generation failed: {e}"
+
+
+def generate_technical_proposal(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+    """Generate a tender-specific Technical Proposal on company letterhead."""
+    header = _build_company_header(company)
+    functionality = extracted.get("functionality_requirements", [])
+    eval_criteria = extracted.get("evaluation_criteria", [])
+    prompt = f"""Generate a comprehensive TECHNICAL PROPOSAL for the following tender.
+This must address the functionality requirements and evaluation criteria to maximize the technical score.
+
+COMPANY PROFILE:
+{header}
+
+TENDER DETAILS:
+- Reference: {tender.get('reference_number', 'N/A')}
+- Title: {tender.get('title', 'N/A')}
+- Client: {tender.get('client_company', 'N/A')}
+- Contract Period: {tender.get('contract_period', 'N/A')}
+
+AI-EXTRACTED TENDER INFO:
+Functionality requirements: {json.dumps(functionality, default=str)}
+Evaluation criteria: {json.dumps(eval_criteria, default=str)}
+Mandatory requirements: {json.dumps(extracted.get('mandatory_requirements', []), default=str)}
+Scope: {extracted.get('scope_of_work', 'N/A')}
+Personnel required: {extracted.get('number_of_personnel_guards', 'N/A')}
+PSIRA grades: {extracted.get('required_psira_grades', [])}
+
+The Technical Proposal must include:
+1. Executive summary
+2. Understanding of the client's needs
+3. Company capability and experience
+4. Technical approach (addressing each functionality requirement)
+5. Personnel deployment plan (with PSIRA grades if applicable)
+6. Equipment and technology
+7. Training and development
+8. Quality management system
+9. Performance monitoring
+10. Compliance with mandatory requirements (address each one)
+
+Address EVERY functionality requirement and evaluation criterion explicitly.
+Generate at least 2500 words. Be persuasive — this is what wins the technical score."""
+    try:
+        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=6000)
+    except RuntimeError as e:
+        return f"Document generation failed: {e}"
+
+
+def generate_risk_assessment(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+    """Generate a tender-specific Risk Assessment on company letterhead."""
+    header = _build_company_header(company)
+    prompt = f"""Generate a comprehensive RISK ASSESSMENT for the following tender.
+This must be a formal risk assessment document specific to the tender's scope and location.
+
+COMPANY PROFILE:
+{header}
+
+TENDER DETAILS:
+- Reference: {tender.get('reference_number', 'N/A')}
+- Title: {tender.get('title', 'N/A')}
+- Client: {tender.get('client_company', 'N/A')}
+- Location: {tender.get('location_site', 'N/A')}
+- Scope: {extracted.get('scope_of_work', 'N/A')}
+
+The Risk Assessment must include:
+1. Introduction and methodology
+2. Risk identification (at least 15 risks specific to this tender)
+3. Risk analysis matrix (likelihood x impact) — present as a table
+4. Risk evaluation and priority
+5. Risk mitigation strategies for each identified risk
+6. Residual risk assessment
+7. Risk monitoring and review
+8. Emergency response procedures
+9. Contingency plans
+
+For each risk, include: Risk ID, Description, Likelihood (High/Medium/Low), Impact (High/Medium/Low), Risk Rating, Mitigation, Owner.
+Generate at least 2000 words."""
+    try:
+        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=6000)
+    except RuntimeError as e:
+        return f"Document generation failed: {e}"
+
+
+def generate_sops(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+    """Generate Standard Operating Procedures specific to the tender."""
+    header = _build_company_header(company)
+    prompt = f"""Generate comprehensive STANDARD OPERATING PROCEDURES (SOPs) for the following tender.
+These must be operational procedures that staff will follow daily.
+
+COMPANY PROFILE:
+{header}
+
+TENDER DETAILS:
+- Reference: {tender.get('reference_number', 'N/A')}
+- Title: {tender.get('title', 'N/A')}
+- Client: {tender.get('client_company', 'N/A')}
+- Scope: {extracted.get('scope_of_work', 'N/A')}
+- Personnel: {extracted.get('number_of_personnel_guards', 'N/A')}
+- PSIRA grades: {extracted.get('required_psira_grades', [])}
+
+Generate at least 10 SOPs, each with:
+- SOP Number and Title
+- Purpose
+- Scope
+- Responsibilities
+- Procedure (step by step)
+- Related documents
+
+Include SOPs for:
+1. Guard deployment and shift handover
+2. Access control
+3. Incident reporting and response
+4. Emergency procedures
+5. Patrol and surveillance
+6. Communication protocols
+7. Equipment use and maintenance
+8. Health and safety
+9. Training and induction
+10. Performance monitoring
+
+Generate at least 2500 words. Be specific to this tender's scope."""
+    try:
+        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=6000)
+    except RuntimeError as e:
+        return f"Document generation failed: {e}"
+
+
+def generate_table_of_contents(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+    """Generate a Table of Contents for the full tender submission package."""
+    prompt = f"""Generate a comprehensive TABLE OF CONTENTS for a tender submission package for the following tender.
+This should cover ALL documents that would be included in the final submission.
+
+TENDER DETAILS:
+- Reference: {tender.get('reference_number', 'N/A')}
+- Title: {tender.get('title', 'N/A')}
+- Client: {tender.get('client_company', 'N/A')}
+
+AI-EXTRACTED COMPULSORY DOCUMENTS:
+{json.dumps(extracted.get('compulsory_documents', []), default=str)}
+
+Generate a table of contents with:
+1. Cover letter
+2. Company profile
+3. Compliance documents (CIPC, SARS, B-BBEE, PSIRA, COIDA, etc.)
+4. Technical proposal
+5. Method statement
+6. Implementation plan
+7. Risk assessment
+8. SOPs
+9. Organogram
+10. Pricing schedule
+11. References
+12. Signed declarations
+13. Appendices
+
+Number each section (1, 2, 3...) with sub-sections (1.1, 1.2, ...).
+Also include a brief description of what each section contains.
+Format as a clean, professional table of contents."""
+    try:
+        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=3000)
+    except RuntimeError as e:
+        return f"Document generation failed: {e}"
+
+
+# Map doc types to their generator functions
+DOCUMENT_GENERATORS = {
+    "method_statement": generate_method_statement,
+    "implementation_plan": generate_implementation_plan,
+    "technical_proposal": generate_technical_proposal,
+    "risk_assessment": generate_risk_assessment,
+    "sops": generate_sops,
+    "table_of_contents": generate_table_of_contents,
+}
+
+DOCUMENT_TYPE_INFO = {
+    "method_statement": {"title": "Method Statement", "description": "How the company will deliver the services"},
+    "implementation_plan": {"title": "Implementation Plan", "description": "Step-by-step plan for implementing the contract"},
+    "technical_proposal": {"title": "Technical Proposal", "description": "Addresses functionality requirements to maximize technical score"},
+    "risk_assessment": {"title": "Risk Assessment", "description": "Risk identification, analysis and mitigation"},
+    "sops": {"title": "Standard Operating Procedures", "description": "Daily operational procedures for staff"},
+    "table_of_contents": {"title": "Table of Contents", "description": "Full submission package table of contents"},
+}
+
+

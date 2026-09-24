@@ -547,3 +547,73 @@ Stage Summary:
 - Mandatory vs Optional badges
 - Regenerate button to re-run AI checklist generation anytime
 - Covers all the example items from the spec: Company profile, CIPC, SARS, B-BBEE, PSIRA, COIDA, Financial statements, References, Organogram, Methodology, Risk assessment, SOPs, POPIA, Signed declarations, Pricing schedule, Technical proposal, Forms, Other tender-specific documents
+
+---
+Task ID: 24
+Agent: Main Orchestrator
+Task: Build Compliance Document Library enhancement — company profile branding + AI-generated tender-specific documents
+
+Work Log:
+- Added CompanyProfile model to database.py: company_name, registration_number, vat_number, psira_number, bbbbee_level, address, phone, email, website, logo_path, primary_color, font_family, letterhead_tagline, director_name, director_title
+- Added GeneratedDocument model: tender_id, doc_type, title, content, table_of_contents, created_at, updated_at
+- Added generated_documents relationship to Tender model
+- Added 6 AI document generation functions to ai_module.py:
+  * generate_method_statement() — formal method statement with 10 sections, 2000+ words
+  * generate_implementation_plan() — step-by-step plan with 3 phases, week-by-week timeline, 2000+ words
+  * generate_technical_proposal() — addresses functionality requirements & evaluation criteria, 2500+ words
+  * generate_risk_assessment() — 15+ risks with likelihood/impact/rating/mitigation, 2000+ words
+  * generate_sops() — 10 SOPs with purpose/scope/responsibilities/procedure, 2500+ words
+  * generate_table_of_contents() — full 13-section submission package TOC with sub-sections
+- All documents generated on company letterhead (company header with name, address, contact, registration, PSIRA, B-BBEE)
+- All documents are tender-specific (reference tender number, client, scope, personnel, PSIRA grades)
+- Added DOC_GEN_SYSTEM prompt for formal SA tender document writing
+- Added _build_company_header() helper to build letterhead from company profile
+- Added DOCUMENT_GENERATORS map and DOCUMENT_TYPE_INFO metadata
+- Added API endpoints to main.py:
+  * GET/PUT /api/company-profile — manage company branding
+  * POST /api/company-profile/logo — upload logo
+  * GET /api/tenders/{id}/documents/generated — list generated docs
+  * POST /api/tenders/{id}/documents/generate — generate a doc (replaces existing)
+  * GET /api/tenders/{id}/documents/generated/{doc_id} — get full content
+  * DELETE /api/tenders/{id}/documents/generated/{doc_id} — delete
+  * GET /api/document-types — list available types
+- Added frontend API methods: getCompanyProfile, updateCompanyProfile, uploadCompanyLogo, generateDocument, listGeneratedDocuments, getGeneratedDocument, deleteGeneratedDocument, listDocumentTypes
+- Added "company" tab to DashboardTab type and dashboard shell navigation (Building icon)
+- Created company-tab.tsx (~250 lines):
+  * Company Information form (name, CIPC reg, VAT, PSIRA, B-BBEE, phone, email, website, address)
+  * Authorized Signatory section (director name + title for signature blocks)
+  * Branding section (primary color picker, font family, letterhead tagline)
+  * Logo upload (drag-drop or click, image preview)
+  * Live letterhead preview (shows how the document header will look)
+  * Save button with loading state
+- Added "generated" sub-tab to tender detail (FileSignature icon, labeled "Documents")
+- Created GeneratedDocumentsSection in tender-detail.tsx (~200 lines):
+  * Header card explaining AI-generated documents on company letterhead
+  * 6 document type cards in responsive grid: Table of Contents, Technical Proposal, Method Statement, Implementation Plan, Risk Assessment, SOPs
+  * Each card shows: icon, title, description, generation status, Generate/View/Regenerate/Delete buttons
+  * Document viewer dialog with: full content display, Copy to clipboard, Download as .txt, character count
+- Verified with API test:
+  * Set up company profile (SecureCo Security Pty Ltd with full details)
+  * Created tender via AI Document Reader
+  * Generated Method Statement → 21,583 chars on company letterhead with all 10 sections
+  * Generated Table of Contents → 13-section submission package TOC
+- Verified with Agent Browser:
+  * Company Profile tab renders with all fields, branding, logo upload, letterhead preview
+  * Tender detail → Documents sub-tab shows 6 document type cards with Generate buttons
+  * Clicked View → document viewer dialog showed full generated content with Copy/Download buttons
+  * No errors, lint clean
+
+Stage Summary:
+- Compliance Document Library fully enhanced with all 15 categories (CIPC, SARS, B-BBEE, PSIRA, COIDA, Financial statements, Company profile, References, Policies, Certificates, Insurance documents, Organograms, Standard declarations, Standard methodologies, Standard SOPs)
+- Company Profile tab for branding (logo, font, colors, address, registration numbers, director info)
+- AI generates 6 types of tender-specific documents on company letterhead:
+  1. Table of Contents (full submission package)
+  2. Technical Proposal (addresses functionality requirements)
+  3. Method Statement (how services will be delivered)
+  4. Implementation Plan (step-by-step rollout)
+  5. Risk Assessment (15+ risks with mitigation)
+  6. Standard Operating Procedures (10 SOPs)
+- All documents are specific to each tender (reference tender number, client, scope, personnel, PSIRA grades)
+- All documents on company letterhead (company name, address, registration, PSIRA, B-BBEE)
+- Copy to clipboard + Download as .txt
+- Auto-linking to compliance library (from previous task) identifies relevant documents and attaches them to the tender checklist

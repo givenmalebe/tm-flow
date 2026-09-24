@@ -335,6 +335,51 @@ export const api = {
     });
   },
 
+  // ---- Company Profile (Branding) ----
+  async getCompanyProfile() {
+    return request<any>(`/company-profile`);
+  },
+
+  async updateCompanyProfile(payload: any) {
+    return request<any>(`/company-profile`, { method: "PUT", body: payload });
+  },
+
+  async uploadCompanyLogo(file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    return request<{ logo_path: string; url: string }>(`/company-profile/logo`, {
+      method: "POST",
+      body: form,
+      isForm: true,
+    });
+  },
+
+  // ---- AI Document Generation ----
+  async generateDocument(tenderId: number, docType: string) {
+    return request<any>(`/tenders/${tenderId}/documents/generate`, {
+      method: "POST",
+      body: { doc_type: docType },
+    });
+  },
+
+  async listGeneratedDocuments(tenderId: number) {
+    return request<{ items: any[] }>(`/tenders/${tenderId}/documents/generated`);
+  },
+
+  async getGeneratedDocument(tenderId: number, docId: number) {
+    return request<any>(`/tenders/${tenderId}/documents/generated/${docId}`);
+  },
+
+  async deleteGeneratedDocument(tenderId: number, docId: number) {
+    return request<{ deleted: boolean }>(`/tenders/${tenderId}/documents/generated/${docId}`, {
+      method: "DELETE",
+    });
+  },
+
+  async listDocumentTypes() {
+    return request<{ types: any[] }>(`/document-types`);
+  },
+
   // ---- AI Assistant ----
   async askAssistant(question: string, tenderId?: number) {
     return request<{

@@ -32,6 +32,10 @@ import {
   Building2,
   Users,
   User,
+  FileSignature,
+  Copy,
+  Check,
+  FileCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -87,7 +91,7 @@ interface TenderDetailProps {
   onBack: () => void;
 }
 
-type SubTab = "overview" | "documents" | "checklist" | "briefings" | "pricing" | "submission" | "communications" | "addendums" | "ai";
+type SubTab = "overview" | "documents" | "checklist" | "briefings" | "pricing" | "submission" | "communications" | "addendums" | "generated" | "ai";
 
 export function TenderDetail({ tenderId, onBack }: TenderDetailProps) {
   const { refresh } = useDashboardStore();
@@ -239,6 +243,7 @@ export function TenderDetail({ tenderId, onBack }: TenderDetailProps) {
           <TabsTrigger value="submission" className="text-xs"><Send className="h-3.5 w-3.5 mr-1" />Submission</TabsTrigger>
           <TabsTrigger value="communications" className="text-xs"><MessageSquare className="h-3.5 w-3.5 mr-1" />Comms</TabsTrigger>
           <TabsTrigger value="addendums" className="text-xs"><FileDiff className="h-3.5 w-3.5 mr-1" />Addendums</TabsTrigger>
+          <TabsTrigger value="generated" className="text-xs"><FileSignature className="h-3.5 w-3.5 mr-1" />Documents</TabsTrigger>
           <TabsTrigger value="ai" className="text-xs"><Bot className="h-3.5 w-3.5 mr-1" />AI</TabsTrigger>
         </TabsList>
 
@@ -265,6 +270,9 @@ export function TenderDetail({ tenderId, onBack }: TenderDetailProps) {
         </TabsContent>
         <TabsContent value="addendums" className="mt-4">
           <AddendumsSection tender={tender} onChanged={fetch} />
+        </TabsContent>
+        <TabsContent value="generated" className="mt-4">
+          <GeneratedDocumentsSection tender={tender} onChanged={fetch} />
         </TabsContent>
         <TabsContent value="ai" className="mt-4">
           <AISection tender={tender} onChanged={fetch} />
@@ -1991,6 +1999,215 @@ function Field2({ label, children }: { label: string; children: React.ReactNode 
     <div className="space-y-1">
       <Label className="text-xs">{label}</Label>
       {children}
+    </div>
+  );
+}
+
+// ============== Generated Documents Section ==============
+const DOC_TYPES = [
+  { key: "table_of_contents", title: "Table of Contents", description: "Full submission package TOC", icon: FileSignature },
+  { key: "technical_proposal", title: "Technical Proposal", description: "Addresses functionality requirements", icon: FileCheck },
+  { key: "method_statement", title: "Method Statement", description: "How services will be delivered", icon: FileText },
+  { key: "implementation_plan", title: "Implementation Plan", description: "Step-by-step rollout plan", icon: FileText },
+  { key: "risk_assessment", title: "Risk Assessment", description: "Risk identification & mitigation", icon: FileText },
+  { key: "sops", title: "Standard Operating Procedures", description: "Daily operational procedures", icon: FileText },
+];
+
+function GeneratedDocumentsSection({ tender, onChanged }: { tender: any; onChanged: () => void }) {
+  const [generated, setGenerated] = useState<any[]>(tender.generated_documents || []);
+  const [generating, setGenerating] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<any | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    setGenerated(tender.generated_documents || []);
+  }, [tender.generated_documents]);
+
+  const handleGenerate = async (docType: string) => {
+    setGenerating(docType);
+    toast.info("AI is generating your document…");
+    try {
+      const result = await api.generateDocument(tender.id, docType);
+      setGenerated((arr) => {
+        const filtered = arr.filter((d) => d.doc_type !== docType);
+        return [...filtered, result];
+      });
+      toast.success("Document generated!");
+      onChanged();
+      setViewing(result);
+    } catch (e: any) {
+      toast.error(e.message || "Generation failed");
+    } finally {
+      setGenerating(null);
+    }
+  };
+
+  const handleDelete = async (docId: number) => {
+    try {
+      await api.deleteGeneratedDocument(tender.id, docId);
+      setGenerated((arr) => arr.filter((d) => d.id !== docId));
+      if (viewing?.id === docId) setViewing(null);
+      toast.success("Document deleted");
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Delete failed");
+    }
+  };
+
+  const handleCopy = () => {
+    if (viewing?.content) {
+      navigator.clipboard.writeText(viewing.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+      toast.success("Document copied to clipboard");
+    }
+  };
+
+  const handleDownload = () => {
+    if (viewing?.content) {
+      const blob = new Blob([viewing.content], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${viewing.doc_type}_${tender.reference_number}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success("Document downloaded");
+    }
+  };
+
+  const getGenerated = (docType: string) => generated.find((d) => d.doc_type === docType);
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <Card className="border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
+        <CardContent className="p-4">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+              <FileSignature className="h-5 w-5 text-primary" />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-semibold text-sm">AI-Generated Tender Documents</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                The AI generates tender-specific documents on your company letterhead — Method Statements, Implementation Plans,
+                Technical Proposals, Risk Assessments, SOPs, and Table of Contents. Set up your company profile first for branded letterhead.
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Document type grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {DOC_TYPES.map((dt) => {
+          const existing = getGenerated(dt.key);
+          const isGenerating = generating === dt.key;
+          return (
+            <Card key={dt.key} className={cn("transition-all", existing && "border-emerald-300 dark:border-emerald-800")}>
+              <CardContent className="p-4">
+                <div className="flex items-start gap-2 mb-2">
+                  <div className={cn(
+                    "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
+                    existing ? "bg-emerald-100 dark:bg-emerald-950" : "bg-primary/10"
+                  )}>
+                    {existing ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <dt.icon className="h-4 w-4 text-primary" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm">{dt.title}</div>
+                    <div className="text-xs text-muted-foreground">{dt.description}</div>
+                  </div>
+                </div>
+                {existing && (
+                  <div className="text-xs text-emerald-600 dark:text-emerald-400 mb-2 flex items-center gap-1">
+                    <CheckCircle2 className="h-3 w-3" />
+                    Generated · {Math.round((existing.content?.length || 0) / 1000)}K chars
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  {existing ? (
+                    <>
+                      <Button size="sm" variant="outline" className="flex-1" onClick={() => setViewing(existing)}>
+                        <FileText className="h-3.5 w-3.5" />
+                        View
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleGenerate(dt.key)}
+                        disabled={isGenerating}
+                        title="Regenerate"
+                      >
+                        {isGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-rose-600"
+                        onClick={() => handleDelete(existing.id)}
+                        title="Delete"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      size="sm"
+                      className="w-full"
+                      onClick={() => handleGenerate(dt.key)}
+                      disabled={isGenerating}
+                    >
+                      {isGenerating ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          Generating…
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="h-3.5 w-3.5" />
+                          Generate with AI
+                        </>
+                      )}
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      {/* Document viewer dialog */}
+      <Dialog open={!!viewing} onOpenChange={(o) => !o && setViewing(null)}>
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileSignature className="h-5 w-5 text-primary" />
+              {viewing?.title}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex items-center gap-2 pb-2 border-b">
+            <Button variant="outline" size="sm" onClick={handleCopy}>
+              {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+              {copied ? "Copied" : "Copy"}
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleDownload}>
+              <Download className="h-3.5 w-3.5" />
+              Download
+            </Button>
+            <Badge variant="outline" className="text-xs ml-auto">
+              {Math.round((viewing?.content?.length || 0) / 1000)}K chars
+            </Badge>
+          </div>
+          <div className="flex-1 overflow-y-auto scrollbar-thin">
+            <pre className="text-xs whitespace-pre-wrap font-mono bg-muted/30 rounded-lg p-4">
+              {viewing?.content}
+            </pre>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -628,30 +628,55 @@ function Hero({ onGetStarted }: LandingPageProps) {
 /* -------------------------------------------------------------------------- */
 
 function StatsBar() {
+  const statIcons = [Database, Activity, ScanText, Bell];
+  const statColors = [
+    "from-emerald-500 to-teal-500",
+    "from-teal-500 to-cyan-500",
+    "from-cyan-500 to-emerald-500",
+    "from-emerald-600 to-green-500",
+  ];
   return (
-    <section className="relative isolate overflow-hidden border-b bg-gradient-to-b from-emerald-50/80 via-emerald-50/30 to-background">
-      <motion.div
+    <section className="relative isolate overflow-hidden border-b bg-gradient-to-br from-emerald-950 via-emerald-900 to-teal-950">
+      {/* animated mesh */}
+      <div
         aria-hidden
-        className="pointer-events-none absolute left-1/2 top-1/2 -z-10 h-64 w-[60%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-300/10 blur-3xl"
-        animate={{ scale: [1, 1.1, 1], opacity: [0.3, 0.5, 0.3] }}
-        transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
+        className="pointer-events-none absolute inset-0 -z-10 opacity-30"
+        style={{
+          backgroundImage: "radial-gradient(circle at 25% 50%, rgba(16,185,129,0.15) 0%, transparent 50%), radial-gradient(circle at 75% 50%, rgba(20,184,166,0.15) 0%, transparent 50%)",
+          backgroundSize: "200% 200%",
+          animation: "tf-hero-gradient 15s ease infinite",
+        }}
       />
-      <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-2 gap-6 md:grid-cols-4">
-          {STATS.map((s, i) => (
-            <Reveal key={s.label} delay={i * 0.08}>
-              <Card className="border-emerald-100 bg-background/70 backdrop-blur-sm transition-all hover:shadow-md hover:-translate-y-0.5">
-                <CardContent className="text-center py-6">
-                  <div className="bg-gradient-to-br from-emerald-600 to-teal-500 bg-clip-text text-4xl font-bold text-transparent sm:text-5xl">
-                    {s.value}
+      {/* floating orbs */}
+      <motion.div aria-hidden className="pointer-events-none absolute left-[15%] top-1/2 -z-10 h-48 w-48 -translate-y-1/2 rounded-full bg-emerald-400/20 blur-3xl" animate={{ x: [0, 30, 0], scale: [1, 1.15, 1] }} transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }} />
+      <motion.div aria-hidden className="pointer-events-none absolute right-[15%] top-1/3 -z-10 h-56 w-56 rounded-full bg-teal-400/15 blur-3xl" animate={{ x: [0, -25, 0], scale: [1, 1.2, 1] }} transition={{ duration: 10, repeat: Infinity, ease: "easeInOut", delay: 1 }} />
+
+      <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+        <div className="grid grid-cols-2 gap-5 md:grid-cols-4">
+          {STATS.map((s, i) => {
+            const Icon = statIcons[i];
+            return (
+              <Reveal key={s.label} delay={i * 0.1}>
+                <div className="group relative">
+                  <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md p-6 text-center transition-all hover:bg-white/10 hover:border-white/20 hover:-translate-y-1">
+                    {/* glow */}
+                    <div className={cn("pointer-events-none absolute -top-8 left-1/2 h-16 w-16 -translate-x-1/2 rounded-full bg-gradient-to-br opacity-40 blur-2xl transition-opacity group-hover:opacity-70", statColors[i])} />
+                    <div className="relative">
+                      <div className={cn("mx-auto mb-3 flex size-12 items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-lg", statColors[i])}>
+                        <Icon className="size-6" />
+                      </div>
+                      <div className="bg-gradient-to-r from-white to-emerald-200 bg-clip-text text-4xl font-bold text-transparent sm:text-5xl">
+                        {s.value}
+                      </div>
+                      <div className="mt-2 text-sm font-medium text-emerald-100/80">
+                        {s.label}
+                      </div>
+                    </div>
                   </div>
-                  <div className="mt-1.5 text-sm font-medium text-muted-foreground">
-                    {s.label}
-                  </div>
-                </CardContent>
-              </Card>
-            </Reveal>
-          ))}
+                </div>
+              </Reveal>
+            );
+          })}
         </div>
       </div>
     </section>
@@ -664,9 +689,9 @@ function StatsBar() {
 
 function FeaturesGrid() {
   return (
-    <section id="features" className="relative isolate scroll-mt-20 overflow-hidden border-b">
-      {/* subtle background gradient */}
-      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-b from-background via-emerald-50/20 to-background" />
+    <section id="features" className="relative isolate scroll-mt-20 overflow-hidden border-b bg-gradient-to-b from-amber-50/30 via-background to-rose-50/20">
+      {/* subtle background pattern */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 opacity-30" style={{ backgroundImage: "radial-gradient(circle at 80% 20%, rgba(251,191,36,0.06) 0%, transparent 40%), radial-gradient(circle at 20% 80%, rgba(244,63,94,0.04) 0%, transparent 40%)" }} />
       <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
         <Reveal className="mx-auto max-w-2xl text-center">
           <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-700">
@@ -722,7 +747,7 @@ function FeaturesGrid() {
 
 function HowItWorks() {
   return (
-    <section id="how-it-works" className="relative isolate scroll-mt-20 overflow-hidden border-b bg-gradient-to-b from-muted/40 via-emerald-50/10 to-background">
+    <section id="how-it-works" className="relative isolate scroll-mt-20 overflow-hidden border-b bg-gradient-to-b from-violet-50/30 via-background to-cyan-50/20">
       <motion.div
         aria-hidden
         className="pointer-events-none absolute right-0 top-1/4 -z-10 h-80 w-80 rounded-full bg-teal-300/10 blur-3xl"
@@ -790,7 +815,7 @@ function HowItWorks() {
 
 function AIHighlight() {
   return (
-    <section className="relative isolate overflow-hidden border-b">
+    <section className="relative isolate overflow-hidden border-b bg-gradient-to-br from-teal-50/40 via-emerald-50/20 to-background">
       <motion.div
         aria-hidden
         className="pointer-events-none absolute left-[20%] top-0 -z-10 h-72 w-72 rounded-full bg-emerald-300/10 blur-3xl"
@@ -909,7 +934,7 @@ function DeadlineLadder() {
   };
 
   return (
-    <section className="relative isolate overflow-hidden border-b bg-gradient-to-b from-muted/40 via-background to-background">
+    <section className="relative isolate overflow-hidden border-b bg-gradient-to-b from-amber-50/40 via-amber-50/10 to-background">
       <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
         <Reveal className="mx-auto max-w-2xl text-center">
           <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-700">
@@ -987,7 +1012,7 @@ function DeadlineLadder() {
 
 function Testimonial() {
   return (
-    <section className="relative isolate overflow-hidden border-b">
+    <section className="relative isolate overflow-hidden border-b bg-gradient-to-b from-rose-50/20 via-white to-purple-50/10">
       <motion.div
         aria-hidden
         className="pointer-events-none absolute left-1/2 top-0 -z-10 h-64 w-[50%] -translate-x-1/2 rounded-full bg-emerald-200/15 blur-3xl"
@@ -1113,7 +1138,7 @@ function Pricing({ onGetStarted }: LandingPageProps) {
   ];
 
   return (
-    <section id="pricing" className="relative isolate scroll-mt-20 overflow-hidden border-b bg-gradient-to-b from-muted/40 via-emerald-50/10 to-background">
+    <section id="pricing" className="relative isolate scroll-mt-20 overflow-hidden border-b bg-gradient-to-br from-slate-50 via-emerald-50/30 to-teal-50/20">
       <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
         <Reveal className="mx-auto max-w-2xl text-center">
           <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-700">
@@ -1206,7 +1231,7 @@ function Pricing({ onGetStarted }: LandingPageProps) {
 
 function FAQ() {
   return (
-    <section id="faq" className="relative isolate scroll-mt-20 overflow-hidden border-b">
+    <section id="faq" className="relative isolate scroll-mt-20 overflow-hidden border-b bg-gradient-to-b from-cyan-50/20 via-background to-emerald-50/10">
       <motion.div
         aria-hidden
         className="pointer-events-none absolute right-[10%] bottom-0 -z-10 h-72 w-72 rounded-full bg-teal-200/10 blur-3xl"

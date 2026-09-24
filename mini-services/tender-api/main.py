@@ -2428,6 +2428,88 @@ def import_discovered_tender(
     return _serialize_tender(t)
 
 
+# ---------------------- AI Tender Readiness Report ----------------------
+
+@app.post("/api/tenders/{tender_id}/readiness-report")
+def generate_readiness_report(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """
+    THE MOST IMPORTANT REQUIREMENT.
+    Generates a comprehensive readiness report that tells the user:
+    - What the tender requires
+    - What they have
+    - What they are missing
+    - Deadlines
+    - Risks
+    - What needs to be done before submission
+    - A readiness score out of 100
+    """
+    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not tender:
+        raise HTTPException(status_code=404, detail="Tender not found")
+
+    # Build tender data
+    tender_data = {
+        "reference_number": tender.reference_number,
+        "title": tender.title,
+        "client_company": tender.client_company,
+        "closing_date": tender.closing_date.isoformat() if tender.closing_date else None,
+        "closing_time": tender.closing_time.strftime("%H:%M") if tender.closing_time else None,
+        "days_until_close": (tender.closing_date - date.today()).days if tender.closing_date else None,
+        "contract_period": tender.contract_period,
+        "estimated_value": tender.estimated_value,
+        "location_site": tender.location_site,
+        "scope_of_work": tender.scope_of_work,
+        "status": tender.status,
+        "outcome": tender.outcome,
+        "person_responsible": tender.person_responsible,
+        "submission_method": tender.submission_method,
+        "ai_summary": tender.ai_summary,
+    }
+
+    extracted = tender.ai_extracted_info or {}
+
+    # Build checklist data
+    checklist = [
+        {
+            "name": c.name, "status": c.status, "category": c.category,
+            "mandatory": c.mandatory, "description": c.description,
+            "library_category": c.library_category,
+            "linked_library_doc_id": c.linked_library_doc_id,
+        }
+        for c in tender.checklist_items
+    ]
+
+    # Get compliance library docs
+    library_docs = []
+    for d in db.query(LibraryDocument).all():
+        days_to_expiry = None
+        doc_status = "Active"
+        if d.expiry_date:
+            days_to_expiry = (d.expiry_date - date.today()).days
+            if days_to_expiry < 0:
+                doc_status = "Expired"
+            elif days_to_expiry <= 30:
+                doc_status = "Expiring Soon"
+        library_docs.append({
+            "name": d.name, "category": d.category,
+            "expiry_date": d.expiry_date.isoformat() if d.expiry_date else None,
+            "days_to_expiry": days_to_expiry, "status": doc_status,
+        })
+
+    # Get company profile
+    profile = db.query(CompanyProfile).filter(CompanyProfile.user_id == user.id).first()
+    company = {
+        "company_name": profile.company_name if profile else (user.company_name or user.full_name),
+        "registration_number": profile.registration_number if profile else None,
+        "psira_number": profile.psira_number if profile else None,
+        "bbbbee_level": profile.bbbbee_level if profile else None,
+    }
+
+    # Generate the report
+    report = ai_module.generate_readiness_report(tender_data, extracted, checklist, library_docs, company)
+    return {"report": report, "tender_id": tender_id}
+
+
 # ---------------------- AI Assistant ----------------------
 
 def _build_full_system_context(db: Session, user: User, tender_id: Optional[int] = None) -> dict:

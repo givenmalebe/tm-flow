@@ -1340,3 +1340,66 @@ Stage Summary:
 - All filters can be combined (e.g., search for "E137" + status "New Opportunity" + closing date range + value range)
 - Sort by any of 9 fields in ascending or descending order
 - Collapsible "Advanced" section keeps the UI clean when basic filters suffice
+
+---
+Task ID: 40
+Agent: Main Orchestrator
+Task: Build the MOST IMPORTANT REQUIREMENT — AI Tender Readiness Report + verify tender tracking spreadsheet
+
+Work Log:
+- Added generate_readiness_report() to ai_module.py — uses READINESS_SYSTEM prompt with 7 sections:
+  1. WHAT THE TENDER REQUIRES — all mandatory requirements, compulsory documents, PSIRA grades, personnel, equipment, functionality, evaluation criteria, pricing, submission
+  2. WHAT YOU HAVE — completed checklist items, linked compliance library documents
+  3. WHAT YOU ARE MISSING — outstanding/expired checklist items with descriptions, prioritized by mandatory first
+  4. DEADLINES — closing date, days remaining, briefing dates, urgency language
+  5. RISKS — disqualification risks, expired documents, missing items, tight deadlines, with impact and recommended actions
+  6. WHAT NEEDS TO BE DONE BEFORE SUBMISSION — prioritized numbered action list
+  7. READINESS SCORE — score out of 100 with explanation
+- Added POST /api/tenders/{id}/readiness-report endpoint — builds tender data, checklist, library docs, and company profile, passes to AI
+- Added generateReadinessReport() to frontend api.ts
+- Added "Readiness" sub-tab to tender detail (Target icon, between Overview and Preparation)
+- Created ReadinessSection component (~210 lines):
+  * Header card with Target icon and description
+  * "Generate Report" button (one-click)
+  * Animated loading state with pulsing Target icon
+  * Report rendered as separate color-coded cards per section:
+    - WHAT THE TENDER REQUIRES (primary)
+    - WHAT YOU HAVE (emerald)
+    - WHAT YOU ARE MISSING (amber border)
+    - DEADLINES (primary)
+    - RISKS (rose border)
+    - WHAT NEEDS TO BE DONE BEFORE SUBMISSION (primary)
+    - READINESS SCORE (primary border, highlighted)
+  * Regenerate, Copy, and Download buttons
+  * Empty state with explanation
+  * Error state with retry
+- Verified via API: Generated report for E137/2025 — all 7 sections present, 4650 chars
+  * WHAT THE TENDER REQUIRES: Listed guards, PSIRA, documents, evaluation, pricing, submission
+  * WHAT YOU HAVE: Noted nothing complete yet
+  * WHAT YOU ARE MISSING: Listed all 15 outstanding items with descriptions
+  * DEADLINES: Closing date, days remaining, warning about date
+  * RISKS: 7 specific risks (disqualification, missing PSIRA, no references, etc.)
+  * WHAT NEEDS TO BE DONE: 17 numbered action items
+  * READINESS SCORE: 5/100 with explanation
+- Verified in browser: Readiness tab shows, Generate button works, report renders with sections
+- Verified tender tracking spreadsheet/register is complete:
+  * Every tender automatically captured in the central database
+  * Each tender has its own record with all key information (reference, client, description, closing date, value, person responsible, status, outcome, etc.)
+  * Automatically updated as the tender progresses (status changes, checklist updates, submissions, etc.)
+  * Every tender remains in the system as a historical record (including unsuccessful and withdrawn)
+  * The Tenders tab serves as the complete tender register/spreadsheet with search, filtering, and sorting
+- No errors, lint clean
+
+Stage Summary:
+- THE MOST IMPORTANT REQUIREMENT is now fully operational:
+  When you upload a tender, the AI tells you:
+  ✅ "This is what the tender requires" — WHAT THE TENDER REQUIRES section
+  ✅ "This is what you have" — WHAT YOU HAVE section
+  ✅ "This is what you are missing" — WHAT YOU ARE MISSING section
+  ✅ "These are the deadlines" — DEADLINES section
+  ✅ "These are the risks" — RISKS section
+  ✅ "This is what needs to be done before submission" — WHAT NEEDS TO BE DONE BEFORE SUBMISSION section
+  ✅ Plus a READINESS SCORE out of 100
+- One central system to manage every tender from discovery to final outcome
+- AI helps identify requirements, missing documents, deadlines, risks and outstanding work
+- Tender tracking spreadsheet/register: every tender captured and tracked automatically, remains as historical record

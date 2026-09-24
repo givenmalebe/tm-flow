@@ -185,6 +185,12 @@ export const api = {
     return request<{ summary: string }>(`/tenders/${tenderId}/ai-summary`, { method: "POST" });
   },
 
+  async generateReadinessReport(tenderId: number) {
+    return request<{ report: string; tender_id: number }>(`/tenders/${tenderId}/readiness-report`, {
+      method: "POST",
+    });
+  },
+
   // ---- Checklist ----
   async addChecklistItem(tenderId: number, item: any) {
     return request<any>(`/tenders/${tenderId}/checklist`, { method: "POST", body: item });

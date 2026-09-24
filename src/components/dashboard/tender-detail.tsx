@@ -38,6 +38,8 @@ import {
   FileCheck,
   ClipboardCheck,
   TrendingUp,
+  Target,
+  Calendar,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -93,7 +95,7 @@ interface TenderDetailProps {
   onBack: () => void;
 }
 
-type SubTab = "overview" | "preparation" | "documents" | "checklist" | "briefings" | "pricing" | "submission" | "communications" | "addendums" | "generated" | "ai";
+type SubTab = "overview" | "preparation" | "readiness" | "documents" | "checklist" | "briefings" | "pricing" | "submission" | "communications" | "addendums" | "generated" | "ai";
 
 export function TenderDetail({ tenderId, onBack }: TenderDetailProps) {
   const { refresh } = useDashboardStore();
@@ -238,6 +240,7 @@ export function TenderDetail({ tenderId, onBack }: TenderDetailProps) {
       <Tabs value={tab} onValueChange={(v) => setTab(v as SubTab)}>
         <TabsList className="w-full flex-wrap h-auto justify-start overflow-x-auto scrollbar-thin">
           <TabsTrigger value="overview" className="text-xs"><FileText className="h-3.5 w-3.5 mr-1" />Overview</TabsTrigger>
+          <TabsTrigger value="readiness" className="text-xs"><Target className="h-3.5 w-3.5 mr-1" />Readiness</TabsTrigger>
           <TabsTrigger value="preparation" className="text-xs"><ClipboardCheck className="h-3.5 w-3.5 mr-1" />Preparation</TabsTrigger>
           <TabsTrigger value="documents" className="text-xs"><FileStack className="h-3.5 w-3.5 mr-1" />Documents</TabsTrigger>
           <TabsTrigger value="checklist" className="text-xs"><ListChecks className="h-3.5 w-3.5 mr-1" />Checklist</TabsTrigger>
@@ -252,6 +255,9 @@ export function TenderDetail({ tenderId, onBack }: TenderDetailProps) {
 
         <TabsContent value="overview" className="mt-4">
           <OverviewSection tender={tender} />
+        </TabsContent>
+        <TabsContent value="readiness" className="mt-4">
+          <ReadinessSection tender={tender} />
         </TabsContent>
         <TabsContent value="preparation" className="mt-4">
           <PreparationSection tender={tender} onChanged={fetch} />
@@ -294,6 +300,217 @@ export function TenderDetail({ tenderId, onBack }: TenderDetailProps) {
           fetch();
         }}
       />
+    </div>
+  );
+}
+
+// ============== Readiness Report Section ==============
+function ReadinessSection({ tender }: { tender: any }) {
+  const [report, setReport] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handleGenerate = async () => {
+    setLoading(true);
+    setError(null);
+    toast.info("AI is analyzing your tender readiness…");
+    try {
+      const data = await api.generateReadinessReport(tender.id);
+      setReport(data.report);
+      toast.success("Readiness report generated!");
+    } catch (e: any) {
+      setError(e.message || "Failed to generate report");
+      toast.error(e.message || "Failed to generate report");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCopy = () => {
+    if (report) {
+      navigator.clipboard.writeText(report);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+      toast.success("Report copied to clipboard");
+    }
+  };
+
+  const handleDownload = () => {
+    if (report) {
+      const blob = new Blob([report], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `readiness_report_${tender.reference_number}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success("Report downloaded");
+    }
+  };
+
+  // Parse the report into sections for visual rendering
+  const sections = report ? report.split(/=== (.+?) ===/).filter(Boolean) : [];
+
+  return (
+    <div className="space-y-4">
+      {/* Header card */}
+      <Card className="border-primary/30 bg-gradient-to-br from-primary/5 to-transparent">
+        <CardContent className="p-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+                <Target className="h-6 w-6 text-primary" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-base">AI Tender Readiness Report</h3>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  The AI tells you: what the tender requires, what you have, what you're missing,
+                  deadlines, risks, and what needs to be done before submission.
+                </p>
+              </div>
+            </div>
+            {!report && !loading && (
+              <Button onClick={handleGenerate} size="lg">
+                <Sparkles className="h-4 w-4" />
+                Generate Report
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Loading state */}
+      {loading && (
+        <Card>
+          <CardContent className="py-16 flex flex-col items-center text-center">
+            <div className="relative">
+              <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center">
+                <Target className="h-8 w-8 text-primary animate-pulse" />
+              </div>
+              <div className="absolute -inset-2 rounded-2xl border-2 border-primary/20 animate-ping" style={{ animationDuration: "2s" }} />
+            </div>
+            <h3 className="font-semibold mt-4">AI is analyzing your tender…</h3>
+            <p className="text-sm text-muted-foreground mt-1 max-w-md">
+              Reading the tender requirements, checking your checklist, reviewing deadlines,
+              identifying risks, and building your action plan. This usually takes 20-40 seconds.
+            </p>
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground mt-4" />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Error */}
+      {error && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription className="flex items-center justify-between">
+            <span>{error}</span>
+            <Button variant="outline" size="sm" onClick={handleGenerate}>Retry</Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Report display */}
+      {report && !loading && (
+        <>
+          {/* Action buttons */}
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={handleGenerate}>
+              <RefreshCw className="h-3.5 w-3.5" />
+              Regenerate
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleCopy}>
+              {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+              {copied ? "Copied" : "Copy"}
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleDownload}>
+              <Download className="h-3.5 w-3.5" />
+              Download
+            </Button>
+          </div>
+
+          {/* Render the report sections */}
+          {sections.length > 1 ? (
+            <div className="space-y-3">
+              {sections.map((section, i) => {
+                // Even indices (0, 2, 4...) are section titles, odd are content
+                if (i % 2 === 0) {
+                  const title = section.trim();
+                  const content = sections[i + 1]?.trim() || "";
+                  const iconMap: Record<string, any> = {
+                    "WHAT THE TENDER REQUIRES": FileText,
+                    "WHAT YOU HAVE": CheckCircle2,
+                    "WHAT YOU ARE MISSING": AlertTriangle,
+                    "DEADLINES": Calendar,
+                    "RISKS": AlertTriangle,
+                    "WHAT NEEDS TO BE DONE BEFORE SUBMISSION": ListChecks,
+                    "READINESS SCORE": Target,
+                  };
+                  const Icon = iconMap[title] || FileText;
+                  const isMissing = title.includes("MISSING");
+                  const isRisks = title.includes("RISKS");
+                  const isScore = title.includes("SCORE");
+
+                  return (
+                    <Card key={i} className={cn(
+                      isMissing && "border-amber-300 dark:border-amber-800",
+                      isRisks && "border-rose-300 dark:border-rose-800",
+                      isScore && "border-primary/40 bg-primary/5",
+                    )}>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="flex items-center gap-2 text-sm">
+                          <Icon className={cn(
+                            "h-4 w-4",
+                            isMissing && "text-amber-600",
+                            isRisks && "text-rose-600",
+                            isScore && "text-primary",
+                            !isMissing && !isRisks && !isScore && "text-primary",
+                          )} />
+                          {title}
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <pre className="text-sm whitespace-pre-wrap font-sans">{content}</pre>
+                      </CardContent>
+                    </Card>
+                  );
+                }
+                return null;
+              })}
+            </div>
+          ) : (
+            <Card>
+              <CardContent className="p-4">
+                <pre className="text-sm whitespace-pre-wrap font-sans">{report}</pre>
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
+
+      {/* Empty state */}
+      {!report && !loading && !error && (
+        <Card>
+          <CardContent className="py-12 flex flex-col items-center text-center">
+            <div className="h-14 w-14 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
+              <Target className="h-7 w-7 text-primary" />
+            </div>
+            <h3 className="font-semibold">Generate your readiness report</h3>
+            <p className="text-sm text-muted-foreground mt-1 max-w-md">
+              The AI will analyze everything about this tender and tell you exactly:
+              what it requires, what you have, what you're missing, the deadlines, the risks,
+              and what needs to be done before submission — plus a readiness score out of 100.
+            </p>
+            <Button className="mt-4" onClick={handleGenerate} size="lg">
+              <Sparkles className="h-4 w-4" />
+              Generate Readiness Report
+            </Button>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

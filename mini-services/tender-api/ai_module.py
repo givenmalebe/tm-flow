@@ -995,3 +995,62 @@ Generate a complete pricing sheet with realistic line items. Return ONLY the JSO
             "pricing_notes": "AI pricing generation failed. Please add line items manually.",
             "vat_rate": 0.15,
         }
+
+
+# ---- AI Tender Readiness Report (the "most important requirement") ----
+
+READINESS_SYSTEM = """You are TenderFlow AI, a tender readiness analyst. Your job is to give the user a crystal-clear picture of where they stand with a tender and exactly what they need to do to win it.
+
+You produce a READINESS REPORT in plain text with these exact sections (use the section headers as written):
+
+=== WHAT THE TENDER REQUIRES ===
+[List all mandatory requirements, compulsory documents, PSIRA grades, personnel, equipment, functionality requirements, evaluation criteria, and submission requirements. Be specific.]
+
+=== WHAT YOU HAVE ===
+[List the checklist items that are marked "Complete" and any compliance library documents that are linked. Be specific about what's already done.]
+
+=== WHAT YOU ARE MISSING ===
+[List the checklist items that are "Outstanding" or "Expired". For each, explain what it is and why it's needed. Prioritize mandatory items first. This is the most critical section — be thorough.]
+
+=== DEADLINES ===
+[List all critical deadlines: closing date and time, days remaining, briefing dates (if any), and any other important deadlines from the tender. Use urgency language if deadlines are close.]
+
+=== RISKS ===
+[List all potential risks: disqualification requirements, expired compliance documents, missing compulsory documents, unconfirmed briefing attendance, missing personnel, tight deadlines, etc. For each risk, explain the impact and recommend immediate action.]
+
+=== WHAT NEEDS TO BE DONE BEFORE SUBMISSION ===
+[Provide a prioritized action list — numbered steps the user must take before submitting. Start with the most urgent/critical items. Be specific and actionable. Include: documents to obtain, people to contact, tasks to complete, reviews to do, and the final submission itself.]
+
+=== READINESS SCORE ===
+[Provide a readiness score out of 100 based on: checklist completion %, deadline proximity, risk level, and outstanding mandatory items. Explain the score briefly.]
+
+Keep it factual, specific, and actionable. Reference the tender by its reference number. Do not add markdown formatting."""
+
+
+def generate_readiness_report(tender_data: Dict[str, Any], extracted: Dict[str, Any], checklist: List[Dict[str, Any]], library_docs: List[Dict[str, Any]], company: Dict[str, Any]) -> str:
+    """
+    Generate the comprehensive Tender Readiness Report.
+    This is the 'most important requirement' — tells the user everything they need to know.
+    """
+    prompt = f"""Generate a READINESS REPORT for the following tender.
+
+TENDER DETAILS:
+{json.dumps(tender_data, indent=2, default=str)[:3000]}
+
+AI-EXTRACTED TENDER INFO:
+{json.dumps(extracted, indent=2, default=str)[:5000]}
+
+CHECKLIST ITEMS (with status):
+{json.dumps(checklist, indent=2, default=str)[:5000]}
+
+COMPLIANCE LIBRARY DOCUMENTS:
+{json.dumps(library_docs, indent=2, default=str)[:2000]}
+
+COMPANY PROFILE:
+{json.dumps(company, indent=2, default=str)[:1000]}
+
+Generate the full READINESS REPORT with all 7 sections as specified."""
+    try:
+        return _run_zai_chat(prompt, system=READINESS_SYSTEM, max_tokens=6000)
+    except RuntimeError as e:
+        return f"Readiness report generation failed: {e}"

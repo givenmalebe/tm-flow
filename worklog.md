@@ -486,3 +486,64 @@ Stage Summary:
 - One click to create a tender record with all info auto-filled + checklist built from compulsory documents
 - Also works standalone (read without creating) for quick document evaluation
 - All 23 fields from the spec are covered
+
+---
+Task ID: 23
+Agent: Main Orchestrator
+Task: Build Automatic Tender Checklist — AI generates tender-specific checklist with auto-linking to compliance library
+
+Work Log:
+- Added generate_tender_checklist() to ai_module.py — uses AI to generate a tender-specific checklist with:
+  * name, category (Compliance/Company/Technical/Methodology/Pricing/Forms/Personnel/References/Other)
+  * description (explains WHY each item is required for this specific tender)
+  * mandatory flag (true/false)
+  * library_category (maps to compliance library categories for auto-linking)
+- Added CHECKLIST_SYSTEM prompt with rules for generating comprehensive, tender-specific checklists
+- Added 3 new columns to ChecklistItem model in database.py: category, mandatory, library_category
+- Updated _checklist_from_extracted() in main.py to:
+  * Try AI-generated checklist first (calls generate_tender_checklist)
+  * Fall back to default categories + compulsory docs if AI fails
+  * Auto-link each item to a matching compliance library document
+- Added _auto_link_library_doc() — finds matching library docs by category, sets status to:
+  * "Complete" if a valid (non-expired) library doc exists
+  * "Expired" if the only matching library doc is expired
+  * "Outstanding" if no matching library doc exists
+- Added _regenerate_checklist() — deletes existing checklist and regenerates from AI-extracted info
+- Added POST /api/tenders/{tender_id}/checklist/regenerate endpoint
+- Updated ChecklistItemUpdate schema to include category, mandatory, library_category fields
+- Updated _serialize_tender to include the new checklist fields in API responses
+- Added regenerateChecklist() method to frontend api.ts
+- Completely rewrote ChecklistSection in tender-detail.tsx:
+  * Summary card with 4 stats: Complete / Outstanding / Expired / N/A + progress bar
+  * "Regenerate" button (visible when AI extraction exists) — re-runs AI checklist generation
+  * Checklist items GROUPED BY CATEGORY (Compliance, Company, Technical, Methodology, Pricing, Forms, Personnel, References, Other) — each category is a separate card with icon + completion count
+  * Each item shows: status dropdown (4 statuses), editable name, Mandatory/Optional badge, description, library link status
+  * Auto-linked items show "Linked: [doc name]" in emerald with Expired badge if applicable
+  * Items with library_category but no linked doc show amber hint: "Upload a X document to your library to auto-complete this item"
+  * Link/unlink library documents via dialog
+  * Add custom items
+  * Empty state with guidance
+- Verified with API test:
+  * Uploaded sample tender document via /api/ai/read-document-and-create
+  * AI generated 20-item tender-specific checklist with categories, descriptions, mandatory flags, and library_category mappings
+  * Items included: Company profile, CIPC, SARS, B-BBEE, PSIRA, COIDA, Financial statements, References, Certified ID copies, PSIRA certificates for guards, Proof of similar contracts, Pricing schedule, Technical proposal, Methodology, Risk assessment, SOPs, Organogram, POPIA, Signed declarations, Compulsory briefing attendance
+  * Uploaded a B-BBEE certificate to the compliance library
+  * Regenerated checklist → B-BBEE item was AUTO-LINKED to the library doc, status set to "Expired" (cert expired 2026-02-14, system date 2026-09-24)
+- Verified with Agent Browser:
+  * Navigated to tender detail → Checklist tab
+  * Saw "Automatic Submission Checklist" with Regenerate button, 4 stats, progress bar
+  * Saw category cards (Compliance, Technical, Methodology, Forms, Personnel, References)
+  * Saw items with Mandatory badges, descriptions, auto-linked B-BBEE cert showing Expired
+  * Saw amber hints for items needing library documents
+  * No errors, lint clean
+
+Stage Summary:
+- Automatic Tender Checklist is fully operational
+- AI generates a tender-specific checklist (not generic) based on what the tender document requires
+- All 4 statuses supported: Complete / Outstanding / Expired / Not Applicable
+- Auto-links to compliance library — if you have a valid B-BBEE cert in your library, the B-BBEE checklist item is auto-marked Complete; if the cert is expired, it's marked Expired
+- Items grouped by category with icons and per-category completion counts
+- Each item has a description explaining WHY it's required
+- Mandatory vs Optional badges
+- Regenerate button to re-run AI checklist generation anytime
+- Covers all the example items from the spec: Company profile, CIPC, SARS, B-BBEE, PSIRA, COIDA, Financial statements, References, Organogram, Methodology, Risk assessment, SOPs, POPIA, Signed declarations, Pricing schedule, Technical proposal, Forms, Other tender-specific documents

@@ -193,6 +193,9 @@ class ChecklistItemCreate(ChecklistItemBase):
 class ChecklistItemUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    category: Optional[str] = None
+    mandatory: Optional[bool] = None
+    library_category: Optional[str] = None
     status: Optional[str] = None
     linked_library_doc_id: Optional[int] = None
     notes: Optional[str] = None
@@ -372,6 +375,8 @@ def _serialize_tender(t: Tender) -> dict:
         "checklist_items": [
             {
                 "id": c.id, "name": c.name, "description": c.description,
+                "category": c.category, "mandatory": c.mandatory,
+                "library_category": c.library_category,
                 "status": c.status, "notes": c.notes,
                 "linked_library_doc_id": c.linked_library_doc_id,
             } for c in t.checklist_items
@@ -466,13 +471,112 @@ def _build_default_checklist(tender_id: int, db: Session):
         db.add(ChecklistItem(tender_id=tender_id, name=name, status="Outstanding"))
 
 
+def _auto_link_library_doc(item: ChecklistItem, db: Session):
+    """
+    Auto-link a checklist item to a matching compliance library document.
+    Sets status to Complete if a valid library doc exists, Expired if the doc is expired.
+    """
+    if not item.library_category:
+        return
+    # Find matching library docs by category
+    today = date.today()
+    matching_docs = db.query(LibraryDocument).filter(
+        LibraryDocument.category == item.library_category
+    ).all()
+    if not matching_docs:
+        return
+    # Prefer non-expired docs, then the most recently uploaded
+    best_doc = None
+    best_is_expired = False
+    for d in matching_docs:
+        if d.expiry_date:
+            is_expired = d.expiry_date < today
+            if not is_expired and not best_is_expired:
+                best_doc = d
+                best_is_expired = False
+            elif is_expired and best_doc is None:
+                best_doc = d
+                best_is_expired = True
+        else:
+            # No expiry = always valid
+            if not best_is_expired:
+                best_doc = d
+                best_is_expired = False
+    if best_doc:
+        item.linked_library_doc_id = best_doc.id
+        item.status = "Expired" if best_is_expired else "Complete"
+
+
 def _checklist_from_extracted(tender_id: int, extracted: dict, db: Session):
-    """Create checklist from AI-extracted compulsory documents + defaults, then mark library matches."""
-    compulsory = extracted.get("compulsory_documents", []) if extracted else []
-    suggestions = extracted.get("checklist_suggestions", []) if extracted else []
-    combined = list(dict.fromkeys(CHECKLIST_CATEGORIES + compulsory + suggestions))
-    for name in combined:
-        db.add(ChecklistItem(tender_id=tender_id, name=name[:500], status="Outstanding"))
+    """
+    Create a tender-specific checklist using AI generation.
+    Falls back to default categories + compulsory documents if AI generation fails.
+    Auto-links each item to a matching compliance library document and sets status.
+    """
+    # Try AI-generated checklist first
+    ai_items = []
+    if extracted and not extracted.get("_error"):
+        try:
+            ai_items = ai_module.generate_tender_checklist(extracted)
+        except Exception:
+            ai_items = []
+
+    if ai_items:
+        # Use AI-generated items
+        for item_data in ai_items:
+            item = ChecklistItem(
+                tender_id=tender_id,
+                name=item_data["name"],
+                description=item_data.get("description"),
+                category=item_data.get("category", "Other"),
+                mandatory=item_data.get("mandatory", True),
+                library_category=item_data.get("library_category"),
+                status="Outstanding",
+            )
+            _auto_link_library_doc(item, db)
+            db.add(item)
+    else:
+        # Fallback: default categories + compulsory documents + suggestions
+        compulsory = extracted.get("compulsory_documents", []) if extracted else []
+        suggestions = extracted.get("checklist_suggestions", []) if extracted else []
+        combined = list(dict.fromkeys(CHECKLIST_CATEGORIES + compulsory + suggestions))
+        for name in combined:
+            item = ChecklistItem(
+                tender_id=tender_id,
+                name=name[:500],
+                status="Outstanding",
+                category="Compliance",
+                mandatory=True,
+            )
+            # Try to match a library category by name
+            name_lower = name.lower()
+            lib_cat_map = {
+                "cipc": "CIPC", "sars": "SARS", "b-bbee": "B-BBEE", "bbbee": "B-BBEE",
+                "psira": "PSIRA", "coida": "COIDA", "financial": "Financial statements",
+                "company profile": "Company profile", "references": "References",
+                "organogram": "Organograms", "methodology": "Standard methodologies",
+                "sop": "Standard SOPs", "declaration": "Standard declarations",
+            }
+            for key, cat in lib_cat_map.items():
+                if key in name_lower:
+                    item.library_category = cat
+                    break
+            _auto_link_library_doc(item, db)
+            db.add(item)
+
+
+def _regenerate_checklist(tender_id: int, db: Session):
+    """
+    Delete the existing checklist and regenerate it from the tender's AI-extracted info.
+    Used when the user wants to re-run checklist generation after updating extraction.
+    """
+    db.query(ChecklistItem).filter(ChecklistItem.tender_id == tender_id).delete()
+    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+    if tender and tender.ai_extracted_info:
+        _checklist_from_extracted(tender_id, tender.ai_extracted_info, db)
+    else:
+        _build_default_checklist(tender_id, db)
+    db.flush()
 
 
 # ---------------------- Auth Routes ----------------------
@@ -931,6 +1035,21 @@ async def ai_read_document_and_create(
 
 
 # ---------------------- Checklist Routes ----------------------
+
+@app.post("/api/tenders/{tender_id}/checklist/regenerate")
+def regenerate_checklist(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Regenerate the tender checklist from the AI-extracted info.
+    Uses the AI to produce a tender-specific checklist, then auto-links library docs."""
+    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not tender:
+        raise HTTPException(status_code=404, detail="Tender not found")
+    if not tender.ai_extracted_info:
+        raise HTTPException(status_code=400, detail="No AI extraction found. Please upload and extract the tender document first.")
+    _regenerate_checklist(tender_id, db)
+    db.commit()
+    db.refresh(tender)
+    return _serialize_tender(tender)
+
 
 @app.post("/api/tenders/{tender_id}/checklist")
 def add_checklist_item(tender_id: int, item: ChecklistItemBase, db: Session = Depends(get_db), user: User = Depends(get_current_user)):

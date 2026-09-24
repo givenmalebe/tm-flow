@@ -113,6 +113,9 @@ class ChecklistItem(Base):
     tender_id = Column(Integer, ForeignKey("tenders.id", ondelete="CASCADE"), nullable=False)
     name = Column(String(500), nullable=False)
     description = Column(Text, nullable=True)
+    category = Column(String(100), nullable=True)  # Compliance / Technical / Pricing / Forms / Personnel / Company / Methodology / References / Other
+    mandatory = Column(Boolean, default=True)
+    library_category = Column(String(100), nullable=True)  # matching library category for auto-linking
     status = Column(String(50), default="Outstanding")  # Complete / Outstanding / Expired / Not Applicable
     linked_library_doc_id = Column(Integer, ForeignKey("library_documents.id", ondelete="SET NULL"), nullable=True)
     notes = Column(Text, nullable=True)

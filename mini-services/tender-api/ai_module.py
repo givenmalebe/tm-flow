@@ -117,7 +117,87 @@ Respond with ONLY the JSON object as specified."""
         return {"_error": f"AI extraction failed: {str(e)}"}
 
 
-# ---- Tender summary ----
+# ---- AI-powered tender-specific checklist generation ----
+
+CHECKLIST_SYSTEM = """You are a South African tender compliance analyst.
+Given a tender document's extracted information, you must produce a COMPLETE submission checklist that is SPECIFIC to this tender.
+You MUST respond with ONLY a valid JSON array (no markdown, no code fences, no extra text).
+
+Each checklist item must follow this schema:
+{
+  "name": string (short name, e.g. "B-BBEE certificate", "PSIRA registration certificates", "Pricing schedule"),
+  "category": one of ["Compliance", "Technical", "Pricing", "Forms", "Personnel", "Company", "Methodology", "References", "Other"],
+  "description": string (1-2 sentences explaining WHAT this is and WHY it's required for this specific tender),
+  "mandatory": boolean (true if compulsory/mandatory, false if optional/recommended),
+  "library_category": string or null (the matching compliance library category if this document can be reused from the company library, else null). Must be one of: "CIPC", "SARS", "B-BBEE", "PSIRA", "COIDA", "Financial statements", "Company profile", "References", "Policies", "Certificates", "Insurance documents", "Organograms", "Standard declarations", "Standard methodologies", "Standard SOPs", "Other"
+}
+
+Rules:
+- Always include the standard compliance documents (Company profile, CIPC, SARS, B-BBEE, PSIRA, COIDA, Financial statements) — mark them mandatory if the tender requires compliance documents, optional otherwise.
+- Include ALL compulsory_documents mentioned in the extraction.
+- Include a "Pricing schedule" item (mandatory) for every tender.
+- Include a "Technical proposal" item if the tender has functionality requirements.
+- Include a "Methodology" item if scope_of_work is detailed.
+- Include a "Risk assessment" item for security/service tenders.
+- Include "SOPs" (Standard Operating Procedures) for service tenders.
+- Include "Organogram" if personnel/guards are required.
+- Include "POPIA documents" and "Signed declarations" for government tenders.
+- Include personnel-specific items (e.g. "Certified ID copies of all guards", "PSIRA certificates for all guards") if personnel are required.
+- Include any "Forms required by the client" mentioned in submission_requirements.
+- Include compulsory briefing attendance as a checklist item if a compulsory briefing is required.
+- For each item, set library_category to the matching library category so the system can auto-link existing company documents.
+- Be specific to THIS tender — don't add generic items that don't apply.
+- Aim for 15-30 items depending on the tender complexity."""
+
+
+def generate_tender_checklist(extracted: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Generate a tender-specific checklist using AI, based on the extracted tender info.
+    Returns a list of checklist items with name, category, description, mandatory, library_category.
+    """
+    if not extracted or extracted.get("_error"):
+        return []
+
+    prompt = f"""Based on the following tender extraction, generate a complete submission checklist specific to this tender.
+
+TENDER EXTRACTION (JSON):
+{json.dumps(extracted, indent=2, default=str)[:15000]}
+
+Return ONLY the JSON array as specified. Include every document and requirement needed to submit this tender."""
+
+    try:
+        result = _run_zai_chat(prompt, system=CHECKLIST_SYSTEM)
+        result = result.strip()
+        if result.startswith("```"):
+            result = result.split("\n", 1)[1] if "\n" in result else result[3:]
+            if result.endswith("```"):
+                result = result[:-3]
+            result = result.strip()
+        if result.startswith("json"):
+            result = result[4:].strip()
+        # Find first [ and last ]
+        first = result.find("[")
+        last = result.rfind("]")
+        if first >= 0 and last > first:
+            result = result[first:last + 1]
+        items = json.loads(result)
+        if not isinstance(items, list):
+            return []
+        # Validate each item
+        valid_items = []
+        for item in items:
+            if isinstance(item, dict) and item.get("name"):
+                valid_items.append({
+                    "name": str(item["name"])[:500],
+                    "category": str(item.get("category", "Other")),
+                    "description": str(item.get("description", ""))[:1000],
+                    "mandatory": bool(item.get("mandatory", True)),
+                    "library_category": item.get("library_category") if item.get("library_category") else None,
+                })
+        return valid_items
+    except (json.JSONDecodeError, RuntimeError, Exception):
+        # Fallback: return empty list — the caller will use default categories
+        return []
 
 SUMMARY_SYSTEM = """You are a professional tender analyst. Produce a concise tender summary in plain text using this exact format:
 

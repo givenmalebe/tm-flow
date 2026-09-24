@@ -1,0 +1,6 @@
+B-BBEE CERTIFICATE
+Company: Test Co
+B-BBEE Level: Level 2
+Certificate Number: BEE2025-001
+Issue Date: 2025-01-15
+Expiry Date: 2026-02-14

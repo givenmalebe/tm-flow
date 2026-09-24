@@ -183,6 +183,10 @@ export const api = {
     return request<any>(`/tenders/${tenderId}/checklist`, { method: "POST", body: item });
   },
 
+  async regenerateChecklist(tenderId: number) {
+    return request<any>(`/tenders/${tenderId}/checklist/regenerate`, { method: "POST" });
+  },
+
   async updateChecklistItem(itemId: number, payload: any) {
     return request<any>(`/checklist/${itemId}`, { method: "PUT", body: payload });
   },

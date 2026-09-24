@@ -347,10 +347,11 @@ def discover_tenders(
     num_results: int = 15,
 ) -> Dict[str, Any]:
     """
-    Search the web for open tenders matching the given criteria.
-    Returns a dict with 'query', 'results' (list of structured tenders), and 'raw_count'.
+    Find real open tenders matching the given criteria.
+    Uses Python scrapers to directly fetch real tender listings from SA portals,
+    then falls back to AI web search for broader coverage.
+    Returns a dict with 'query', 'results', 'sources', 'raw_count'.
     """
-    # Build an optimized search query
     parts = []
     if category:
         parts.append(category)
@@ -362,20 +363,29 @@ def discover_tenders(
         parts.append(location)
     query = " ".join(parts)
 
-    # Do the web search
-    raw_results = _run_zai_web_search(query, num=num_results)
+    # --- Step 1: Python scrapers (direct fetch from real tender portals) ---
+    scraped_results: List[Dict[str, Any]] = []
+    sources_used: List[str] = []
+    scrape_errors: List[str] = []
 
-    if not raw_results:
-        return {
-            "query": query,
-            "results": [],
-            "raw_count": 0,
-            "error": "No search results returned. Please try different keywords.",
-        }
+    try:
+        from scraper import scrape_all
+        scrape_data = scrape_all(category, keywords, location, limit=num_results)
+        scraped_results = scrape_data.get("results", [])
+        sources_used = scrape_data.get("sources", [])
+        scrape_errors = scrape_data.get("errors", [])
+    except Exception as e:
+        scrape_errors.append(f"scraper module: {str(e)[:100]}")
 
-    # Use AI to structure the raw results into clean tender entries
-    raw_text = json.dumps(raw_results, indent=2, default=str)[:20000]
-    prompt = f"""Analyze these web search results and extract ONLY actual tender opportunities.
+    # --- Step 2: AI web search for additional coverage ---
+    web_search_results: List[Dict[str, Any]] = []
+    if len(scraped_results) < num_results:
+        try:
+            raw_results = _run_zai_web_search(query, num=num_results)
+            if raw_results:
+                # Use AI to structure the raw web search results
+                raw_text = json.dumps(raw_results, indent=2, default=str)[:20000]
+                prompt = f"""Analyze these web search results and extract ONLY actual tender opportunities.
 If a result is a news article, blog post, or generic page (not an actual tender listing), EXCLUDE it.
 
 The user is looking for: {category} {keywords} in {location}
@@ -384,47 +394,55 @@ RAW SEARCH RESULTS (JSON):
 {raw_text}
 
 Return ONLY the JSON array as specified. Exclude non-tender results."""
-    try:
-        response = _run_zai_chat(prompt, system=DISCOVER_SYSTEM)
-        # Parse the JSON array from the response
-        response = response.strip()
-        if response.startswith("```"):
-            response = response.split("\n", 1)[1] if "\n" in response else response[3:]
-            if response.endswith("```"):
-                response = response[:-3]
-            response = response.strip()
-        if response.startswith("json"):
-            response = response[4:].strip()
-        # Find first [ and last ]
-        first = response.find("[")
-        last = response.rfind("]")
-        if first >= 0 and last > first:
-            response = response[first:last + 1]
-        structured = json.loads(response)
-        if not isinstance(structured, list):
-            structured = []
-    except (json.JSONDecodeError, RuntimeError) as e:
-        # Fallback: return raw results in a simpler format
-        structured = [
-            {
-                "title": r.get("name", ""),
-                "client": "Unknown",
-                "category": category,
-                "location": location,
-                "closing_date": None,
-                "description": r.get("snippet", ""),
-                "source_site": r.get("host_name", ""),
-                "url": r.get("url", ""),
-                "reference_number": None,
-                "estimated_value": None,
-                "relevance": "medium",
-            }
-            for r in raw_results
-        ]
+                try:
+                    response = _run_zai_chat(prompt, system=DISCOVER_SYSTEM)
+                    response = response.strip()
+                    if response.startswith("```"):
+                        response = response.split("\n", 1)[1] if "\n" in response else response[3:]
+                        if response.endswith("```"):
+                            response = response[:-3]
+                        response = response.strip()
+                    if response.startswith("json"):
+                        response = response[4:].strip()
+                    first = response.find("[")
+                    last = response.rfind("]")
+                    if first >= 0 and last > first:
+                        response = response[first:last + 1]
+                    structured = json.loads(response)
+                    if isinstance(structured, list):
+                        web_search_results = structured
+                        if web_search_results:
+                            sources_used.append(f"AI web search ({len(web_search_results)} tenders)")
+                except (json.JSONDecodeError, RuntimeError):
+                    pass
+        except Exception:
+            pass
+
+    # --- Merge & deduplicate ---
+    all_results = scraped_results + web_search_results
+    seen_urls = set()
+    seen_titles = set()
+    deduped = []
+    for r in all_results:
+        url = r.get("url", "")
+        title = r.get("title", "").lower().strip()[:80]
+        if url in seen_urls or title in seen_titles:
+            continue
+        seen_urls.add(url)
+        seen_titles.add(title)
+        deduped.append(r)
+
+    # Sort by relevance then closing date
+    rel_order = {"high": 0, "medium": 1, "low": 2}
+    deduped.sort(key=lambda r: (rel_order.get(r.get("relevance", "medium"), 1), r.get("closing_date") or "9999"))
 
     return {
         "query": query,
-        "results": structured,
-        "raw_count": len(raw_results),
+        "results": deduped[:num_results],
+        "sources": sources_used,
+        "errors": scrape_errors,
+        "raw_count": len(deduped),
+        "scraped_count": len(scraped_results),
+        "web_search_count": len(web_search_results),
     }
 

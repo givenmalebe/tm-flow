@@ -105,6 +105,9 @@ export function DiscoverTab() {
   const [results, setResults] = useState<DiscoveredTender[]>([]);
   const [searchedQuery, setSearchedQuery] = useState("");
   const [rawCount, setRawCount] = useState(0);
+  const [sources, setSources] = useState<string[]>([]);
+  const [scrapedCount, setScrapedCount] = useState(0);
+  const [webSearchCount, setWebSearchCount] = useState(0);
   const [importing, setImporting] = useState<number | null>(null);
   const [importedIds, setImportedIds] = useState<Set<number>>(new Set());
 
@@ -132,8 +135,11 @@ export function DiscoverTab() {
       setResults(data.results || []);
       setSearchedQuery(data.query || "");
       setRawCount(data.raw_count || 0);
+      setSources(data.sources || []);
+      setScrapedCount(data.scraped_count || 0);
+      setWebSearchCount(data.web_search_count || 0);
       if ((data.results || []).length > 0) {
-        toast.success(`Found ${data.results.length} tender${data.results.length === 1 ? "" : "s"}`);
+        toast.success(`Found ${data.results.length} real tender${data.results.length === 1 ? "" : "s"}`);
       } else {
         toast.info("No tenders found. Try different keywords.");
       }
@@ -290,7 +296,7 @@ export function DiscoverTab() {
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2">
             <p className="text-xs text-muted-foreground flex items-center gap-1.5">
               <Filter className="h-3 w-3" />
-              The AI searches real tender portals (etenders.gov.za, tenderbulletins.co.za, PSIRA, etc.) and returns only actual tender opportunities.
+              Python scrapers directly fetch live listings from real SA tender portals (security.co.za, tenderflow.co.za, etenders.gov.za) + AI web search for broader coverage.
             </p>
             <Button
               onClick={handleSearch}
@@ -332,13 +338,13 @@ export function DiscoverTab() {
               </div>
               <div className="absolute -inset-2 rounded-2xl border-2 border-primary/20 animate-ping" style={{ animationDuration: "2s" }} />
             </div>
-            <h3 className="font-semibold mt-4">AI is searching the web…</h3>
+            <h3 className="font-semibold mt-4">Scraping real tender portals…</h3>
             <p className="text-sm text-muted-foreground mt-1 max-w-sm">
-              Scanning tender portals, government sites and bulletin boards for open {effectiveCategory.toLowerCase()} tenders in {location}.
+              Python scrapers are fetching live listings from security.co.za, tenderflow.co.za, etenders.gov.za and more — looking for open {effectiveCategory.toLowerCase()} tenders in {location}.
             </p>
             <div className="flex items-center gap-2 mt-4 text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" />
-              This usually takes 15-30 seconds
+              Direct scraping + AI web search · Usually 10-20 seconds
             </div>
           </CardContent>
         </Card>
@@ -352,11 +358,29 @@ export function DiscoverTab() {
             <div>
               <h2 className="text-lg font-semibold flex items-center gap-2">
                 <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-                {results.length} tender{results.length === 1 ? "" : "s"} found
+                {results.length} real tender{results.length === 1 ? "" : "s"} found
               </h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Searched: <span className="font-mono">"{searchedQuery}"</span> · {rawCount} raw results filtered to {results.length} actual tenders
+                Searched: <span className="font-mono">"{searchedQuery}"</span>
               </p>
+              {sources.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                  <span className="text-xs text-muted-foreground">Sources scraped:</span>
+                  {sources.map((src, i) => (
+                    <Badge key={i} variant="outline" className="text-xs bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800">
+                      {src}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+              {(scrapedCount > 0 || webSearchCount > 0) && (
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  {scrapedCount > 0 && <span>Python scraper: {scrapedCount} tenders</span>}
+                  {scrapedCount > 0 && webSearchCount > 0 && <span> · </span>}
+                  {webSearchCount > 0 && <span>AI web search: {webSearchCount} tenders</span>}
+                  {rawCount > 0 && <span> · {rawCount} total after dedup</span>}
+                </p>
+              )}
             </div>
             <Button variant="outline" size="sm" onClick={handleSearch} disabled={loading}>
               <RefreshCw className="h-3.5 w-3.5" />

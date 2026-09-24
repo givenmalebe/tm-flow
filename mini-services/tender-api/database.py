@@ -184,7 +184,8 @@ class Submission(Base):
     submission_method = Column(String(255), nullable=True)
     submitted_by = Column(String(255), nullable=True)
     confirmation_reference = Column(String(255), nullable=True)
-    final_documents_path = Column(String(1000), nullable=True)
+    confirmation_file_path = Column(String(1000), nullable=True)  # submission confirmation/receipt file
+    final_documents_path = Column(String(1000), nullable=True)  # final submitted documents (PDF bundle)
     final_pricing = Column(Float, nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

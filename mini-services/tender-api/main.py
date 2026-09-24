@@ -414,6 +414,10 @@ def _serialize_tender(t: Tender) -> dict:
                 "submission_method": t.submission.submission_method,
                 "submitted_by": t.submission.submitted_by,
                 "confirmation_reference": t.submission.confirmation_reference,
+                "confirmation_file_path": t.submission.confirmation_file_path,
+                "confirmation_file_url": f"/uploads/{t.submission.confirmation_file_path}?XTransformPort=8000" if t.submission.confirmation_file_path else None,
+                "final_documents_path": t.submission.final_documents_path,
+                "final_documents_url": f"/uploads/{t.submission.final_documents_path}?XTransformPort=8000" if t.submission.final_documents_path else None,
                 "final_pricing": t.submission.final_pricing,
                 "notes": t.submission.notes,
             } if t.submission else None
@@ -1584,6 +1588,96 @@ def create_or_update_submission(tender_id: int, payload: SubmissionCreate, db: S
     db.commit()
     db.refresh(sub)
     return {"id": sub.id, "tender_id": sub.tender_id}
+
+
+@app.post("/api/tenders/{tender_id}/submission/confirmation-file")
+async def upload_submission_confirmation(
+    tender_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Upload the submission confirmation/receipt file."""
+    if not db.query(Tender).filter(Tender.id == tender_id).first():
+        raise HTTPException(status_code=404, detail="Tender not found")
+    sub = db.query(Submission).filter(Submission.tender_id == tender_id).first()
+    if not sub:
+        sub = Submission(tender_id=tender_id)
+        db.add(sub)
+        db.commit()
+        db.refresh(sub)
+    rel_path = _save_upload(file, subdir=f"submissions/{tender_id}")
+    sub.confirmation_file_path = rel_path
+    db.commit()
+    db.refresh(sub)
+    return {
+        "id": sub.id,
+        "confirmation_file_path": rel_path,
+        "confirmation_file_url": f"/uploads/{rel_path}?XTransformPort=8000",
+    }
+
+
+@app.delete("/api/tenders/{tender_id}/submission/confirmation-file")
+def delete_submission_confirmation(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Remove the submission confirmation file."""
+    sub = db.query(Submission).filter(Submission.tender_id == tender_id).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    if sub.confirmation_file_path:
+        full_path = os.path.join(UPLOAD_DIR, sub.confirmation_file_path)
+        if os.path.exists(full_path):
+            try:
+                os.unlink(full_path)
+            except OSError:
+                pass
+        sub.confirmation_file_path = None
+    db.commit()
+    return {"deleted": True}
+
+
+@app.post("/api/tenders/{tender_id}/submission/final-documents")
+async def upload_final_documents(
+    tender_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Upload the final submitted documents bundle."""
+    if not db.query(Tender).filter(Tender.id == tender_id).first():
+        raise HTTPException(status_code=404, detail="Tender not found")
+    sub = db.query(Submission).filter(Submission.tender_id == tender_id).first()
+    if not sub:
+        sub = Submission(tender_id=tender_id)
+        db.add(sub)
+        db.commit()
+        db.refresh(sub)
+    rel_path = _save_upload(file, subdir=f"submissions/{tender_id}")
+    sub.final_documents_path = rel_path
+    db.commit()
+    db.refresh(sub)
+    return {
+        "id": sub.id,
+        "final_documents_path": rel_path,
+        "final_documents_url": f"/uploads/{rel_path}?XTransformPort=8000",
+    }
+
+
+@app.delete("/api/tenders/{tender_id}/submission/final-documents")
+def delete_final_documents(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Remove the final documents file."""
+    sub = db.query(Submission).filter(Submission.tender_id == tender_id).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    if sub.final_documents_path:
+        full_path = os.path.join(UPLOAD_DIR, sub.final_documents_path)
+        if os.path.exists(full_path):
+            try:
+                os.unlink(full_path)
+            except OSError:
+                pass
+        sub.final_documents_path = None
+    db.commit()
+    return {"deleted": True}
 
 
 # ---------------------- Communication Routes ----------------------

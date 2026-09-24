@@ -290,6 +290,38 @@ export const api = {
     return request<any>(`/tenders/${tenderId}/submission`, { method: "POST", body: payload });
   },
 
+  async uploadSubmissionConfirmation(tenderId: number, file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    return request<any>(`/tenders/${tenderId}/submission/confirmation-file`, {
+      method: "POST",
+      body: form,
+      isForm: true,
+    });
+  },
+
+  async deleteSubmissionConfirmation(tenderId: number) {
+    return request<{ deleted: boolean }>(`/tenders/${tenderId}/submission/confirmation-file`, {
+      method: "DELETE",
+    });
+  },
+
+  async uploadFinalDocuments(tenderId: number, file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    return request<any>(`/tenders/${tenderId}/submission/final-documents`, {
+      method: "POST",
+      body: form,
+      isForm: true,
+    });
+  },
+
+  async deleteFinalDocuments(tenderId: number) {
+    return request<{ deleted: boolean }>(`/tenders/${tenderId}/submission/final-documents`, {
+      method: "DELETE",
+    });
+  },
+
   // ---- Communications ----
   async createCommunication(tenderId: number, payload: any) {
     return request<any>(`/tenders/${tenderId}/communications`, {

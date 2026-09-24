@@ -1534,6 +1534,10 @@ function SubmissionSection({ tender, onChanged }: { tender: any; onChanged: () =
   const [outcome, setOutcome] = useState(tender.outcome || "Pending");
   const [reason, setReason] = useState(tender.unsuccessful_reason || "");
   const [savingOutcome, setSavingOutcome] = useState(false);
+  const [uploadingConfirmation, setUploadingConfirmation] = useState(false);
+  const [uploadingDocuments, setUploadingDocuments] = useState(false);
+  const confirmationInputRef = useRef<HTMLInputElement>(null);
+  const documentsInputRef = useRef<HTMLInputElement>(null);
 
   const handleSave = async () => {
     setSaving(true);
@@ -1573,10 +1577,68 @@ function SubmissionSection({ tender, onChanged }: { tender: any; onChanged: () =
     }
   };
 
+  const handleUploadConfirmation = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingConfirmation(true);
+    try {
+      await api.uploadSubmissionConfirmation(tender.id, file);
+      toast.success("Submission confirmation uploaded");
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Upload failed");
+    } finally {
+      setUploadingConfirmation(false);
+      if (confirmationInputRef.current) confirmationInputRef.current.value = "";
+    }
+  };
+
+  const handleDeleteConfirmation = async () => {
+    try {
+      await api.deleteSubmissionConfirmation(tender.id);
+      toast.success("Confirmation file removed");
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Failed");
+    }
+  };
+
+  const handleUploadDocuments = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingDocuments(true);
+    try {
+      await api.uploadFinalDocuments(tender.id, file);
+      toast.success("Final documents uploaded");
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Upload failed");
+    } finally {
+      setUploadingDocuments(false);
+      if (documentsInputRef.current) documentsInputRef.current.value = "";
+    }
+  };
+
+  const handleDeleteDocuments = async () => {
+    try {
+      await api.deleteFinalDocuments(tender.id);
+      toast.success("Final documents removed");
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Failed");
+    }
+  };
+
   return (
     <div className="space-y-4">
+      {/* Submission details */}
       <Card>
-        <CardHeader><CardTitle className="text-base">Submission details</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Send className="h-4 w-4 text-primary" />
+            Submission Details
+          </CardTitle>
+        </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field2 label="Submission date">
@@ -1596,17 +1658,17 @@ function SubmissionSection({ tender, onChanged }: { tender: any; onChanged: () =
               </Select>
             </Field2>
             <Field2 label="Submitted by">
-              <Input value={form.submitted_by} onChange={(e) => setForm({ ...form, submitted_by: e.target.value })} />
+              <Input value={form.submitted_by} onChange={(e) => setForm({ ...form, submitted_by: e.target.value })} placeholder="Who submitted the tender" />
             </Field2>
-            <Field2 label="Confirmation reference">
-              <Input value={form.confirmation_reference} onChange={(e) => setForm({ ...form, confirmation_reference: e.target.value })} placeholder="e.g. Bid submission ref" />
+            <Field2 label="Submission/reference number">
+              <Input value={form.confirmation_reference} onChange={(e) => setForm({ ...form, confirmation_reference: e.target.value })} placeholder="e.g. Bid submission ref / RFQ-2025-001" />
             </Field2>
             <Field2 label="Final pricing (ZAR)">
-              <Input type="number" value={form.final_pricing} onChange={(e) => setForm({ ...form, final_pricing: e.target.value })} />
+              <Input type="number" value={form.final_pricing} onChange={(e) => setForm({ ...form, final_pricing: e.target.value })} placeholder="Total tender price submitted" />
             </Field2>
           </div>
           <Field2 label="Notes">
-            <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} />
+            <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} placeholder="Any notes about the submission..." />
           </Field2>
           <Button onClick={handleSave} disabled={saving}>
             <Save className="h-3.5 w-3.5" />
@@ -1615,6 +1677,87 @@ function SubmissionSection({ tender, onChanged }: { tender: any; onChanged: () =
         </CardContent>
       </Card>
 
+      {/* Submission confirmation file */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <FileCheck className="h-4 w-4 text-primary" />
+            Submission Confirmation
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Upload the submission confirmation/receipt you received when submitting the tender (email confirmation, portal receipt, courier proof, etc.)
+          </p>
+          <input ref={confirmationInputRef} type="file" accept=".pdf,.doc,.docx,.jpg,.png,.txt" onChange={handleUploadConfirmation} className="hidden" />
+          {sub?.confirmation_file_url ? (
+            <div className="flex items-center gap-2 rounded-lg border p-3 bg-emerald-50/50 dark:bg-emerald-950/20">
+              <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium">Confirmation uploaded</div>
+                <a href={sub.confirmation_file_url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline flex items-center gap-1">
+                  <Download className="h-3 w-3" />
+                  View / Download
+                </a>
+              </div>
+              <Button size="sm" variant="outline" onClick={() => confirmationInputRef.current?.click()} disabled={uploadingConfirmation}>
+                {uploadingConfirmation ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                Replace
+              </Button>
+              <Button size="sm" variant="ghost" className="text-rose-600" onClick={handleDeleteConfirmation}>
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ) : (
+            <Button variant="outline" onClick={() => confirmationInputRef.current?.click()} disabled={uploadingConfirmation} className="w-full border-dashed">
+              {uploadingConfirmation ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              {uploadingConfirmation ? "Uploading…" : "Upload Submission Confirmation"}
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Final submitted documents */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <FileStack className="h-4 w-4 text-primary" />
+            Final Submitted Documents
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Upload the final submitted tender documents (the complete PDF bundle that was submitted to the client)
+          </p>
+          <input ref={documentsInputRef} type="file" accept=".pdf,.doc,.docx,.zip" onChange={handleUploadDocuments} className="hidden" />
+          {sub?.final_documents_url ? (
+            <div className="flex items-center gap-2 rounded-lg border p-3 bg-emerald-50/50 dark:bg-emerald-950/20">
+              <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium">Final documents uploaded</div>
+                <a href={sub.final_documents_url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline flex items-center gap-1">
+                  <Download className="h-3 w-3" />
+                  View / Download
+                </a>
+              </div>
+              <Button size="sm" variant="outline" onClick={() => documentsInputRef.current?.click()} disabled={uploadingDocuments}>
+                {uploadingDocuments ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                Replace
+              </Button>
+              <Button size="sm" variant="ghost" className="text-rose-600" onClick={handleDeleteDocuments}>
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ) : (
+            <Button variant="outline" onClick={() => documentsInputRef.current?.click()} disabled={uploadingDocuments} className="w-full border-dashed">
+              {uploadingDocuments ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              {uploadingDocuments ? "Uploading…" : "Upload Final Documents"}
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Tender outcome */}
       <Card>
         <CardHeader><CardTitle className="text-base">Tender outcome</CardTitle></CardHeader>
         <CardContent className="space-y-3">

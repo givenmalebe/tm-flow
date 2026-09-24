@@ -896,3 +896,52 @@ Stage Summary:
 - Multiple pricing revisions saved as version history (sorted latest first)
 - AI pricing sheet generator creates realistic drafts based on tender requirements
 - Copy version feature for creating revisions from existing versions
+
+---
+Task ID: 31
+Agent: Main Orchestrator
+Task: Build Submission Tracking — all 9 fields with file uploads for confirmation and final documents
+
+Work Log:
+- Added confirmation_file_path column to Submission model in database.py (for submission confirmation/receipt file)
+- Updated _serialize_tender to include confirmation_file_path, confirmation_file_url, final_documents_path, final_documents_url
+- Added 4 new backend endpoints:
+  * POST /api/tenders/{id}/submission/confirmation-file — upload submission confirmation/receipt
+  * DELETE /api/tenders/{id}/submission/confirmation-file — remove confirmation file
+  * POST /api/tenders/{id}/submission/final-documents — upload final submitted documents bundle
+  * DELETE /api/tenders/{id}/submission/final-documents — remove final documents
+- Added frontend API methods: uploadSubmissionConfirmation, deleteSubmissionConfirmation, uploadFinalDocuments, deleteFinalDocuments
+- Completely rewrote SubmissionSection in tender-detail.tsx with 4 cards:
+  1. Submission Details: date, time, method (dropdown), submitted by, reference number, final pricing (ZAR), notes
+  2. Submission Confirmation: upload confirmation/receipt file (PDF/DOC/JPG/PNG), view/download link, replace, delete
+  3. Final Submitted Documents: upload final document bundle (PDF/DOC/ZIP), view/download link, replace, delete
+  4. Tender Outcome: outcome selector (Pending/Awarded/Unsuccessful/Withdrawn), unsuccessful reason, update button
+- When a submission is saved, the tender status auto-updates to "Submitted"
+- File uploads show emerald "uploaded" state with View/Download link, Replace button, and Delete button
+- Verified with API test:
+  * Created tender, saved submission with all fields (date, time, method, submitted by, reference, pricing, notes)
+  * Uploaded confirmation file → returned file path and URL
+  * Uploaded final documents file → returned file path and URL
+  * Verified all 9 fields present in tender response
+  * Tender status auto-updated to "Submitted"
+- Verified with Agent Browser:
+  * Opened tender detail → Submission tab
+  * All 9 fields showing with correct values (date: 2026-09-24, time: 10:30, method: Email, submitted by: John Smith, ref: RFQ-2025-001, pricing: 772800, notes: "Submitted via email...")
+  * Submission Confirmation card showing "Confirmation uploaded" with View/Download link and Replace button
+  * Final Submitted Documents card showing "Final documents uploaded" with View/Download link
+  * No errors, lint clean
+
+Stage Summary:
+- Submission Tracking fully operational with all 9 required fields:
+  1. Submission date ✓
+  2. Submission time ✓
+  3. Submission method (Email/Online Portal/Physical Delivery/Courier/E-procurement/Other) ✓
+  4. Submitted by ✓
+  5. Submission confirmation (file upload — receipt/confirmation document) ✓
+  6. Submission/reference number ✓
+  7. Final submitted documents (file upload — the complete submitted bundle) ✓
+  8. Final pricing (ZAR) ✓
+  9. Notes ✓
+- Plus tender outcome tracking (Pending/Awarded/Unsuccessful/Withdrawn with reason)
+- Auto-updates tender status to "Submitted" when submission is saved
+- File uploads for both confirmation receipts and final documents with view/download/replace/delete

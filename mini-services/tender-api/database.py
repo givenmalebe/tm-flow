@@ -196,13 +196,16 @@ class Communication(Base):
     __tablename__ = "communications"
     id = Column(Integer, primary_key=True, index=True)
     tender_id = Column(Integer, ForeignKey("tenders.id", ondelete="CASCADE"), nullable=False)
-    comm_type = Column(String(100), nullable=False)  # Email / Clarification Request / Clarification Response / Meeting / Addendum / Extension / Other
+    comm_type = Column(String(100), nullable=False)  # Email / Clarification Request / Clarification Response / Meeting Invitation / Meeting Notes / Addendum / Extension / Tender Validity Extension / Pricing Clarification / Client Correspondence / Other
     subject = Column(String(500), nullable=True)
     body = Column(Text, nullable=True)
     comm_date = Column(DateTime, nullable=True)
+    meeting_date = Column(DateTime, nullable=True)  # for meeting invitations/notes
+    meeting_location = Column(String(500), nullable=True)  # for meetings
     from_party = Column(String(255), nullable=True)
     to_party = Column(String(255), nullable=True)
     attachment_path = Column(String(1000), nullable=True)
+    attachment_original_filename = Column(String(500), nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     tender = relationship("Tender", back_populates="communications")

@@ -1,0 +1,1017 @@
+     1→"use client";
+     2→
+     3→import { useCallback, useEffect, useMemo, useState } from "react";
+     4→import {
+     5→  MessageSquare,
+     6→  Mail,
+     7→  HelpCircle,
+     8→  Reply,
+     9→  Users,
+    10→  FileDiff,
+    11→  Clock,
+    12→  Tag,
+    13→  FileText,
+    14→  Send,
+    15→  Building2,
+    16→  RefreshCw,
+    17→  Plus,
+    18→  Search,
+    19→  Trash2,
+    20→  AlertTriangle,
+    21→  Loader2,
+    22→  ChevronDown,
+    23→  ChevronRight,
+    24→  StickyNote,
+    25→  type LucideIcon,
+    26→} from "lucide-react";
+    27→import { toast } from "sonner";
+    28→import {
+    29→  Card,
+    30→  CardContent,
+    31→  CardDescription,
+    32→  CardHeader,
+    33→  CardTitle,
+    34→} from "@/components/ui/card";
+    35→import { Button } from "@/components/ui/button";
+    36→import { Input } from "@/components/ui/input";
+    37→import { Label } from "@/components/ui/label";
+    38→import { Textarea } from "@/components/ui/textarea";
+    39→import { Badge } from "@/components/ui/badge";
+    40→import { Skeleton } from "@/components/ui/skeleton";
+    41→import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+    42→import { Separator } from "@/components/ui/separator";
+    43→import {
+    44→  Select,
+    45→  SelectContent,
+    46→  SelectItem,
+    47→  SelectTrigger,
+    48→  SelectValue,
+    49→} from "@/components/ui/select";
+    50→import {
+    51→  Dialog,
+    52→  DialogContent,
+    53→  DialogDescription,
+    54→  DialogFooter,
+    55→  DialogHeader,
+    56→  DialogTitle,
+    57→} from "@/components/ui/dialog";
+    58→import {
+    59→  AlertDialog,
+    60→  AlertDialogAction,
+    61→  AlertDialogCancel,
+    62→  AlertDialogContent,
+    63→  AlertDialogDescription,
+    64→  AlertDialogFooter,
+    65→  AlertDialogHeader,
+    66→  AlertDialogTitle,
+    67→} from "@/components/ui/alert-dialog";
+    68→import { api } from "@/lib/api";
+    69→import {
+    70→  useDashboardStore,
+    71→  formatDateTime,
+    72→} from "@/lib/dashboard-store";
+    73→import { cn } from "@/lib/utils";
+    74→
+    75→// ---- Types ----
+    76→interface TenderOption {
+    77→  id: number;
+    78→  reference_number: string;
+    79→  title: string;
+    80→  client_company: string | null;
+    81→  status: string;
+    82→}
+    83→
+    84→interface CommunicationRaw {
+    85→  id: number;
+    86→  comm_type: string;
+    87→  subject: string | null;
+    88→  body: string | null;
+    89→  comm_date: string | null;
+    90→  from_party: string | null;
+    91→  to_party: string | null;
+    92→  notes: string | null;
+    93→}
+    94→
+    95→interface FlattenedCommunication extends CommunicationRaw {
+    96→  tender_id: number;
+    97→  tender_reference: string;
+    98→  tender_title: string;
+    99→}
+   100→
+   101→interface CommForm {
+   102→  tender_id: string;
+   103→  comm_type: string;
+   104→  subject: string;
+   105→  body: string;
+   106→  comm_date: string;
+   107→  from_party: string;
+   108→  to_party: string;
+   109→  notes: string;
+   110→}
+   111→
+   112→const EMPTY_FORM: CommForm = {
+   113→  tender_id: "",
+   114→  comm_type: "Email",
+   115→  subject: "",
+   116→  body: "",
+   117→  comm_date: "",
+   118→  from_party: "",
+   119→  to_party: "",
+   120→  notes: "",
+   121→};
+   122→
+   123→const COMM_TYPES = [
+   124→  "Email",
+   125→  "Clarification Request",
+   126→  "Clarification Response",
+   127→  "Meeting",
+   128→  "Addendum",
+   129→  "Extension",
+   130→  "Tender Validity Extension",
+   131→  "Pricing Clarification",
+   132→  "Client Correspondence",
+   133→  "Other",
+   134→] as const;
+   135→
+   136→// ---- Helpers ----
+   137→function commTypeBadgeClass(type: string): string {
+   138→  switch (type) {
+   139→    case "Email":
+   140→      return "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900";
+   141→    case "Clarification Request":
+   142→      return "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border-amber-200 dark:border-amber-900";
+   143→    case "Clarification Response":
+   144→      return "bg-teal-100 text-teal-700 dark:bg-teal-950 dark:text-teal-300 border-teal-200 dark:border-teal-900";
+   145→    case "Meeting":
+   146→      return "bg-cyan-100 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300 border-cyan-200 dark:border-cyan-900";
+   147→    case "Addendum":
+   148→      return "bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300 border-violet-200 dark:border-violet-900";
+   149→    case "Extension":
+   150→    case "Tender Validity Extension":
+   151→      return "bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300 border-orange-200 dark:border-orange-900";
+   152→    case "Pricing Clarification":
+   153→      return "bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-950 dark:text-fuchsia-300 border-fuchsia-200 dark:border-fuchsia-900";
+   154→    case "Client Correspondence":
+   155→      return "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900";
+   156→    default:
+   157→      return "bg-muted text-muted-foreground border-border";
+   158→  }
+   159→}
+   160→
+   161→function commTypeIconClass(type: string): string {
+   162→  switch (type) {
+   163→    case "Email":
+   164→      return "bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400";
+   165→    case "Clarification Request":
+   166→      return "bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400";
+   167→    case "Clarification Response":
+   168→      return "bg-teal-100 text-teal-600 dark:bg-teal-950 dark:text-teal-400";
+   169→    case "Meeting":
+   170→      return "bg-cyan-100 text-cyan-600 dark:bg-cyan-950 dark:text-cyan-400";
+   171→    case "Addendum":
+   172→      return "bg-violet-100 text-violet-600 dark:bg-violet-950 dark:text-violet-400";
+   173→    case "Extension":
+   174→    case "Tender Validity Extension":
+   175→      return "bg-orange-100 text-orange-600 dark:bg-orange-950 dark:text-orange-400";
+   176→    case "Pricing Clarification":
+   177→      return "bg-fuchsia-100 text-fuchsia-600 dark:bg-fuchsia-950 dark:text-fuchsia-400";
+   178→    case "Client Correspondence":
+   179→      return "bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400";
+   180→    default:
+   181→      return "bg-muted text-muted-foreground";
+   182→  }
+   183→}
+   184→
+   185→function toDatetimeLocalValue(iso: string | null): string {
+   186→  if (!iso) return "";
+   187→  try {
+   188→    const d = new Date(iso);
+   189→    if (isNaN(d.getTime())) return "";
+   190→    const pad = (n: number) => String(n).padStart(2, "0");
+   191→    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+   192→      d.getHours()
+   193→    )}:${pad(d.getMinutes())}`;
+   194→  } catch {
+   195→    return "";
+   196→  }
+   197→}
+   198→
+   199→// ---- Communication type icon render (declared outside main component
+   200→// to satisfy react-hooks/static-components) ----
+   201→function CommTypeIconRender({
+   202→  type,
+   203→  className,
+   204→}: {
+   205→  type: string;
+   206→  className?: string;
+   207→}) {
+   208→  switch (type) {
+   209→    case "Email":
+   210→      return <Mail className={className} />;
+   211→    case "Clarification Request":
+   212→      return <HelpCircle className={className} />;
+   213→    case "Clarification Response":
+   214→      return <Reply className={className} />;
+   215→    case "Meeting":
+   216→      return <Users className={className} />;
+   217→    case "Addendum":
+   218→      return <FileDiff className={className} />;
+   219→    case "Extension":
+   220→    case "Tender Validity Extension":
+   221→      return <Clock className={className} />;
+   222→    case "Pricing Clarification":
+   223→      return <Tag className={className} />;
+   224→    case "Client Correspondence":
+   225→      return <Send className={className} />;
+   226→    default:
+   227→      return <FileText className={className} />;
+   228→  }
+   229→}
+   230→
+   231→// ---- Stat card ----
+   232→interface StatCardProps {
+   233→  icon: LucideIcon;
+   234→  iconClass: string;
+   235→  value: number;
+   236→  label: string;
+   237→  sublabel: string;
+   238→}
+   239→
+   240→function StatCard({ icon: Icon, iconClass, value, label, sublabel }: StatCardProps) {
+   241→  return (
+   242→    <Card className="transition-shadow hover:shadow-md">
+   243→      <CardContent className="flex items-start justify-between gap-3">
+   244→        <div className="min-w-0">
+   245→          <div className="text-3xl font-bold tracking-tight tabular-nums text-foreground">
+   246→            {value}
+   247→          </div>
+   248→          <div className="mt-1 text-sm font-medium text-foreground">{label}</div>
+   249→          <div className="text-xs text-muted-foreground mt-0.5">{sublabel}</div>
+   250→        </div>
+   251→        <div
+   252→          className={cn(
+   253→            "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl",
+   254→            iconClass
+   255→          )}
+   256→        >
+   257→          <Icon className="h-5 w-5" />
+   258→        </div>
+   259→      </CardContent>
+   260→    </Card>
+   261→  );
+   262→}
+   263→
+   264→function StatSkeleton() {
+   265→  return (
+   266→    <Card>
+   267→      <CardContent className="flex items-start justify-between gap-3">
+   268→        <div className="flex-1 space-y-2">
+   269→          <Skeleton className="h-8 w-16" />
+   270→          <Skeleton className="h-4 w-24" />
+   271→          <Skeleton className="h-3 w-20" />
+   272→        </div>
+   273→        <Skeleton className="h-11 w-11 rounded-xl" />
+   274→      </CardContent>
+   275→    </Card>
+   276→  );
+   277→}
+   278→
+   279→// ---- Empty state ----
+   280→function EmptyState({
+   281→  icon: Icon,
+   282→  title,
+   283→  message,
+   284→  iconClass,
+   285→  action,
+   286→}: {
+   287→  icon: LucideIcon;
+   288→  title: string;
+   289→  message: string;
+   290→  iconClass?: string;
+   291→  action?: React.ReactNode;
+   292→}) {
+   293→  return (
+   294→    <div className="flex flex-col items-center justify-center gap-3 py-14 text-center">
+   295→      <div
+   296→        className={cn(
+   297→          "flex h-14 w-14 items-center justify-center rounded-2xl",
+   298→          iconClass || "bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+   299→        )}
+   300→      >
+   301→        <Icon className="h-7 w-7" />
+   302→      </div>
+   303→      <div className="space-y-1">
+   304→        <p className="text-base font-semibold text-foreground">{title}</p>
+   305→        <p className="text-sm text-muted-foreground max-w-sm">{message}</p>
+   306→      </div>
+   307→      {action}
+   308→    </div>
+   309→  );
+   310→}
+   311→
+   312→// ---- Communication timeline card ----
+   313→interface CommunicationCardProps {
+   314→  comm: FlattenedCommunication;
+   315→  isLast: boolean;
+   316→  onDelete: (id: number) => void;
+   317→  onOpenTender: (id: number) => void;
+   318→}
+   319→
+   320→function CommunicationCard({
+   321→  comm,
+   322→  isLast,
+   323→  onDelete,
+   324→  onOpenTender,
+   325→}: CommunicationCardProps) {
+   326→  const [expanded, setExpanded] = useState(false);
+   327→  const [confirmOpen, setConfirmOpen] = useState(false);
+   328→
+   329→  const body = comm.body?.trim() || "";
+   330→  const isLongBody = body.length > 240;
+   331→  const shownBody = expanded || !isLongBody ? body : body.slice(0, 240).trimEnd() + "…";
+   332→
+   333→  return (
+   334→    <div className="relative pl-12 pb-6">
+   335→      {/* Timeline line */}
+   336→      {!isLast && (
+   337→        <span
+   338→          className="absolute left-[18px] top-10 bottom-0 w-px bg-border"
+   339→          aria-hidden
+   340→        />
+   341→      )}
+   342→      {/* Timeline node */}
+   343→      <div
+   344→        className={cn(
+   345→          "absolute left-0 top-1 flex h-9 w-9 items-center justify-center rounded-full ring-4 ring-background",
+   346→          commTypeIconClass(comm.comm_type)
+   347→        )}
+   348→      >
+   349→        <CommTypeIconRender type={comm.comm_type} className="h-4 w-4" />
+   350→      </div>
+   351→
+   352→      <Card className="transition-shadow hover:shadow-md">
+   353→        <CardContent className="space-y-3">
+   354→          {/* Header row */}
+   355→          <div className="flex flex-wrap items-start justify-between gap-2">
+   356→            <div className="min-w-0 flex-1 space-y-1">
+   357→              <div className="flex flex-wrap items-center gap-2">
+   358→                <Badge
+   359→                  variant="outline"
+   360→                  className={cn("border text-[11px] font-medium", commTypeBadgeClass(comm.comm_type))}
+   361→                >
+   362→                  {comm.comm_type}
+   363→                </Badge>
+   364→                <span className="text-sm font-semibold text-foreground">
+   365→                  {comm.subject || "(no subject)"}
+   366→                </span>
+   367→              </div>
+   368→              <button
+   369→                type="button"
+   370→                onClick={() => onOpenTender(comm.tender_id)}
+   371→                className="group inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary"
+   372→                title="Open tender"
+   373→              >
+   374→                <Building2 className="h-3.5 w-3.5" />
+   375→                <span className="font-mono">{comm.tender_reference}</span>
+   376→                <span className="truncate max-w-[260px] group-hover:underline">
+   377→                  · {comm.tender_title}
+   378→                </span>
+   379→              </button>
+   380→            </div>
+   381→            <div className="flex items-center gap-1">
+   382→              <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+   383→                <Button
+   384→                  variant="ghost"
+   385→                  size="icon"
+   386→                  className="h-8 w-8 text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950"
+   387→                  aria-label="Delete communication"
+   388→                  onClick={() => setConfirmOpen(true)}
+   389→                >
+   390→                  <Trash2 className="h-4 w-4" />
+   391→                </Button>
+   392→                <AlertDialogContent>
+   393→                  <AlertDialogHeader>
+   394→                    <AlertDialogTitle>Delete communication?</AlertDialogTitle>
+   395→                    <AlertDialogDescription>
+   396→                      This will permanently delete{" "}
+   397→                      <span className="font-semibold text-foreground">
+   398→                        {comm.subject || "this communication"}
+   399→                      </span>
+   400→                      . This action cannot be undone.
+   401→                    </AlertDialogDescription>
+   402→                  </AlertDialogHeader>
+   403→                  <AlertDialogFooter>
+   404→                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+   405→                    <AlertDialogAction
+   406→                      className="bg-rose-600 hover:bg-rose-700 focus-visible:ring-rose-600"
+   407→                      onClick={() => {
+   408→                        onDelete(comm.id);
+   409→                        setConfirmOpen(false);
+   410→                      }}
+   411→                    >
+   412→                      <Trash2 className="h-4 w-4" />
+   413→                      Delete
+   414→                    </AlertDialogAction>
+   415→                  </AlertDialogFooter>
+   416→                </AlertDialogContent>
+   417→              </AlertDialog>
+   418→            </div>
+   419→          </div>
+   420→
+   421→          {/* Date + parties */}
+   422→          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+   423→            <span className="inline-flex items-center gap-1.5">
+   424→              <Clock className="h-3.5 w-3.5" />
+   425→              <span className="tabular-nums">{formatDateTime(comm.comm_date)}</span>
+   426→            </span>
+   427→            {comm.from_party && (
+   428→              <span className="inline-flex items-center gap-1.5">
+   429→                <span className="text-muted-foreground/70">From:</span>
+   430→                <span className="font-medium text-foreground">{comm.from_party}</span>
+   431→              </span>
+   432→            )}
+   433→            {comm.to_party && (
+   434→              <span className="inline-flex items-center gap-1.5">
+   435→                <span className="text-muted-foreground/70">To:</span>
+   436→                <span className="font-medium text-foreground">{comm.to_party}</span>
+   437→              </span>
+   438→            )}
+   439→          </div>
+   440→
+   441→          {/* Body */}
+   442→          {body && (
+   443→            <div className="space-y-1">
+   444→              <p className="whitespace-pre-wrap text-sm text-foreground/90 leading-relaxed">
+   445→                {shownBody}
+   446→              </p>
+   447→              {isLongBody && (
+   448→                <Button
+   449→                  variant="ghost"
+   450→                  size="sm"
+   451→                  className="h-6 px-2 text-xs text-primary hover:bg-primary/10"
+   452→                  onClick={() => setExpanded((v) => !v)}
+   453→                >
+   454→                  {expanded ? (
+   455→                    <>
+   456→                      <ChevronDown className="h-3 w-3" />
+   457→                      Show less
+   458→                    </>
+   459→                  ) : (
+   460→                    <>
+   461→                      <ChevronRight className="h-3 w-3" />
+   462→                      Show more
+   463→                    </>
+   464→                  )}
+   465→                </Button>
+   466→              )}
+   467→            </div>
+   468→          )}
+   469→
+   470→          {/* Notes */}
+   471→          {comm.notes?.trim() && (
+   472→            <div className="rounded-lg border border-dashed bg-muted/30 p-3">
+   473→              <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground mb-1">
+   474→                <StickyNote className="h-3 w-3" />
+   475→                Notes
+   476→              </div>
+   477→              <p className="text-xs text-foreground/80 whitespace-pre-wrap">
+   478→                {comm.notes}
+   479→              </p>
+   480→            </div>
+   481→          )}
+   482→        </CardContent>
+   483→      </Card>
+   484→    </div>
+   485→  );
+   486→}
+   487→
+   488→// ---- Main component ----
+   489→export function ClarificationsTab() {
+   490→  const [tenders, setTenders] = useState<TenderOption[]>([]);
+   491→  const [communications, setCommunications] = useState<FlattenedCommunication[]>([]);
+   492→  const [loading, setLoading] = useState(true);
+   493→  const [refreshing, setRefreshing] = useState(false);
+   494→  const [error, setError] = useState<string | null>(null);
+   495→
+   496→  const [typeFilter, setTypeFilter] = useState<string>("all");
+   497→  const [search, setSearch] = useState("");
+   498→
+   499→  const [dialogOpen, setDialogOpen] = useState(false);
+   500→  const [form, setForm] = useState<CommForm>(EMPTY_FORM);
+   501→  const [saving, setSaving] = useState(false);
+   502→
+   503→  const fetchTenders = useCallback(async (isRefresh = false) => {
+   504→    if (isRefresh) setRefreshing(true);
+   505→    else setLoading(true);
+   506→    setError(null);
+   507→    try {
+   508→      const res = await api.listTenders({ sort: "updated_at", order: "desc" });
+   509→      const items = (res?.items || []) as TenderOption[];
+   510→      setTenders(items);
+   511→
+   512→      const flat: FlattenedCommunication[] = [];
+   513→      for (const t of items) {
+   514→        const tender = t as any;
+   515→        const comms = (tender.communications || []) as CommunicationRaw[];
+   516→        for (const c of comms) {
+   517→          flat.push({
+   518→            ...c,
+   519→            tender_id: tender.id,
+   520→            tender_reference: tender.reference_number || "—",
+   521→            tender_title: tender.title || "",
+   522→          });
+   523→        }
+   524→      }
+   525→      // Newest first
+   526→      flat.sort((a, b) => {
+   527→        const da = a.comm_date ? new Date(a.comm_date).getTime() : 0;
+   528→        const db = b.comm_date ? new Date(b.comm_date).getTime() : 0;
+   529→        if (db !== da) return db - da;
+   530→        return b.id - a.id;
+   531→      });
+   532→      setCommunications(flat);
+   533→    } catch (e: any) {
+   534→      setError(e?.message || "Failed to load communications");
+   535→    } finally {
+   536→      setLoading(false);
+   537→      setRefreshing(false);
+   538→    }
+   539→  }, []);
+   540→
+   541→  useEffect(() => {
+   542→    fetchTenders();
+   543→  }, [fetchTenders]);
+   544→
+   545→  const openTender = (id: number) => {
+   546→    useDashboardStore.getState().setTab("tenders");
+   547→    setTimeout(() => useDashboardStore.getState().selectTender(id), 50);
+   548→  };
+   549→
+   550→  // ---- Stats ----
+   551→  const stats = useMemo(() => {
+   552→    const total = communications.length;
+   553→    const clarificationRequests = communications.filter(
+   554→      (c) => c.comm_type === "Clarification Request"
+   555→    ).length;
+   556→    const meetings = communications.filter((c) => c.comm_type === "Meeting").length;
+   557→    const extensions = communications.filter(
+   558→      (c) =>
+   559→        c.comm_type === "Extension" ||
+   560→        c.comm_type === "Tender Validity Extension"
+   561→    ).length;
+   562→    return { total, clarificationRequests, meetings, extensions };
+   563→  }, [communications]);
+   564→
+   565→  // ---- Filtered communications ----
+   566→  const filtered = useMemo(() => {
+   567→    const q = search.trim().toLowerCase();
+   568→    return communications.filter((c) => {
+   569→      if (typeFilter !== "all" && c.comm_type !== typeFilter) return false;
+   570→      if (!q) return true;
+   571→      const hay = [
+   572→        c.subject || "",
+   573→        c.body || "",
+   574→        c.tender_reference || "",
+   575→        c.tender_title || "",
+   576→        c.from_party || "",
+   577→        c.to_party || "",
+   578→      ]
+   579→        .join(" ")
+   580→        .toLowerCase();
+   581→      return hay.includes(q);
+   582→    });
+   583→  }, [communications, typeFilter, search]);
+   584→
+   585→  // ---- Create communication ----
+   586→  const handleSave = async () => {
+   587→    if (!form.tender_id) {
+   588→      toast.error("Please select a tender");
+   589→      return;
+   590→    }
+   591→    if (!form.comm_type) {
+   592→      toast.error("Please select a communication type");
+   593→      return;
+   594→    }
+   595→    setSaving(true);
+   596→    try {
+   597→      const tenderId = Number(form.tender_id);
+   598→      await api.createCommunication(tenderId, {
+   599→        tender_id: tenderId,
+   600→        comm_type: form.comm_type,
+   601→        subject: form.subject.trim() || undefined,
+   602→        body: form.body.trim() || undefined,
+   603→        comm_date: form.comm_date || undefined,
+   604→        from_party: form.from_party.trim() || undefined,
+   605→        to_party: form.to_party.trim() || undefined,
+   606→        notes: form.notes.trim() || undefined,
+   607→      });
+   608→      toast.success("Communication logged");
+   609→      setDialogOpen(false);
+   610→      setForm(EMPTY_FORM);
+   611→      await fetchTenders(true);
+   612→    } catch (e: any) {
+   613→      toast.error(e?.message || "Failed to log communication");
+   614→    } finally {
+   615→      setSaving(false);
+   616→    }
+   617→  };
+   618→
+   619→  const handleDelete = async (id: number) => {
+   620→    try {
+   621→      await api.deleteCommunication(id);
+   622→      toast.success("Communication deleted");
+   623→      await fetchTenders(true);
+   624→    } catch (e: any) {
+   625→      toast.error(e?.message || "Failed to delete communication");
+   626→    }
+   627→  };
+   628→
+   629→  const openDialog = () => {
+   630→    setForm({
+   631→      ...EMPTY_FORM,
+   632→      comm_date: toDatetimeLocalValue(new Date().toISOString()),
+   633→    });
+   634→    setDialogOpen(true);
+   635→  };
+   636→
+   637→  // ---- Loading state ----
+   638→  if (loading) {
+   639→    return (
+   640→      <div className="space-y-6">
+   641→        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+   642→          <div className="space-y-2">
+   643→            <Skeleton className="h-8 w-56" />
+   644→            <Skeleton className="h-4 w-72" />
+   645→          </div>
+   646→          <div className="flex gap-2">
+   647→            <Skeleton className="h-9 w-24" />
+   648→            <Skeleton className="h-9 w-40" />
+   649→          </div>
+   650→        </div>
+   651→        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+   652→          {Array.from({ length: 4 }).map((_, i) => (
+   653→            <StatSkeleton key={i} />
+   654→          ))}
+   655→        </div>
+   656→        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+   657→          <Skeleton className="h-10 w-full sm:w-56" />
+   658→          <Skeleton className="h-10 flex-1" />
+   659→        </div>
+   660→        <div className="space-y-4">
+   661→          {Array.from({ length: 4 }).map((_, i) => (
+   662→            <Skeleton key={i} className="h-32 w-full" />
+   663→          ))}
+   664→        </div>
+   665→      </div>
+   666→    );
+   667→  }
+   668→
+   669→  // ---- Error state ----
+   670→  if (error) {
+   671→    return (
+   672→      <div className="space-y-6">
+   673→        <div>
+   674→          <h1 className="text-2xl font-bold tracking-tight">
+   675→            Clarifications &amp; Communication
+   676→          </h1>
+   677→          <p className="text-sm text-muted-foreground">
+   678→            Track all communication relating to tenders
+   679→          </p>
+   680→        </div>
+   681→        <Alert variant="destructive">
+   682→          <AlertTriangle className="h-4 w-4" />
+   683→          <AlertTitle>Couldn&apos;t load communications</AlertTitle>
+   684→          <AlertDescription>
+   685→            <p className="mb-3">{error}</p>
+   686→            <Button
+   687→              size="sm"
+   688→              variant="outline"
+   689→              onClick={() => fetchTenders()}
+   690→              className="border-destructive/40 text-destructive hover:bg-destructive/10"
+   691→            >
+   692→              <RefreshCw className="h-3.5 w-3.5" />
+   693→              Try again
+   694→            </Button>
+   695→          </AlertDescription>
+   696→        </Alert>
+   697→      </div>
+   698→    );
+   699→  }
+   700→
+   701→  return (
+   702→    <div className="space-y-6">
+   703→      {/* ---- Page header ---- */}
+   704→      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+   705→        <div>
+   706→          <h1 className="text-2xl font-bold tracking-tight">
+   707→            Clarifications &amp; Communication
+   708→          </h1>
+   709→          <p className="text-sm text-muted-foreground">
+   710→            Track all communication relating to tenders
+   711→          </p>
+   712→        </div>
+   713→        <div className="flex items-center gap-2">
+   714→          <Button
+   715→            variant="ghost"
+   716→            onClick={() => fetchTenders(true)}
+   717→            disabled={refreshing}
+   718→          >
+   719→            <RefreshCw
+   720→              className={cn("h-4 w-4", refreshing && "animate-spin")}
+   721→            />
+   722→            Refresh
+   723→          </Button>
+   724→          <Button onClick={openDialog} disabled={tenders.length === 0}>
+   725→            <Plus className="h-4 w-4" />
+   726→            Log Communication
+   727→          </Button>
+   728→        </div>
+   729→      </div>
+   730→
+   731→      {/* ---- Stats ---- */}
+   732→      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+   733→        <StatCard
+   734→          icon={MessageSquare}
+   735→          iconClass="bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+   736→          value={stats.total}
+   737→          label="Total Communications"
+   738→          sublabel="Across all tenders"
+   739→        />
+   740→        <StatCard
+   741→          icon={HelpCircle}
+   742→          iconClass="bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400"
+   743→          value={stats.clarificationRequests}
+   744→          label="Clarification Requests"
+   745→          sublabel="Logged to date"
+   746→        />
+   747→        <StatCard
+   748→          icon={Users}
+   749→          iconClass="bg-cyan-100 text-cyan-600 dark:bg-cyan-950 dark:text-cyan-400"
+   750→          value={stats.meetings}
+   751→          label="Meetings"
+   752→          sublabel="Logged"
+   753→        />
+   754→        <StatCard
+   755→          icon={Clock}
+   756→          iconClass="bg-orange-100 text-orange-600 dark:bg-orange-950 dark:text-orange-400"
+   757→          value={stats.extensions}
+   758→          label="Extensions"
+   759→          sublabel="Deadline / validity"
+   760→        />
+   761→      </div>
+   762→
+   763→      {/* ---- Filter bar ---- */}
+   764→      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+   765→        <div className="w-full sm:w-60">
+   766→          <Select value={typeFilter} onValueChange={setTypeFilter}>
+   767→            <SelectTrigger className="w-full">
+   768→              <SelectValue placeholder="All types" />
+   769→            </SelectTrigger>
+   770→            <SelectContent>
+   771→              <SelectItem value="all">All types</SelectItem>
+   772→              {COMM_TYPES.map((t) => (
+   773→                <SelectItem key={t} value={t}>
+   774→                  {t}
+   775→                </SelectItem>
+   776→              ))}
+   777→            </SelectContent>
+   778→          </Select>
+   779→        </div>
+   780→        <div className="relative flex-1">
+   781→          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+   782→          <Input
+   783→            placeholder="Search by subject, tender reference, parties…"
+   784→            value={search}
+   785→            onChange={(e) => setSearch(e.target.value)}
+   786→            className="pl-9"
+   787→          />
+   788→        </div>
+   789→      </div>
+   790→
+   791→      {/* ---- Tender-empty banner ---- */}
+   792→      {tenders.length === 0 ? (
+   793→        <Card className="border-dashed">
+   794→          <CardContent>
+   795→            <EmptyState
+   796→              icon={MessageSquare}
+   797→              title="No tenders yet"
+   798→              message="Create a tender first, then you can log communications against it."
+   799→              iconClass="bg-muted text-muted-foreground"
+   800→            />
+   801→          </CardContent>
+   802→        </Card>
+   803→      ) : communications.length === 0 ? (
+   804→        <Card className="border-dashed">
+   805→          <CardContent>
+   806→            <EmptyState
+   807→              icon={MessageSquare}
+   808→              title="No communications logged yet"
+   809→              message="Log your first email, clarification request, meeting or extension to start building your audit trail."
+   810→              action={
+   811→                <Button onClick={openDialog}>
+   812→                  <Plus className="h-4 w-4" />
+   813→                  Log Communication
+   814→                </Button>
+   815→              }
+   816→            />
+   817→          </CardContent>
+   818→        </Card>
+   819→      ) : filtered.length === 0 ? (
+   820→        <Card className="border-dashed">
+   821→          <CardContent>
+   822→            <EmptyState
+   823→              icon={Search}
+   824→              title="No matches"
+   825→              message="No communications match your current filters. Try adjusting the type or search query."
+   826→              iconClass="bg-muted text-muted-foreground"
+   827→            />
+   828→          </CardContent>
+   829→        </Card>
+   830→      ) : (
+   831→        <div className="space-y-1">
+   832→          <div className="flex items-center justify-between">
+   833→            <p className="text-sm text-muted-foreground">
+   834→              Showing{" "}
+   835→              <span className="font-medium text-foreground tabular-nums">
+   836→                {filtered.length}
+   837→              </span>{" "}
+   838→              of{" "}
+   839→              <span className="font-medium text-foreground tabular-nums">
+   840→                {communications.length}
+   841→              </span>{" "}
+   842→              communications
+   843→            </p>
+   844→          </div>
+   845→          <Separator />
+   846→          <div className="pt-2">
+   847→            {filtered.map((c, idx) => (
+   848→              <CommunicationCard
+   849→                key={c.id}
+   850→                comm={c}
+   851→                isLast={idx === filtered.length - 1}
+   852→                onDelete={handleDelete}
+   853→                onOpenTender={openTender}
+   854→              />
+   855→            ))}
+   856→          </div>
+   857→        </div>
+   858→      )}
+   859→
+   860→      {/* ---- Log Communication Dialog ---- */}
+   861→      <Dialog
+   862→        open={dialogOpen}
+   863→        onOpenChange={(open) => {
+   864→          setDialogOpen(open);
+   865→          if (!open) setForm(EMPTY_FORM);
+   866→        }}
+   867→      >
+   868→        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin">
+   869→          <DialogHeader>
+   870→            <DialogTitle>Log Communication</DialogTitle>
+   871→            <DialogDescription>
+   872→              Record a communication against a tender for your audit trail.
+   873→            </DialogDescription>
+   874→          </DialogHeader>
+   875→
+   876→          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+   877→            {/* Tender */}
+   878→            <div className="sm:col-span-2 space-y-1.5">
+   879→              <Label htmlFor="comm-tender">
+   880→                Tender <span className="text-rose-600">*</span>
+   881→              </Label>
+   882→              <Select
+   883→                value={form.tender_id}
+   884→                onValueChange={(v) => setForm((f) => ({ ...f, tender_id: v }))}
+   885→              >
+   886→                <SelectTrigger id="comm-tender" className="w-full">
+   887→                  <SelectValue placeholder="Select a tender…" />
+   888→                </SelectTrigger>
+   889→                <SelectContent className="max-h-72">
+   890→                  {tenders.map((t) => (
+   891→                    <SelectItem key={t.id} value={String(t.id)}>
+   892→                      <span className="font-mono text-xs">{t.reference_number}</span>
+   893→                      <span className="text-muted-foreground"> — </span>
+   894→                      <span className="truncate">{t.title}</span>
+   895→                    </SelectItem>
+   896→                  ))}
+   897→                </SelectContent>
+   898→              </Select>
+   899→            </div>
+   900→
+   901→            {/* Type */}
+   902→            <div className="space-y-1.5">
+   903→              <Label htmlFor="comm-type">
+   904→                Type <span className="text-rose-600">*</span>
+   905→              </Label>
+   906→              <Select
+   907→                value={form.comm_type}
+   908→                onValueChange={(v) => setForm((f) => ({ ...f, comm_type: v }))}
+   909→              >
+   910→                <SelectTrigger id="comm-type" className="w-full">
+   911→                  <SelectValue />
+   912→                </SelectTrigger>
+   913→                <SelectContent className="max-h-72">
+   914→                  {COMM_TYPES.map((t) => (
+   915→                    <SelectItem key={t} value={t}>
+   916→                      {t}
+   917→                    </SelectItem>
+   918→                  ))}
+   919→                </SelectContent>
+   920→              </Select>
+   921→            </div>
+   922→
+   923→            {/* Date */}
+   924→            <div className="space-y-1.5">
+   925→              <Label htmlFor="comm-date">Date &amp; time</Label>
+   926→              <Input
+   927→                id="comm-date"
+   928→                type="datetime-local"
+   929→                value={form.comm_date}
+   930→                onChange={(e) => setForm((f) => ({ ...f, comm_date: e.target.value }))}
+   931→              />
+   932→            </div>
+   933→
+   934→            {/* Subject */}
+   935→            <div className="sm:col-span-2 space-y-1.5">
+   936→              <Label htmlFor="comm-subject">Subject</Label>
+   937→              <Input
+   938→                id="comm-subject"
+   939→                value={form.subject}
+   940→                onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value }))}
+   941→                placeholder="Brief subject line"
+   942→              />
+   943→            </div>
+   944→
+   945→            {/* From / To */}
+   946→            <div className="space-y-1.5">
+   947→              <Label htmlFor="comm-from">From</Label>
+   948→              <Input
+   949→                id="comm-from"
+   950→                value={form.from_party}
+   951→                onChange={(e) => setForm((f) => ({ ...f, from_party: e.target.value }))}
+   952→                placeholder="Sender name / organisation"
+   953→              />
+   954→            </div>
+   955→            <div className="space-y-1.5">
+   956→              <Label htmlFor="comm-to">To</Label>
+   957→              <Input
+   958→                id="comm-to"
+   959→                value={form.to_party}
+   960→                onChange={(e) => setForm((f) => ({ ...f, to_party: e.target.value }))}
+   961→                placeholder="Recipient name / organisation"
+   962→              />
+   963→            </div>
+   964→
+   965→            {/* Body */}
+   966→            <div className="sm:col-span-2 space-y-1.5">
+   967→              <Label htmlFor="comm-body">Body</Label>
+   968→              <Textarea
+   969→                id="comm-body"
+   970→                value={form.body}
+   971→                onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
+   972→                placeholder="Paste or write the communication body…"
+   973→                rows={5}
+   974→              />
+   975→            </div>
+   976→
+   977→            {/* Notes */}
+   978→            <div className="sm:col-span-2 space-y-1.5">
+   979→              <Label htmlFor="comm-notes">Internal notes</Label>
+   980→              <Textarea
+   981→                id="comm-notes"
+   982→                value={form.notes}
+   983→                onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+   984→                placeholder="Optional internal notes (not sent to client)"
+   985→                rows={3}
+   986→              />
+   987→            </div>
+   988→          </div>
+   989→
+   990→          <DialogFooter>
+   991→            <Button
+   992→              variant="outline"
+   993→              onClick={() => setDialogOpen(false)}
+   994→              disabled={saving}
+   995→            >
+   996→              Cancel
+   997→            </Button>
+   998→            <Button onClick={handleSave} disabled={saving || !form.tender_id}>
+   999→              {saving ? (
+  1000→                <>
+  1001→                  <Loader2 className="h-4 w-4 animate-spin" />
+  1002→                  Saving…
+  1003→                </>
+  1004→              ) : (
+  1005→                <>
+  1006→                  <Plus className="h-4 w-4" />
+  1007→                  Log Communication
+  1008→                </>
+  1009→              )}
+  1010→            </Button>
+  1011→          </DialogFooter>
+  1012→        </DialogContent>
+  1013→      </Dialog>
+  1014→    </div>
+  1015→  );
+  1016→}
+  1017→

@@ -1829,7 +1829,7 @@ function CommunicationsSection({ tender, onChanged }: { tender: any; onChanged: 
     }
   };
 
-  const COMM_TYPES = ["Email", "Clarification Request", "Clarification Response", "Meeting", "Addendum", "Extension", "Tender Validity Extension", "Pricing Clarification", "Client Correspondence", "Other"];
+  const COMM_TYPES = ["Email", "Clarification Request", "Clarification Response", "Meeting Invitation", "Meeting Notes", "Pricing Clarification", "Client Correspondence", "Addendum", "Tender Extension", "Tender Validity Extension", "Other"];
 
   return (
     <div className="space-y-3">

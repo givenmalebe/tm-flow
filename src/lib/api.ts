@@ -330,6 +330,31 @@ export const api = {
     });
   },
 
+  async uploadCommunicationAttachment(commId: number, file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    return request<any>(`/communications/${commId}/attachment`, {
+      method: "POST",
+      body: form,
+      isForm: true,
+    });
+  },
+
+  async deleteCommunicationAttachment(commId: number) {
+    return request<{ deleted: boolean }>(`/communications/${commId}/attachment`, {
+      method: "DELETE",
+    });
+  },
+
+  async searchAddendums() {
+    return request<{
+      results: any[];
+      total_tenders_searched: number;
+      total_with_addendums: number;
+      message?: string;
+    }>(`/communications/search-addendums`, { method: "POST" });
+  },
+
   async deleteCommunication(id: number) {
     return request<{ deleted: boolean }>(`/communications/${id}`, { method: "DELETE" });
   },

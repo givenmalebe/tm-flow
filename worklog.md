@@ -945,3 +945,98 @@ Stage Summary:
 - Plus tender outcome tracking (Pending/Awarded/Unsuccessful/Withdrawn with reason)
 - Auto-updates tender status to "Submitted" when submission is saved
 - File uploads for both confirmation receipts and final documents with view/download/replace/delete
+
+---
+Task ID: 32
+Agent: frontend-styling-expert
+Task: Rebuild clarifications-tab with new types, attachments, meeting fields, addendum search
+
+Work Log:
+- Read worklog, api.ts, dashboard-store.ts, briefings-tab.tsx, and existing clarifications-tab.tsx for context
+- Confirmed backend CommunicationBase schema already supports `meeting_date`, `meeting_location`, and attachment fields; verified `_serialize_tender` returns `meeting_date`, `meeting_location`, `attachment_url`, `attachment_filename`
+- Verified `api.ts` already has `uploadCommunicationAttachment`, `deleteCommunicationAttachment`, `searchAddendums` methods
+- Rewrote clarifications-tab.tsx (~1100 lines) with all required features:
+  * All 11 COMM_TYPES with TYPE_CONFIG map giving each a distinct lucide icon + colored badge/iconWrap (emerald/amber/violet/cyan/rose/orange/muted, NO indigo)
+  * Page header with title/subtitle/Refresh button
+  * AI Addendum Search Banner card at top — calls `api.searchAddendums()` with loading, no-active, no-results, and results states; each result renders tender reference (clickable → openTender), addendum title, date, description, source link
+  * Stats row of 4 cards: Total Communications, Clarification Requests, Meetings (invitations+notes), Extensions (tender+validity)
+  * Filter bar: type Select (All + 11 types), search Input, Log Communication primary button
+  * Timeline (newest first) using CommunicationCard subcomponent with timeline node/icon, type badge, subject, tender reference (clickable), comm_date, from/to parties, meeting_date + meeting_location box for Meeting Invitation/Notes, expandable body, attachment section (View Attachment link OR Upload Attachment button OR Remove), notes box, AlertDialog delete confirmation
+  * Log Communication Dialog with tender selector (required), type selector (required, all 11 types), datetime-local date, conditional meeting fields (datetime + location) shown only when type ∈ {Meeting Invitation, Meeting Notes}, subject, body, from_party, to_party, notes, save button with loading
+- Emerald/teal/cyan theme used for Email — no indigo anywhere
+- Used `useDashboardStore` setTab("tenders") + selectTender(id) for tender navigation
+- Lint (`bun run lint`) passes clean with no errors
+
+Stage Summary:
+- Artifacts produced:
+  * /home/z/my-project/src/components/dashboard/tabs/clarifications-tab.tsx (rewritten)
+- Features delivered:
+  * 11 communication types with distinct icons/colors
+  * AI addendum search banner (key feature) with full result rendering
+  * 4 stat cards
+  * Type + search filter bar
+  * Timeline with attachments (upload/view/remove), meeting date/location, expandable body, notes, confirm-delete
+  * Log Communication dialog with conditional meeting fields
+  * Tender navigation via dashboard store
+  * Emerald theme, fully responsive, lint-clean
+
+---
+Task ID: 33
+Agent: Main Orchestrator
+Task: Build Clarifications & Communication — all 11 types, attachment uploads, meeting fields, AI addendum search
+
+Work Log:
+- Added meeting_date, meeting_location, attachment_original_filename columns to Communication model
+- Updated CommunicationBase schema to include meeting_date and meeting_location fields
+- Updated _serialize_tender to include meeting_date, meeting_location, attachment_path, attachment_url, attachment_filename
+- Updated create_communication endpoint to save meeting_date and meeting_location
+- Added 3 new backend endpoints:
+  * POST /api/communications/{id}/attachment — upload attachment file for a communication
+  * DELETE /api/communications/{id}/attachment — remove attachment
+  * POST /api/communications/search-addendums — AI searches the web for addendums related to active tenders
+- The addendum search endpoint:
+  * Finds all active tenders
+  * For each, builds a search query "{ref} {title} addendum site:etenders.gov.za OR site:tenderbulletins.co.za OR site:gov.za"
+  * Uses z-ai web search to find results
+  * Uses AI chat to filter for actual addendum results
+  * Returns results per tender with title, url, description, date
+- Added frontend API methods: uploadCommunicationAttachment, deleteCommunicationAttachment, searchAddendums
+- Updated COMM_TYPES in tender-detail.tsx CommunicationsSection to include all 11 types:
+  Email, Clarification Request, Clarification Response, Meeting Invitation, Meeting Notes, Pricing Clarification, Client Correspondence, Addendum, Tender Extension, Tender Validity Extension, Other
+- Delegated rebuild of clarifications-tab.tsx to subagent (Task 32) — ~1100 lines with:
+  * AI Addendum Search banner with "Search for Addendums" button
+  * 4 stats cards: Total Communications, Clarification Requests, Meetings, Extensions
+  * Type filter + search + Log Communication button
+  * Timeline with all 11 types (distinct icons + colors per type)
+  * Meeting fields (meeting_date, meeting_location) shown for Meeting Invitation/Notes
+  * Attachment upload/view/remove per communication
+  * Log Communication dialog with conditional meeting fields
+- Verified with API test:
+  * Created 4 communications: Email, Clarification Request, Meeting Invitation (with meeting_date + location), Tender Extension
+  * All saved correctly with proper fields
+  * Uploaded attachment to a communication → returned file URL
+  * AI addendum search ran on 1 active tender, returned 0 addendums (expected for test tender)
+- Verified with Agent Browser:
+  * Clarifications tab shows AI addendum search banner, 4 stats, filter bar, 4 communication entries
+  * Attachment showing "View Attachment (attachment.txt)" link for the communication with an uploaded file
+  * Other communications show "Upload Attachment" buttons
+  * No errors, lint clean
+
+Stage Summary:
+- Clarifications & Communication fully operational with all 11 required types:
+  1. Emails ✓
+  2. Clarification requests ✓
+  3. Clarification responses ✓
+  4. Meeting invitations (with meeting_date + meeting_location) ✓
+  5. Meeting notes (with meeting_date + meeting_location) ✓
+  6. Pricing clarification ✓
+  7. Client correspondence ✓
+  8. Addendums ✓
+  9. Tender extensions ✓
+  10. Tender validity extensions ✓
+  11. Other ✓
+- Each communication has a date and is linked to the relevant tender
+- Attachment upload per communication (PDF/DOC/JPG/PNG)
+- AI addendum search: searches the web for addendums related to active tenders
+- Meeting-specific fields: meeting_date and meeting_location for Meeting Invitation/Notes types
+- 4 stats cards, type filter, search, timeline view

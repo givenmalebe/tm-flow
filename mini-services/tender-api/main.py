@@ -306,6 +306,8 @@ class CommunicationBase(BaseModel):
     subject: Optional[str] = None
     body: Optional[str] = None
     comm_date: Optional[datetime] = None
+    meeting_date: Optional[datetime] = None
+    meeting_location: Optional[str] = None
     from_party: Optional[str] = None
     to_party: Optional[str] = None
     notes: Optional[str] = None
@@ -427,7 +429,12 @@ def _serialize_tender(t: Tender) -> dict:
                 "id": c.id, "comm_type": c.comm_type, "subject": c.subject,
                 "body": c.body,
                 "comm_date": c.comm_date.isoformat() if c.comm_date else None,
+                "meeting_date": c.meeting_date.isoformat() if c.meeting_date else None,
+                "meeting_location": c.meeting_location,
                 "from_party": c.from_party, "to_party": c.to_party,
+                "attachment_path": c.attachment_path,
+                "attachment_url": f"/uploads/{c.attachment_path}?XTransformPort=8000" if c.attachment_path else None,
+                "attachment_filename": c.attachment_original_filename,
                 "notes": c.notes,
             } for c in t.communications
         ],
@@ -1692,6 +1699,8 @@ def create_communication(tender_id: int, payload: CommunicationCreate, db: Sessi
         subject=payload.subject,
         body=payload.body,
         comm_date=payload.comm_date,
+        meeting_date=payload.meeting_date,
+        meeting_location=payload.meeting_location,
         from_party=payload.from_party,
         to_party=payload.to_party,
         notes=payload.notes,
@@ -1700,6 +1709,115 @@ def create_communication(tender_id: int, payload: CommunicationCreate, db: Sessi
     db.commit()
     db.refresh(c)
     return {"id": c.id, "comm_type": c.comm_type}
+
+
+@app.post("/api/communications/{comm_id}/attachment")
+async def upload_communication_attachment(
+    comm_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Upload an attachment for a communication."""
+    c = db.query(Communication).filter(Communication.id == comm_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Communication not found")
+    rel_path = _save_upload(file, subdir=f"communications/{comm_id}")
+    c.attachment_path = rel_path
+    c.attachment_original_filename = file.filename
+    db.commit()
+    db.refresh(c)
+    return {
+        "id": c.id,
+        "attachment_path": rel_path,
+        "attachment_url": f"/uploads/{rel_path}?XTransformPort=8000",
+        "attachment_filename": file.filename,
+    }
+
+
+@app.delete("/api/communications/{comm_id}/attachment")
+def delete_communication_attachment(comm_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Remove an attachment from a communication."""
+    c = db.query(Communication).filter(Communication.id == comm_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Communication not found")
+    if c.attachment_path:
+        full_path = os.path.join(UPLOAD_DIR, c.attachment_path)
+        if os.path.exists(full_path):
+            try:
+                os.unlink(full_path)
+            except OSError:
+                pass
+        c.attachment_path = None
+        c.attachment_original_filename = None
+    db.commit()
+    return {"deleted": True}
+
+
+@app.post("/api/communications/search-addendums")
+def search_addendums(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    AI searches the web for addendums related to the user's active tenders.
+    Returns a list of potential addendums found for each tender.
+    """
+    active_statuses = {"New Opportunity", "Under Review", "Interested", "Preparing",
+                       "Documents Outstanding", "Pricing in Progress", "Awaiting Information",
+                       "Ready for Submission", "Submitted", "Clarification Requested",
+                       "Clarification Submitted", "Shortlisted", "Interview/Presentation",
+                       "Negotiation"}
+    active_tenders = db.query(Tender).filter(Tender.status.in_(active_statuses)).all()
+
+    if not active_tenders:
+        return {"results": [], "message": "No active tenders to search for addendums."}
+
+    results = []
+    for tender in active_tenders:
+        # Build a search query for addendums for this tender
+        query = f"{tender.reference_number} {tender.title} addendum site:etenders.gov.za OR site:tenderbulletins.co.za OR site:gov.za"
+        try:
+            raw_results = ai_module._run_zai_web_search(query, num=5)
+            if raw_results:
+                # Use AI to filter for actual addendum results
+                raw_text = json.dumps(raw_results, indent=2, default=str)[:5000]
+                prompt = f"""Analyze these search results and identify ONLY actual addendum results for this tender.
+Tender: {tender.reference_number} - {tender.title}
+Client: {tender.client_company}
+
+Search results:
+{raw_text}
+
+Return ONLY a JSON array of addendum results:
+[{{"title": string, "url": string, "description": string, "date": string|null}}]
+If no actual addendums found, return []."""
+                try:
+                    response = ai_module._run_zai_chat(prompt, system="You are a tender addendum search assistant. Return ONLY valid JSON.")
+                    response = response.strip()
+                    first = response.find("[")
+                    last = response.rfind("]")
+                    if first >= 0 and last > first:
+                        response = response[first:last + 1]
+                    addendums = json.loads(response)
+                    if isinstance(addendums, list) and addendums:
+                        results.append({
+                            "tender_id": tender.id,
+                            "tender_reference": tender.reference_number,
+                            "tender_title": tender.title,
+                            "client": tender.client_company,
+                            "addendums_found": addendums,
+                        })
+                except (json.JSONDecodeError, RuntimeError):
+                    pass
+        except Exception:
+            pass
+
+    return {
+        "results": results,
+        "total_tenders_searched": len(active_tenders),
+        "total_with_addendums": len(results),
+    }
 
 
 @app.delete("/api/communications/{comm_id}")

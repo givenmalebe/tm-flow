@@ -1,0 +1,1675 @@
+     1→"use client";
+     2→
+     3→import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+     4→import {
+     5→  AlertTriangle,
+     6→  BellRing,
+     7→  Building2,
+     8→  Calendar,
+     9→  CalendarClock,
+    10→  CalendarDays,
+    11→  CalendarPlus,
+    12→  CheckCircle2,
+    13→  Clock,
+    14→  ExternalLink,
+    15→  FileText,
+    16→  Hourglass,
+    17→  Loader2,
+    18→  MapPin,
+    19→  Pencil,
+    20→  RefreshCw,
+    21→  Search,
+    22→  Timer,
+    23→  Trash2,
+    24→  Upload,
+    25→  User,
+    26→  UserCheck,
+    27→  Zap,
+    28→  type LucideIcon,
+    29→} from "lucide-react";
+    30→import { toast } from "sonner";
+    31→import {
+    32→  Card,
+    33→  CardContent,
+    34→  CardDescription,
+    35→  CardHeader,
+    36→  CardTitle,
+    37→} from "@/components/ui/card";
+    38→import { Button } from "@/components/ui/button";
+    39→import { Input } from "@/components/ui/input";
+    40→import { Label } from "@/components/ui/label";
+    41→import { Textarea } from "@/components/ui/textarea";
+    42→import { Badge } from "@/components/ui/badge";
+    43→import { Skeleton } from "@/components/ui/skeleton";
+    44→import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+    45→import { Switch } from "@/components/ui/switch";
+    46→import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+    47→import {
+    48→  Select,
+    49→  SelectContent,
+    50→  SelectItem,
+    51→  SelectTrigger,
+    52→  SelectValue,
+    53→} from "@/components/ui/select";
+    54→import {
+    55→  Dialog,
+    56→  DialogContent,
+    57→  DialogDescription,
+    58→  DialogFooter,
+    59→  DialogHeader,
+    60→  DialogTitle,
+    61→} from "@/components/ui/dialog";
+    62→import {
+    63→  AlertDialog,
+    64→  AlertDialogAction,
+    65→  AlertDialogCancel,
+    66→  AlertDialogContent,
+    67→  AlertDialogDescription,
+    68→  AlertDialogFooter,
+    69→  AlertDialogHeader,
+    70→  AlertDialogTitle,
+    71→} from "@/components/ui/alert-dialog";
+    72→import { api } from "@/lib/api";
+    73→import {
+    74→  useDashboardStore,
+    75→  formatDate,
+    76→  daysUntil,
+    77→} from "@/lib/dashboard-store";
+    78→import { cn } from "@/lib/utils";
+    79→
+    80→// =====================================================================
+    81→// Types
+    82→// =====================================================================
+    83→type BriefingType = "Briefing" | "Site Inspection";
+    84→type Urgency = "today" | "critical" | "urgent" | "soon" | "normal" | "past";
+    85→
+    86→/** A briefing with computed urgency info — used everywhere in this tab. */
+    87→interface BriefingAlert {
+    88→  id: number;
+    89→  tender_id: number;
+    90→  tender_reference: string | null;
+    91→  tender_title: string | null;
+    92→  client: string | null;
+    93→  briefing_type: BriefingType;
+    94→  date: string | null;
+    95→  time: string | null;
+    96→  location: string | null;
+    97→  contact_person: string | null;
+    98→  attendance_required: boolean;
+    99→  attendance_confirmed: boolean;
+   100→  person_attending: string | null;
+   101→  certificate_path: string | null;
+   102→  certificate_url: string | null;
+   103→  notes: string | null;
+   104→  days_until: number;
+   105→  is_past: boolean;
+   106→  is_today: boolean;
+   107→  urgency: Urgency;
+   108→}
+   109→
+   110→interface BriefingSummary {
+   111→  total_upcoming: number;
+   112→  total_alerts: number;
+   113→  today_count: number;
+   114→  critical_count: number;
+   115→  urgent_count: number;
+   116→  soon_count: number;
+   117→  unconfirmed_count: number;
+   118→  no_attendee_count: number;
+   119→  total_all?: number;
+   120→}
+   121→
+   122→interface TenderOption {
+   123→  id: number;
+   124→  reference_number: string;
+   125→  title: string;
+   126→}
+   127→
+   128→interface BriefingForm {
+   129→  tender_id: string;
+   130→  briefing_type: BriefingType;
+   131→  date: string;
+   132→  time: string;
+   133→  location: string;
+   134→  contact_person: string;
+   135→  attendance_required: boolean;
+   136→  attendance_confirmed: boolean;
+   137→  person_attending: string;
+   138→  notes: string;
+   139→}
+   140→
+   141→const EMPTY_FORM: BriefingForm = {
+   142→  tender_id: "",
+   143→  briefing_type: "Briefing",
+   144→  date: "",
+   145→  time: "",
+   146→  location: "",
+   147→  contact_person: "",
+   148→  attendance_required: true,
+   149→  attendance_confirmed: false,
+   150→  person_attending: "",
+   151→  notes: "",
+   152→};
+   153→
+   154→const BRIEFING_TYPES: BriefingType[] = ["Briefing", "Site Inspection"];
+   155→
+   156→// =====================================================================
+   157→// Helpers
+   158→// =====================================================================
+   159→function computeUrgency(days: number): Urgency {
+   160→  if (days < 0) return "past";
+   161→  if (days === 0) return "today";
+   162→  if (days <= 1) return "critical";
+   163→  if (days <= 3) return "urgent";
+   164→  if (days <= 7) return "soon";
+   165→  return "normal";
+   166→}
+   167→
+   168→/** Normalize a raw briefing (from listBriefings) into a BriefingAlert. */
+   169→function toBriefingView(b: any): BriefingAlert {
+   170→  const days = b.days_until ?? daysUntil(b.date) ?? -999;
+   171→  return {
+   172→    id: b.id,
+   173→    tender_id: b.tender_id,
+   174→    tender_reference: b.tender_reference ?? null,
+   175→    tender_title: b.tender_title ?? null,
+   176→    client: b.client ?? null,
+   177→    briefing_type: b.briefing_type as BriefingType,
+   178→    date: b.date ?? null,
+   179→    time: b.time ?? null,
+   180→    location: b.location ?? null,
+   181→    contact_person: b.contact_person ?? null,
+   182→    attendance_required: !!b.attendance_required,
+   183→    attendance_confirmed: !!b.attendance_confirmed,
+   184→    person_attending: b.person_attending ?? null,
+   185→    certificate_path: b.certificate_path ?? null,
+   186→    certificate_url: b.certificate_url ?? null,
+   187→    notes: b.notes ?? null,
+   188→    days_until: days,
+   189→    is_past: days < 0,
+   190→    is_today: days === 0,
+   191→    urgency: (b.urgency as Urgency) ?? computeUrgency(days),
+   192→  };
+   193→}
+   194→
+   195→const URGENCY_CONFIG: Record<
+   196→  Urgency,
+   197→  {
+   198→    label: string;
+   199→    strip: string;
+   200→    badge: string;
+   201→    border: string;
+   202→    todayBg: string;
+   203→    text: string;
+   204→    icon: LucideIcon;
+   205→  }
+   206→> = {
+   207→  today: {
+   208→    label: "TODAY",
+   209→    strip: "bg-rose-600 text-white",
+   210→    badge: "bg-rose-600 text-white border-rose-700",
+   211→    border: "border-rose-300 dark:border-rose-800",
+   212→    todayBg: "bg-rose-50 dark:bg-rose-950/20",
+   213→    text: "text-rose-700 dark:text-rose-400",
+   214→    icon: BellRing,
+   215→  },
+   216→  critical: {
+   217→    label: "CRITICAL",
+   218→    strip: "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300",
+   219→    badge: "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border-rose-200 dark:border-rose-900",
+   220→    border: "border-rose-300 dark:border-rose-800",
+   221→    todayBg: "",
+   222→    text: "text-rose-700 dark:text-rose-400",
+   223→    icon: Zap,
+   224→  },
+   225→  urgent: {
+   226→    label: "URGENT",
+   227→    strip: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
+   228→    badge: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border-amber-200 dark:border-amber-900",
+   229→    border: "border-amber-300 dark:border-amber-800",
+   230→    todayBg: "",
+   231→    text: "text-amber-700 dark:text-amber-400",
+   232→    icon: Timer,
+   233→  },
+   234→  soon: {
+   235→    label: "SOON",
+   236→    strip: "bg-yellow-100 text-yellow-800 dark:bg-yellow-950 dark:text-yellow-300",
+   237→    badge: "bg-yellow-100 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-300 border-yellow-200 dark:border-yellow-900",
+   238→    border: "border-yellow-300 dark:border-yellow-800",
+   239→    todayBg: "",
+   240→    text: "text-yellow-700 dark:text-yellow-500",
+   241→    icon: Hourglass,
+   242→  },
+   243→  normal: {
+   244→    label: "Upcoming",
+   245→    strip: "",
+   246→    badge: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900",
+   247→    border: "border-border",
+   248→    todayBg: "",
+   249→    text: "text-emerald-700 dark:text-emerald-400",
+   250→    icon: Calendar,
+   251→  },
+   252→  past: {
+   253→    label: "Completed",
+   254→    strip: "",
+   255→    badge: "bg-muted text-muted-foreground",
+   256→    border: "border-border",
+   257→    todayBg: "",
+   258→    text: "text-muted-foreground",
+   259→    icon: CheckCircle2,
+   260→  },
+   261→};
+   262→
+   263→function typeBadgeClass(type: BriefingType): string {
+   264→  return type === "Briefing"
+   265→    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900"
+   266→    : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border-amber-200 dark:border-amber-900";
+   267→}
+   268→
+   269→// =====================================================================
+   270→// Stat card
+   271→// =====================================================================
+   272→function StatCard({
+   273→  icon: Icon,
+   274→  iconClass,
+   275→  value,
+   276→  label,
+   277→  subtitle,
+   278→}: {
+   279→  icon: LucideIcon;
+   280→  iconClass: string;
+   281→  value: number;
+   282→  label: string;
+   283→  subtitle: string;
+   284→}) {
+   285→  return (
+   286→    <Card className="transition-shadow hover:shadow-md">
+   287→      <CardContent className="flex items-start justify-between gap-3">
+   288→        <div className="min-w-0">
+   289→          <div className="text-3xl font-bold tracking-tight tabular-nums text-foreground">
+   290→            {value}
+   291→          </div>
+   292→          <div className="mt-1 text-sm font-medium text-foreground">{label}</div>
+   293→          <div className="text-xs text-muted-foreground mt-0.5">{subtitle}</div>
+   294→        </div>
+   295→        <div
+   296→          className={cn(
+   297→            "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl",
+   298→            iconClass
+   299→          )}
+   300→        >
+   301→          <Icon className="h-5 w-5" />
+   302→        </div>
+   303→      </CardContent>
+   304→    </Card>
+   305→  );
+   306→}
+   307→
+   308→function StatSkeleton() {
+   309→  return (
+   310→    <Card>
+   311→      <CardContent className="flex items-start justify-between gap-3">
+   312→        <div className="flex-1 space-y-2">
+   313→          <Skeleton className="h-8 w-16" />
+   314→          <Skeleton className="h-4 w-24" />
+   315→          <Skeleton className="h-3 w-20" />
+   316→        </div>
+   317→        <Skeleton className="h-11 w-11 rounded-xl" />
+   318→      </CardContent>
+   319→    </Card>
+   320→  );
+   321→}
+   322→
+   323→// =====================================================================
+   324→// Empty state
+   325→// =====================================================================
+   326→function EmptyState({
+   327→  icon: Icon,
+   328→  title,
+   329→  message,
+   330→  iconClass,
+   331→  action,
+   332→}: {
+   333→  icon: LucideIcon;
+   334→  title: string;
+   335→  message: string;
+   336→  iconClass?: string;
+   337→  action?: React.ReactNode;
+   338→}) {
+   339→  return (
+   340→    <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+   341→      <div
+   342→        className={cn(
+   343→          "flex h-14 w-14 items-center justify-center rounded-2xl",
+   344→          iconClass ||
+   345→            "bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+   346→        )}
+   347→      >
+   348→        <Icon className="h-7 w-7" />
+   349→      </div>
+   350→      <div className="space-y-1">
+   351→        <p className="text-base font-semibold text-foreground">{title}</p>
+   352→        <p className="text-sm text-muted-foreground max-w-sm">{message}</p>
+   353→      </div>
+   354→      {action}
+   355→    </div>
+   356→  );
+   357→}
+   358→
+   359→// =====================================================================
+   360→// Briefing card — shows all 11 fields + urgency strip + alert strips + certificate
+   361→// =====================================================================
+   362→interface BriefingCardProps {
+   363→  briefing: BriefingAlert;
+   364→  onEdit: (b: BriefingAlert) => void;
+   365→  onDelete: (b: BriefingAlert) => void;
+   366→  onOpenTender: (id: number) => void;
+   367→  onConfirmAttendance: (b: BriefingAlert) => void;
+   368→  onUploadCertificate: (b: BriefingAlert, file: File) => void;
+   369→  onRemoveCertificate: (b: BriefingAlert) => void;
+   370→  uploadingId: number | null;
+   371→  removingCertId: number | null;
+   372→}
+   373→
+   374→function BriefingCard({
+   375→  briefing,
+   376→  onEdit,
+   377→  onDelete,
+   378→  onOpenTender,
+   379→  onConfirmAttendance,
+   380→  onUploadCertificate,
+   381→  onRemoveCertificate,
+   382→  uploadingId,
+   383→  removingCertId,
+   384→}: BriefingCardProps) {
+   385→  const fileRef = useRef<HTMLInputElement>(null);
+   386→  const b = briefing;
+   387→  const config = URGENCY_CONFIG[b.urgency];
+   388→  const UrgencyIcon = config.icon;
+   389→  const isPast = b.is_past;
+   390→  const showStrip = b.urgency === "today" || b.urgency === "critical" || b.urgency === "urgent" || b.urgency === "soon";
+   391→  const needsConfirmation =
+   392→    b.attendance_required &&
+   393→    !b.attendance_confirmed &&
+   394→    !isPast &&
+   395→    b.days_until >= 0 &&
+   396→    b.days_until <= 7;
+   397→  const noAttendee = b.attendance_required && !b.person_attending && !isPast;
+   398→  const isUploading = uploadingId === b.id;
+   399→  const isRemoving = removingCertId === b.id;
+   400→
+   401→  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+   402→    const f = e.target.files?.[0];
+   403→    if (f) onUploadCertificate(b, f);
+   404→    e.target.value = "";
+   405→  };
+   406→
+   407→  const countdownLabel =
+   408→    b.days_until === 0
+   409→      ? "Today"
+   410→      : b.days_until === 1
+   411→      ? "1 day left"
+   412→      : b.days_until > 0
+   413→      ? `${b.days_until} days left`
+   414→      : `${Math.abs(b.days_until)}d ago`;
+   415→
+   416→  return (
+   417→    <Card
+   418→      className={cn(
+   419→        "flex flex-col transition-shadow hover:shadow-md overflow-hidden",
+   420→        config.border,
+   421→        b.urgency === "today" && "border-2",
+   422→        isPast && "opacity-70"
+   423→      )}
+   424→    >
+   425→      {/* Urgency strip */}
+   426→      {showStrip && (
+   427→        <div
+   428→          className={cn(
+   429→            "flex items-center gap-2 px-4 py-1.5 text-xs font-semibold",
+   430→            config.strip
+   431→          )}
+   432→        >
+   433→          <UrgencyIcon className="h-3.5 w-3.5" />
+   434→          <span>{config.label}</span>
+   435→          <span className="ml-auto tabular-nums">{countdownLabel}</span>
+   436→        </div>
+   437→      )}
+   438→      {isPast && (
+   439→        <div className="flex items-center gap-2 bg-muted px-4 py-1.5 text-xs font-medium text-muted-foreground">
+   440→          <CheckCircle2 className="h-3.5 w-3.5" />
+   441→          <span>Completed / Past</span>
+   442→        </div>
+   443→      )}
+   444→
+   445→      <CardContent className="flex flex-1 flex-col gap-3 pt-4">
+   446→        {/* Header: tender + type */}
+   447→        <div className="flex items-start justify-between gap-2">
+   448→          <button
+   449→            onClick={() => onOpenTender(b.tender_id)}
+   450→            className="group flex min-w-0 items-start gap-2 text-left"
+   451→            title="Open tender"
+   452→          >
+   453→            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+   454→              <MapPin className="h-4 w-4" />
+   455→            </div>
+   456→            <div className="min-w-0">
+   457→              <div className="flex items-center gap-1.5">
+   458→                <span className="font-mono text-xs font-semibold text-primary group-hover:underline">
+   459→                  {b.tender_reference || "—"}
+   460→                </span>
+   461→                <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+   462→              </div>
+   463→              <div
+   464→                className="line-clamp-2 text-sm font-semibold text-foreground group-hover:underline"
+   465→                title={b.tender_title || ""}
+   466→              >
+   467→                {b.tender_title || "Untitled tender"}
+   468→              </div>
+   469→            </div>
+   470→          </button>
+   471→          <Badge
+   472→            variant="outline"
+   473→            className={cn("shrink-0 border", typeBadgeClass(b.briefing_type))}
+   474→          >
+   475→            {b.briefing_type}
+   476→          </Badge>
+   477→        </div>
+   478→
+   479→        {/* Client */}
+   480→        {b.client && (
+   481→          <div className="flex items-center gap-1.5 text-xs">
+   482→            <Building2 className="h-3 w-3 text-muted-foreground" />
+   483→            <span className="font-medium text-foreground">{b.client}</span>
+   484→          </div>
+   485→        )}
+   486→
+   487→        {/* Details grid — Date, Time, Location, Contact */}
+   488→        <div className="grid grid-cols-1 gap-2 rounded-lg bg-muted/40 p-3 text-xs sm:grid-cols-2">
+   489→          <div className="flex items-center gap-2">
+   490→            <CalendarDays className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+   491→            <span className="text-muted-foreground">Date:</span>
+   492→            <span
+   493→              className={cn(
+   494→                "font-medium tabular-nums",
+   495→                !isPast && config.text
+   496→              )}
+   497→            >
+   498→              {formatDate(b.date)}
+   499→            </span>
+   500→          </div>
+   501→          <div className="flex items-center gap-2">
+   502→            <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+   503→            <span className="text-muted-foreground">Time:</span>
+   504→            <span className="font-medium text-foreground tabular-nums">
+   505→              {b.time || "—"}
+   506→            </span>
+   507→          </div>
+   508→          <div className="flex items-center gap-2 sm:col-span-2">
+   509→            <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+   510→            <span className="text-muted-foreground">Location:</span>
+   511→            <span className="truncate font-medium text-foreground">
+   512→              {b.location || "—"}
+   513→            </span>
+   514→          </div>
+   515→          <div className="flex items-center gap-2 sm:col-span-2">
+   516→            <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+   517→            <span className="text-muted-foreground">Contact:</span>
+   518→            <span className="truncate font-medium text-foreground">
+   519→              {b.contact_person || "—"}
+   520→            </span>
+   521→          </div>
+   522→        </div>
+   523→
+   524→        {/* Attendance badges: required + confirmed */}
+   525→        <div className="flex flex-wrap items-center gap-2">
+   526→          {b.attendance_required ? (
+   527→            <Badge
+   528→              variant="outline"
+   529→              className="bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border-rose-200 dark:border-rose-900"
+   530→            >
+   531→              <UserCheck className="h-3 w-3" />
+   532→              Compulsory
+   533→            </Badge>
+   534→          ) : (
+   535→            <Badge variant="outline" className="bg-muted text-muted-foreground">
+   536→              Optional
+   537→            </Badge>
+   538→          )}
+   539→          {b.attendance_confirmed ? (
+   540→            <Badge
+   541→              variant="outline"
+   542→              className="bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900"
+   543→            >
+   544→              <CheckCircle2 className="h-3 w-3" />
+   545→              Confirmed
+   546→            </Badge>
+   547→          ) : (
+   548→            <Badge
+   549→              variant="outline"
+   550→              className="bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border-amber-200 dark:border-amber-900"
+   551→            >
+   552→              <Clock className="h-3 w-3" />
+   553→              Not confirmed
+   554→            </Badge>
+   555→          )}
+   556→        </div>
+   557→
+   558→        {/* Person attending */}
+   559→        <div className="flex items-center gap-2 text-xs">
+   560→          <UserCheck className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+   561→          <span className="text-muted-foreground">Person attending:</span>
+   562→          {b.person_attending ? (
+   563→            <span className="font-medium text-foreground">{b.person_attending}</span>
+   564→          ) : b.attendance_required ? (
+   565→            <span className="font-medium text-amber-700 dark:text-amber-400">
+   566→              Not assigned
+   567→            </span>
+   568→          ) : (
+   569→            <span className="font-medium text-muted-foreground">—</span>
+   570→          )}
+   571→        </div>
+   572→
+   573→        {/* Alert strips */}
+   574→        {(needsConfirmation || noAttendee) && (
+   575→          <div className="space-y-1.5">
+   576→            {needsConfirmation && (
+   577→              <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
+   578→                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+   579→                <span>
+   580→                  Attendance confirmation required — briefing is within{" "}
+   581→                  <span className="font-bold">
+   582→                    {b.days_until === 0
+   583→                      ? "today"
+   584→                      : `${b.days_until} day${b.days_until === 1 ? "" : "s"}`}
+   585→                    !
+   586→                  </span>
+   587→                </span>
+   588→              </div>
+   589→            )}
+   590→            {noAttendee && (
+   591→              <div className="flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800 dark:border-rose-800 dark:bg-rose-950/50 dark:text-rose-300">
+   592→                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+   593→                <span>No person assigned to attend this compulsory briefing.</span>
+   594→              </div>
+   595→            )}
+   596→          </div>
+   597→        )}
+   598→
+   599→        {/* Certificate section */}
+   600→        <div className="rounded-lg border border-border bg-muted/20 p-3">
+   601→          <div className="mb-2 flex items-center gap-2">
+   602→            <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+   603→            <span className="text-xs font-semibold text-foreground">
+   604→              Attendance Certificate
+   605→            </span>
+   606→          </div>
+   607→          {b.certificate_url ? (
+   608→            <div className="flex items-center gap-2">
+   609→              <a
+   610→                href={b.certificate_url}
+   611→                target="_blank"
+   612→                rel="noopener noreferrer"
+   613→                className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300 dark:hover:bg-emerald-900"
+   614→              >
+   615→                <ExternalLink className="h-3.5 w-3.5" />
+   616→                View Certificate
+   617→              </a>
+   618→              <Button
+   619→                size="sm"
+   620→                variant="ghost"
+   621→                className="h-7 px-2 text-xs text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950"
+   622→                onClick={() => onRemoveCertificate(b)}
+   623→                disabled={isRemoving}
+   624→              >
+   625→                {isRemoving ? (
+   626→                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+   627→                ) : (
+   628→                  <Trash2 className="h-3.5 w-3.5" />
+   629→                )}
+   630→                Remove
+   631→              </Button>
+   632→            </div>
+   633→          ) : (
+   634→            <>
+   635→              <input
+   636→                ref={fileRef}
+   637→                type="file"
+   638→                accept=".pdf,.doc,.docx,.jpg,.png"
+   639→                className="hidden"
+   640→                onChange={handleFile}
+   641→              />
+   642→              <Button
+   643→                size="sm"
+   644→                variant="outline"
+   645→                className="h-8 w-full justify-start text-xs"
+   646→                onClick={() => fileRef.current?.click()}
+   647→                disabled={isUploading}
+   648→              >
+   649→                {isUploading ? (
+   650→                  <>
+   651→                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+   652→                    Uploading…
+   653→                  </>
+   654→                ) : (
+   655→                  <>
+   656→                    <Upload className="h-3.5 w-3.5" />
+   657→                    Upload certificate
+   658→                  </>
+   659→                )}
+   660→              </Button>
+   661→              <p className="mt-1 text-[10px] text-muted-foreground">
+   662→                PDF, DOC, DOCX, JPG or PNG. Upload auto-marks attendance as
+   663→                confirmed.
+   664→              </p>
+   665→            </>
+   666→          )}
+   667→        </div>
+   668→
+   669→        {/* Notes */}
+   670→        {b.notes && (
+   671→          <div className="rounded-md bg-muted/40 px-3 py-2 text-xs">
+   672→            <p className="mb-1 font-medium text-muted-foreground">Notes</p>
+   673→            <p className="whitespace-pre-wrap text-foreground">{b.notes}</p>
+   674→          </div>
+   675→        )}
+   676→
+   677→        {/* Actions */}
+   678→        <div className="mt-auto flex items-center justify-end gap-1 border-t pt-3">
+   679→          {needsConfirmation && (
+   680→            <Button
+   681→              size="sm"
+   682→              variant="outline"
+   683→              className="h-8 mr-auto border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300 dark:hover:bg-emerald-900"
+   684→              onClick={() => onConfirmAttendance(b)}
+   685→            >
+   686→              <CheckCircle2 className="h-3.5 w-3.5" />
+   687→              Confirm attendance
+   688→            </Button>
+   689→          )}
+   690→          <Button
+   691→            size="sm"
+   692→            variant="ghost"
+   693→            className="h-8 px-2"
+   694→            onClick={() => onEdit(b)}
+   695→          >
+   696→            <Pencil className="h-3.5 w-3.5" />
+   697→            Edit
+   698→          </Button>
+   699→          <Button
+   700→            size="sm"
+   701→            variant="ghost"
+   702→            className="h-8 px-2 text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950"
+   703→            onClick={() => onDelete(b)}
+   704→          >
+   705→            <Trash2 className="h-3.5 w-3.5" />
+   706→            Delete
+   707→          </Button>
+   708→        </div>
+   709→      </CardContent>
+   710→    </Card>
+   711→  );
+   712→}
+   713→
+   714→// =====================================================================
+   715→// Briefing dialog (create / edit)
+   716→// =====================================================================
+   717→interface BriefingDialogProps {
+   718→  open: boolean;
+   719→  editing: BriefingAlert | null;
+   720→  tenders: TenderOption[];
+   721→  tendersLoading: boolean;
+   722→  onClose: () => void;
+   723→  onSaved: () => void;
+   724→}
+   725→
+   726→function BriefingDialog({
+   727→  open,
+   728→  editing,
+   729→  tenders,
+   730→  tendersLoading,
+   731→  onClose,
+   732→  onSaved,
+   733→}: BriefingDialogProps) {
+   734→  const [form, setForm] = useState<BriefingForm>(EMPTY_FORM);
+   735→  const [saving, setSaving] = useState(false);
+   736→  const isEdit = editing !== null;
+   737→
+   738→  useEffect(() => {
+   739→    if (open) {
+   740→      if (editing) {
+   741→        setForm({
+   742→          tender_id: String(editing.tender_id),
+   743→          briefing_type: editing.briefing_type || "Briefing",
+   744→          date: editing.date || "",
+   745→          time: editing.time || "",
+   746→          location: editing.location || "",
+   747→          contact_person: editing.contact_person || "",
+   748→          attendance_required: editing.attendance_required,
+   749→          attendance_confirmed: editing.attendance_confirmed,
+   750→          person_attending: editing.person_attending || "",
+   751→          notes: editing.notes || "",
+   752→        });
+   753→      } else {
+   754→        setForm(EMPTY_FORM);
+   755→      }
+   756→    }
+   757→  }, [open, editing]);
+   758→
+   759→  const update = <K extends keyof BriefingForm>(key: K, value: BriefingForm[K]) =>
+   760→    setForm((f) => ({ ...f, [key]: value }));
+   761→
+   762→  const canSave =
+   763→    form.date.length > 0 && (isEdit || form.tender_id.length > 0);
+   764→
+   765→  const handleSave = async () => {
+   766→    if (!form.date) {
+   767→      toast.error("Date is required");
+   768→      return;
+   769→    }
+   770→    if (!isEdit && !form.tender_id) {
+   771→      toast.error("Please select a tender");
+   772→      return;
+   773→    }
+   774→    setSaving(true);
+   775→    try {
+   776→      const payload: Record<string, any> = {
+   777→        briefing_type: form.briefing_type,
+   778→        date: form.date,
+   779→        time: form.time || null,
+   780→        location: form.location || null,
+   781→        contact_person: form.contact_person || null,
+   782→        attendance_required: form.attendance_required,
+   783→        attendance_confirmed: form.attendance_confirmed,
+   784→        person_attending: form.person_attending || null,
+   785→        notes: form.notes || null,
+   786→      };
+   787→      if (isEdit && editing) {
+   788→        await api.updateBriefing(editing.id, payload);
+   789→        toast.success("Briefing updated");
+   790→      } else {
+   791→        const tenderId = Number(form.tender_id);
+   792→        await api.createBriefing(tenderId, payload);
+   793→        toast.success("Briefing added");
+   794→      }
+   795→      onSaved();
+   796→      onClose();
+   797→    } catch (e: any) {
+   798→      toast.error(e?.message || "Failed to save briefing");
+   799→    } finally {
+   800→      setSaving(false);
+   801→    }
+   802→  };
+   803→
+   804→  return (
+   805→    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+   806→      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+   807→        <DialogHeader>
+   808→          <DialogTitle className="flex items-center gap-2">
+   809→            {isEdit ? (
+   810→              <>
+   811→                <Pencil className="h-4 w-4 text-primary" />
+   812→                Edit Briefing
+   813→              </>
+   814→            ) : (
+   815→              <>
+   816→                <CalendarPlus className="h-4 w-4 text-primary" />
+   817→                Add Briefing
+   818→              </>
+   819→            )}
+   820→          </DialogTitle>
+   821→          <DialogDescription>
+   822→            {isEdit
+   823→              ? "Update the briefing or site inspection details."
+   824→              : "Schedule a compulsory briefing or site inspection for a tender."}
+   825→          </DialogDescription>
+   826→        </DialogHeader>
+   827→
+   828→        <div className="grid gap-4 py-2">
+   829→          {/* Tender selector — disabled in edit mode */}
+   830→          <div className="grid gap-2">
+   831→            <Label htmlFor="b-tender">
+   832→              Tender <span className="text-rose-500">*</span>
+   833→            </Label>
+   834→            {isEdit ? (
+   835→              <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+   836→                <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
+   837→                <span className="truncate text-muted-foreground">
+   838→                  <span className="font-mono text-xs font-semibold text-foreground">
+   839→                    {editing?.tender_reference}
+   840→                  </span>{" "}
+   841→                  — {editing?.tender_title}
+   842→                </span>
+   843→              </div>
+   844→            ) : tendersLoading ? (
+   845→              <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+   846→                <Loader2 className="h-4 w-4 animate-spin" />
+   847→                Loading tenders…
+   848→              </div>
+   849→            ) : tenders.length === 0 ? (
+   850→              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+   851→                No tenders available. Create a tender first before scheduling a
+   852→                briefing.
+   853→              </div>
+   854→            ) : (
+   855→              <Select
+   856→                value={form.tender_id}
+   857→                onValueChange={(v) => update("tender_id", v)}
+   858→              >
+   859→                <SelectTrigger id="b-tender" className="w-full">
+   860→                  <SelectValue placeholder="Select a tender" />
+   861→                </SelectTrigger>
+   862→                <SelectContent>
+   863→                  {tenders.map((t) => (
+   864→                    <SelectItem key={t.id} value={String(t.id)}>
+   865→                      <span className="font-mono text-xs">
+   866→                        {t.reference_number}
+   867→                      </span>
+   868→                      {" — "}
+   869→                      <span className="truncate">{t.title}</span>
+   870→                    </SelectItem>
+   871→                  ))}
+   872→                </SelectContent>
+   873→              </Select>
+   874→            )}
+   875→          </div>
+   876→
+   877→          {/* Type + Date + Time */}
+   878→          <div className="grid gap-4 sm:grid-cols-3">
+   879→            <div className="grid gap-2">
+   880→              <Label htmlFor="b-type">
+   881→                Type <span className="text-rose-500">*</span>
+   882→              </Label>
+   883→              <Select
+   884→                value={form.briefing_type}
+   885→                onValueChange={(v) => update("briefing_type", v as BriefingType)}
+   886→              >
+   887→                <SelectTrigger id="b-type" className="w-full">
+   888→                  <SelectValue />
+   889→                </SelectTrigger>
+   890→                <SelectContent>
+   891→                  {BRIEFING_TYPES.map((t) => (
+   892→                    <SelectItem key={t} value={t}>
+   893→                      {t}
+   894→                    </SelectItem>
+   895→                  ))}
+   896→                </SelectContent>
+   897→              </Select>
+   898→            </div>
+   899→            <div className="grid gap-2">
+   900→              <Label htmlFor="b-date">
+   901→                Date <span className="text-rose-500">*</span>
+   902→              </Label>
+   903→              <Input
+   904→                id="b-date"
+   905→                type="date"
+   906→                value={form.date}
+   907→                onChange={(e) => update("date", e.target.value)}
+   908→              />
+   909→            </div>
+   910→            <div className="grid gap-2">
+   911→              <Label htmlFor="b-time">Time</Label>
+   912→              <Input
+   913→                id="b-time"
+   914→                type="time"
+   915→                value={form.time}
+   916→                onChange={(e) => update("time", e.target.value)}
+   917→              />
+   918→            </div>
+   919→          </div>
+   920→
+   921→          {/* Location + Contact */}
+   922→          <div className="grid gap-4 sm:grid-cols-2">
+   923→            <div className="grid gap-2">
+   924→              <Label htmlFor="b-location">Location</Label>
+   925→              <Input
+   926→                id="b-location"
+   927→                value={form.location}
+   928→                onChange={(e) => update("location", e.target.value)}
+   929→                placeholder="e.g. Client head office, Boardroom A"
+   930→              />
+   931→            </div>
+   932→            <div className="grid gap-2">
+   933→              <Label htmlFor="b-contact">Contact person</Label>
+   934→              <Input
+   935→                id="b-contact"
+   936→                value={form.contact_person}
+   937→                onChange={(e) => update("contact_person", e.target.value)}
+   938→                placeholder="e.g. Jane Doe — 011 555 0100"
+   939→              />
+   940→            </div>
+   941→          </div>
+   942→
+   943→          {/* Person attending */}
+   944→          <div className="grid gap-2">
+   945→            <Label htmlFor="b-attending">Person attending</Label>
+   946→            <Input
+   947→              id="b-attending"
+   948→              value={form.person_attending}
+   949→              onChange={(e) => update("person_attending", e.target.value)}
+   950→              placeholder="Who will attend from your side"
+   951→            />
+   952→          </div>
+   953→
+   954→          {/* Attendance switches */}
+   955→          <div className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
+   956→            <div className="flex items-center justify-between gap-3">
+   957→              <div className="min-w-0">
+   958→                <Label htmlFor="b-required" className="cursor-pointer">
+   959→                  Attendance required
+   960→                </Label>
+   961→                <p className="text-[11px] text-muted-foreground">
+   962→                  Is attendance compulsory?
+   963→                </p>
+   964→              </div>
+   965→              <Switch
+   966→                id="b-required"
+   967→                checked={form.attendance_required}
+   968→                onCheckedChange={(v) => update("attendance_required", v)}
+   969→              />
+   970→            </div>
+   971→            <div className="flex items-center justify-between gap-3">
+   972→              <div className="min-w-0">
+   973→                <Label htmlFor="b-confirmed" className="cursor-pointer">
+   974→                  Attendance confirmed
+   975→                </Label>
+   976→                <p className="text-[11px] text-muted-foreground">
+   977→                  Have you confirmed?
+   978→                </p>
+   979→              </div>
+   980→              <Switch
+   981→                id="b-confirmed"
+   982→                checked={form.attendance_confirmed}
+   983→                onCheckedChange={(v) => update("attendance_confirmed", v)}
+   984→              />
+   985→            </div>
+   986→          </div>
+   987→
+   988→          {/* Notes */}
+   989→          <div className="grid gap-2">
+   990→            <Label htmlFor="b-notes">Notes</Label>
+   991→            <Textarea
+   992→              id="b-notes"
+   993→              value={form.notes}
+   994→              onChange={(e) => update("notes", e.target.value)}
+   995→              placeholder="Parking, security clearance, documents to bring, etc."
+   996→              rows={3}
+   997→            />
+   998→          </div>
+   999→        </div>
+  1000→
+  1001→        <DialogFooter>
+  1002→          <Button variant="outline" onClick={onClose} disabled={saving}>
+  1003→            Cancel
+  1004→          </Button>
+  1005→          <Button
+  1006→            onClick={handleSave}
+  1007→            disabled={saving || !canSave || (!isEdit && tenders.length === 0)}
+  1008→          >
+  1009→            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+  1010→            {isEdit ? "Save changes" : "Add briefing"}
+  1011→          </Button>
+  1012→        </DialogFooter>
+  1013→      </DialogContent>
+  1014→    </Dialog>
+  1015→  );
+  1016→}
+  1017→
+  1018→// =====================================================================
+  1019→// Delete confirmation
+  1020→// =====================================================================
+  1021→function DeleteDialog({
+  1022→  open,
+  1023→  briefing,
+  1024→  onClose,
+  1025→  onConfirm,
+  1026→  deleting,
+  1027→}: {
+  1028→  open: boolean;
+  1029→  briefing: BriefingAlert | null;
+  1030→  onClose: () => void;
+  1031→  onConfirm: () => void;
+  1032→  deleting: boolean;
+  1033→}) {
+  1034→  return (
+  1035→    <AlertDialog open={open} onOpenChange={(v) => !v && onClose()}>
+  1036→      <AlertDialogContent>
+  1037→        <AlertDialogHeader>
+  1038→          <AlertDialogTitle className="flex items-center gap-2">
+  1039→            <AlertTriangle className="h-5 w-5 text-rose-600" />
+  1040→            Delete briefing
+  1041→          </AlertDialogTitle>
+  1042→          <AlertDialogDescription>
+  1043→            Are you sure you want to delete this{" "}
+  1044→            <span className="font-semibold text-foreground">
+  1045→              {briefing?.briefing_type.toLowerCase()}
+  1046→            </span>{" "}
+  1047→            on{" "}
+  1048→            <span className="font-semibold text-foreground">
+  1049→              {formatDate(briefing?.date)}
+  1050→            </span>
+  1051→            ? This action cannot be undone.
+  1052→          </AlertDialogDescription>
+  1053→        </AlertDialogHeader>
+  1054→        <AlertDialogFooter>
+  1055→          <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+  1056→          <AlertDialogAction
+  1057→            onClick={(e) => {
+  1058→              e.preventDefault();
+  1059→              onConfirm();
+  1060→            }}
+  1061→            disabled={deleting}
+  1062→            className="bg-rose-600 text-white hover:bg-rose-700 focus-visible:ring-rose-600/30"
+  1063→          >
+  1064→            {deleting && <Loader2 className="h-4 w-4 animate-spin" />}
+  1065→            Delete
+  1066→          </AlertDialogAction>
+  1067→        </AlertDialogFooter>
+  1068→      </AlertDialogContent>
+  1069→    </AlertDialog>
+  1070→  );
+  1071→}
+  1072→
+  1073→// =====================================================================
+  1074→// Main component
+  1075→// =====================================================================
+  1076→export function BriefingsTab() {
+  1077→  const [alerts, setAlerts] = useState<BriefingAlert[]>([]);
+  1078→  const [upcoming, setUpcoming] = useState<BriefingAlert[]>([]);
+  1079→  const [allBriefings, setAllBriefings] = useState<BriefingAlert[]>([]);
+  1080→  const [summary, setSummary] = useState<BriefingSummary | null>(null);
+  1081→  const [tenders, setTenders] = useState<TenderOption[]>([]);
+  1082→  const [loading, setLoading] = useState(true);
+  1083→  const [tendersLoading, setTendersLoading] = useState(false);
+  1084→  const [refreshing, setRefreshing] = useState(false);
+  1085→  const [error, setError] = useState<string | null>(null);
+  1086→
+  1087→  const [view, setView] = useState<"upcoming" | "all">("upcoming");
+  1088→  const [typeFilter, setTypeFilter] = useState<"all" | BriefingType>("all");
+  1089→  const [search, setSearch] = useState("");
+  1090→
+  1091→  const [dialogOpen, setDialogOpen] = useState(false);
+  1092→  const [editingBriefing, setEditingBriefing] = useState<BriefingAlert | null>(
+  1093→    null
+  1094→  );
+  1095→
+  1096→  const [deleteBriefing, setDeleteBriefing] = useState<BriefingAlert | null>(
+  1097→    null
+  1098→  );
+  1099→  const [deleteOpen, setDeleteOpen] = useState(false);
+  1100→  const [deleting, setDeleting] = useState(false);
+  1101→
+  1102→  const [uploadingId, setUploadingId] = useState<number | null>(null);
+  1103→  const [removingCertId, setRemovingCertId] = useState<number | null>(null);
+  1104→  const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  1105→
+  1106→  const fetchData = useCallback(async (isRefresh = false) => {
+  1107→    if (isRefresh) setRefreshing(true);
+  1108→    else setLoading(true);
+  1109→    setError(null);
+  1110→    try {
+  1111→      const [alertsRes, allRes] = await Promise.all([
+  1112→        api.getBriefingAlerts(),
+  1113→        api.listBriefings(false, 30),
+  1114→      ]);
+  1115→      setAlerts((alertsRes.alerts || []).map(toBriefingView));
+  1116→      setUpcoming((alertsRes.upcoming || []).map(toBriefingView));
+  1117→      setSummary(alertsRes.summary as BriefingSummary);
+  1118→      setAllBriefings((allRes.items || []).map(toBriefingView));
+  1119→    } catch (e: any) {
+  1120→      setError(e?.message || "Failed to load briefings");
+  1121→    } finally {
+  1122→      setLoading(false);
+  1123→      setRefreshing(false);
+  1124→    }
+  1125→  }, []);
+  1126→
+  1127→  const fetchTenders = useCallback(async () => {
+  1128→    setTendersLoading(true);
+  1129→    try {
+  1130→      const res = await api.listTenders();
+  1131→      setTenders(
+  1132→        (res.items || []).map((t: any) => ({
+  1133→          id: t.id,
+  1134→          reference_number: t.reference_number,
+  1135→          title: t.title,
+  1136→        }))
+  1137→      );
+  1138→    } catch {
+  1139→      // silent — dialog will show empty state
+  1140→    } finally {
+  1141→      setTendersLoading(false);
+  1142→    }
+  1143→  }, []);
+  1144→
+  1145→  useEffect(() => {
+  1146→    fetchData();
+  1147→  }, [fetchData]);
+  1148→
+  1149→  const openTender = (id: number) => {
+  1150→    useDashboardStore.getState().setTab("tenders");
+  1151→    setTimeout(() => useDashboardStore.getState().selectTender(id), 50);
+  1152→  };
+  1153→
+  1154→  // ---- Filtering ----
+  1155→  const filtered = useMemo(() => {
+  1156→    const source = view === "upcoming" ? upcoming : allBriefings;
+  1157→    const q = search.trim().toLowerCase();
+  1158→    return source.filter((b) => {
+  1159→      if (typeFilter !== "all" && b.briefing_type !== typeFilter) return false;
+  1160→      if (q) {
+  1161→        const hay =
+  1162→          `${b.tender_reference || ""} ${b.tender_title || ""} ${b.client || ""} ${b.location || ""}`.toLowerCase();
+  1163→        if (!hay.includes(q)) return false;
+  1164→      }
+  1165→      return true;
+  1166→    });
+  1167→  }, [view, upcoming, allBriefings, typeFilter, search]);
+  1168→
+  1169→  // ---- Group by date (ascending) ----
+  1170→  const grouped = useMemo(() => {
+  1171→    const sorted = [...filtered].sort((a, b) => {
+  1172→      const da = a.date ? new Date(a.date).getTime() : 0;
+  1173→      const db = b.date ? new Date(b.date).getTime() : 0;
+  1174→      return da - db;
+  1175→    });
+  1176→    const map = new Map<string, BriefingAlert[]>();
+  1177→    for (const b of sorted) {
+  1178→      const key = b.date || "no-date";
+  1179→      if (!map.has(key)) map.set(key, []);
+  1180→      map.get(key)!.push(b);
+  1181→    }
+  1182→    return Array.from(map.entries()).map(([key, items]) => {
+  1183→      let label = "No date";
+  1184→      let relative: string | null = null;
+  1185→      if (key !== "no-date") {
+  1186→        label = formatDate(key);
+  1187→        const d = new Date(key);
+  1188→        if (!isNaN(d.getTime())) {
+  1189→          const today = new Date();
+  1190→          today.setHours(0, 0, 0, 0);
+  1191→          d.setHours(0, 0, 0, 0);
+  1192→          const diff = Math.round(
+  1193→            (d.getTime() - today.getTime()) / 86400000
+  1194→          );
+  1195→          if (diff === 0) relative = "Today";
+  1196→          else if (diff === 1) relative = "Tomorrow";
+  1197→          else if (diff === -1) relative = "Yesterday";
+  1198→          else if (diff > 1 && diff <= 7) relative = `In ${diff} days`;
+  1199→          else if (diff < 0) relative = `${Math.abs(diff)}d ago`;
+  1200→        }
+  1201→      }
+  1202→      return { key, items, label, relative };
+  1203→    });
+  1204→  }, [filtered]);
+  1205→
+  1206→  // ---- Mutations ----
+  1207→  const openNew = () => {
+  1208→    setEditingBriefing(null);
+  1209→    fetchTenders();
+  1210→    setDialogOpen(true);
+  1211→  };
+  1212→
+  1213→  const openEdit = (b: BriefingAlert) => {
+  1214→    setEditingBriefing(b);
+  1215→    fetchTenders();
+  1216→    setDialogOpen(true);
+  1217→  };
+  1218→
+  1219→  const requestDelete = (b: BriefingAlert) => {
+  1220→    setDeleteBriefing(b);
+  1221→    setDeleteOpen(true);
+  1222→  };
+  1223→
+  1224→  const confirmDelete = async () => {
+  1225→    if (!deleteBriefing) return;
+  1226→    setDeleting(true);
+  1227→    try {
+  1228→      await api.deleteBriefing(deleteBriefing.id);
+  1229→      toast.success("Briefing deleted");
+  1230→      setDeleteOpen(false);
+  1231→      setDeleteBriefing(null);
+  1232→      fetchData(true);
+  1233→    } catch (e: any) {
+  1234→      toast.error(e?.message || "Failed to delete briefing");
+  1235→    } finally {
+  1236→      setDeleting(false);
+  1237→    }
+  1238→  };
+  1239→
+  1240→  const handleConfirmAttendance = async (b: BriefingAlert) => {
+  1241→    setConfirmingId(b.id);
+  1242→    try {
+  1243→      await api.updateBriefing(b.id, { attendance_confirmed: true });
+  1244→      toast.success("Attendance confirmed");
+  1245→      fetchData(true);
+  1246→    } catch (e: any) {
+  1247→      toast.error(e?.message || "Failed to confirm attendance");
+  1248→    } finally {
+  1249→      setConfirmingId(null);
+  1250→    }
+  1251→  };
+  1252→
+  1253→  const handleUploadCertificate = async (b: BriefingAlert, file: File) => {
+  1254→    setUploadingId(b.id);
+  1255→    try {
+  1256→      await api.uploadBriefingCertificate(b.id, file);
+  1257→      toast.success("Certificate uploaded — attendance marked as confirmed");
+  1258→      fetchData(true);
+  1259→    } catch (e: any) {
+  1260→      toast.error(e?.message || "Failed to upload certificate");
+  1261→    } finally {
+  1262→      setUploadingId(null);
+  1263→    }
+  1264→  };
+  1265→
+  1266→  const handleRemoveCertificate = async (b: BriefingAlert) => {
+  1267→    setRemovingCertId(b.id);
+  1268→    try {
+  1269→      await api.deleteBriefingCertificate(b.id);
+  1270→      toast.success("Certificate removed");
+  1271→      fetchData(true);
+  1272→    } catch (e: any) {
+  1273→      toast.error(e?.message || "Failed to remove certificate");
+  1274→    } finally {
+  1275→      setRemovingCertId(null);
+  1276→    }
+  1277→  };
+  1278→
+  1279→  // ---- Loading state ----
+  1280→  if (loading) {
+  1281→    return (
+  1282→      <div className="space-y-6">
+  1283→        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+  1284→          <div className="space-y-2">
+  1285→            <Skeleton className="h-8 w-72" />
+  1286→            <Skeleton className="h-4 w-96" />
+  1287→          </div>
+  1288→          <Skeleton className="h-9 w-32" />
+  1289→        </div>
+  1290→        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+  1291→          {Array.from({ length: 6 }).map((_, i) => (
+  1292→            <StatSkeleton key={i} />
+  1293→          ))}
+  1294→        </div>
+  1295→        <div className="space-y-4">
+  1296→          {Array.from({ length: 4 }).map((_, i) => (
+  1297→            <Skeleton key={i} className="h-44 w-full rounded-xl" />
+  1298→          ))}
+  1299→        </div>
+  1300→      </div>
+  1301→    );
+  1302→  }
+  1303→
+  1304→  // ---- Error state ----
+  1305→  if (error) {
+  1306→    return (
+  1307→      <div className="space-y-6">
+  1308→        <div>
+  1309→          <h1 className="text-2xl font-bold tracking-tight">
+  1310→            Briefings &amp; Site Inspections
+  1311→          </h1>
+  1312→          <p className="text-sm text-muted-foreground">
+  1313→            Track compulsory briefings and site inspections
+  1314→          </p>
+  1315→        </div>
+  1316→        <Alert variant="destructive">
+  1317→          <AlertTriangle className="h-4 w-4" />
+  1318→          <AlertTitle>Couldn&apos;t load your briefings</AlertTitle>
+  1319→          <AlertDescription>
+  1320→            <p className="mb-3">{error}</p>
+  1321→            <Button
+  1322→              size="sm"
+  1323→              variant="outline"
+  1324→              onClick={() => fetchData()}
+  1325→              className="border-destructive/40 text-destructive hover:bg-destructive/10"
+  1326→            >
+  1327→              <RefreshCw className="h-3.5 w-3.5" />
+  1328→              Try again
+  1329→            </Button>
+  1330→          </AlertDescription>
+  1331→        </Alert>
+  1332→      </div>
+  1333→    );
+  1334→  }
+  1335→
+  1336→  const totalAll = allBriefings.length;
+  1337→  const hasAlerts = (summary?.total_alerts ?? 0) > 0;
+  1338→  const hasToday = (summary?.today_count ?? 0) > 0;
+  1339→
+  1340→  return (
+  1341→    <div className="space-y-6">
+  1342→      {/* ---- Page header ---- */}
+  1343→      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+  1344→        <div>
+  1345→          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+  1346→            <CalendarClock className="h-6 w-6 text-primary" />
+  1347→            Briefings &amp; Site Inspections
+  1348→          </h1>
+  1349→          <p className="text-sm text-muted-foreground">
+  1350→            Track compulsory tender briefings and site inspections
+  1351→          </p>
+  1352→        </div>
+  1353→        <Button
+  1354→          variant="ghost"
+  1355→          onClick={() => fetchData(true)}
+  1356→          disabled={refreshing}
+  1357→        >
+  1358→          <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
+  1359→          <span className="hidden sm:inline">Refresh</span>
+  1360→        </Button>
+  1361→      </div>
+  1362→
+  1363→      {/* ---- Alerts banner (CRITICAL) ---- */}
+  1364→      {hasAlerts && (
+  1365→        <Alert className="border-rose-300 bg-rose-50 dark:border-rose-800 dark:bg-rose-950/30">
+  1366→          <BellRing className="h-5 w-5 text-rose-600 dark:text-rose-400" />
+  1367→          <AlertTitle className="text-rose-800 dark:text-rose-300">
+  1368→            {summary!.total_alerts} compulsory briefing
+  1369→            {summary!.total_alerts === 1 ? "" : "s"} need attention — attendance
+  1370→            not confirmed or no person assigned
+  1371→          </AlertTitle>
+  1372→          <AlertDescription>
+  1373→            <div className="mt-2 space-y-2">
+  1374→              {alerts.slice(0, 4).map((b) => (
+  1375→                <div
+  1376→                  key={b.id}
+  1377→                  className="flex flex-col gap-2 rounded-md border border-rose-200 bg-card p-2.5 text-foreground dark:border-rose-900 sm:flex-row sm:items-center sm:justify-between"
+  1378→                >
+  1379→                  <div className="min-w-0">
+  1380→                    <div className="flex items-center gap-2">
+  1381→                      <span className="font-mono text-xs font-semibold text-primary">
+  1382→                        {b.tender_reference || "—"}
+  1383→                      </span>
+  1384→                      <Badge
+  1385→                        variant="outline"
+  1386→                        className={cn(
+  1387→                          "border text-[10px]",
+  1388→                          b.days_until <= 1
+  1389→                            ? "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300"
+  1390→                            : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
+  1391→                        )}
+  1392→                      >
+  1393→                        {b.days_until === 0
+  1394→                          ? "Today"
+  1395→                          : b.days_until === 1
+  1396→                          ? "1 day"
+  1397→                          : `${b.days_until} days`}
+  1398→                      </Badge>
+  1399→                    </div>
+  1400→                    <div className="line-clamp-1 text-xs font-medium">
+  1401→                      {b.tender_title || "Untitled tender"}
+  1402→                    </div>
+  1403→                    <div className="text-[11px] text-muted-foreground">
+  1404→                      {formatDate(b.date)}
+  1405→                      {b.time && ` • ${b.time}`}
+  1406→                      {!b.attendance_confirmed && " • Not confirmed"}
+  1407→                      {!b.person_attending && " • No attendee"}
+  1408→                    </div>
+  1409→                  </div>
+  1410→                  <Button
+  1411→                    size="sm"
+  1412→                    variant="outline"
+  1413→                    className="h-7 shrink-0 border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300 dark:hover:bg-emerald-900"
+  1414→                    onClick={() => handleConfirmAttendance(b)}
+  1415→                    disabled={confirmingId === b.id}
+  1416→                  >
+  1417→                    {confirmingId === b.id ? (
+  1418→                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+  1419→                    ) : (
+  1420→                      <CheckCircle2 className="h-3.5 w-3.5" />
+  1421→                    )}
+  1422→                    Confirm attendance
+  1423→                  </Button>
+  1424→                </div>
+  1425→              ))}
+  1426→              {alerts.length > 4 && (
+  1427→                <p className="text-[11px] text-rose-700 dark:text-rose-400">
+  1428→                  + {alerts.length - 4} more — see below
+  1429→                </p>
+  1430→              )}
+  1431→            </div>
+  1432→          </AlertDescription>
+  1433→        </Alert>
+  1434→      )}
+  1435→
+  1436→      {/* ---- Today banner (separate) ---- */}
+  1437→      {hasToday && (
+  1438→        <Alert className="border-rose-400 bg-rose-100 dark:border-rose-700 dark:bg-rose-900/40">
+  1439→          <BellRing className="h-5 w-5 text-rose-700 dark:text-rose-300" />
+  1440→          <AlertTitle className="text-rose-900 dark:text-rose-200">
+  1441→            {summary!.today_count} briefing{summary!.today_count === 1 ? "" : "s"} happening today!
+  1442→          </AlertTitle>
+  1443→          <AlertDescription className="text-rose-800 dark:text-rose-300">
+  1444→            Check the list below — make sure attendance is confirmed and a person
+  1445→            is assigned.
+  1446→          </AlertDescription>
+  1447→        </Alert>
+  1448→      )}
+  1449→
+  1450→      {/* ---- Success banner (when no alerts) ---- */}
+  1451→      {!hasAlerts && !hasToday && (summary?.total_upcoming ?? 0) > 0 && (
+  1452→        <Alert className="border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30">
+  1453→          <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+  1454→          <AlertTitle className="text-emerald-800 dark:text-emerald-300">
+  1455→            All upcoming briefings are confirmed
+  1456→          </AlertTitle>
+  1457→          <AlertDescription className="text-emerald-700 dark:text-emerald-400">
+  1458→            {summary?.total_upcoming} upcoming briefing
+  1459→            {summary?.total_upcoming === 1 ? "" : "s"} — all have attendance
+  1460→            confirmed and a person assigned. Nice work!
+  1461→          </AlertDescription>
+  1462→        </Alert>
+  1463→      )}
+  1464→
+  1465→      {/* ---- Summary stats row ---- */}
+  1466→      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+  1467→        <StatCard
+  1468→          icon={CalendarClock}
+  1469→          iconClass="bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+  1470→          value={summary?.total_upcoming ?? 0}
+  1471→          label="Upcoming"
+  1472→          subtitle="Next 30 days"
+  1473→        />
+  1474→        <StatCard
+  1475→          icon={BellRing}
+  1476→          iconClass="bg-rose-100 text-rose-600 dark:bg-rose-950 dark:text-rose-400"
+  1477→          value={summary?.today_count ?? 0}
+  1478→          label="Today"
+  1479→          subtitle="Happening today"
+  1480→        />
+  1481→        <StatCard
+  1482→          icon={Zap}
+  1483→          iconClass="bg-rose-100 text-rose-600 dark:bg-rose-950 dark:text-rose-400"
+  1484→          value={summary?.critical_count ?? 0}
+  1485→          label="Critical"
+  1486→          subtitle="≤ 1 day"
+  1487→        />
+  1488→        <StatCard
+  1489→          icon={Clock}
+  1490→          iconClass="bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400"
+  1491→          value={summary?.unconfirmed_count ?? 0}
+  1492→          label="Unconfirmed"
+  1493→          subtitle="Attendance pending"
+  1494→        />
+  1495→        <StatCard
+  1496→          icon={User}
+  1497→          iconClass="bg-orange-100 text-orange-600 dark:bg-orange-950 dark:text-orange-400"
+  1498→          value={summary?.no_attendee_count ?? 0}
+  1499→          label="No Attendee"
+  1500→          subtitle="No person assigned"
+  1501→        />
+  1502→        <StatCard
+  1503→          icon={Calendar}
+  1504→          iconClass="bg-primary/10 text-primary"
+  1505→          value={totalAll}
+  1506→          label="Total"
+  1507→          subtitle="All briefings"
+  1508→        />
+  1509→      </div>
+  1510→
+  1511→      {/* ---- Filter bar ---- */}
+  1512→      <Card>
+  1513→        <CardContent className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+  1514→          <Tabs
+  1515→            value={view}
+  1516→            onValueChange={(v) => setView(v as "upcoming" | "all")}
+  1517→          >
+  1518→            <TabsList>
+  1519→              <TabsTrigger value="upcoming">Upcoming (30 days)</TabsTrigger>
+  1520→              <TabsTrigger value="all">All</TabsTrigger>
+  1521→            </TabsList>
+  1522→          </Tabs>
+  1523→          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
+  1524→            <Select
+  1525→              value={typeFilter}
+  1526→              onValueChange={(v) => setTypeFilter(v as "all" | BriefingType)}
+  1527→            >
+  1528→              <SelectTrigger className="h-9 w-full sm:w-44">
+  1529→                <SelectValue placeholder="Type" />
+  1530→              </SelectTrigger>
+  1531→              <SelectContent>
+  1532→                <SelectItem value="all">All types</SelectItem>
+  1533→                <SelectItem value="Briefing">Briefings</SelectItem>
+  1534→                <SelectItem value="Site Inspection">Site Inspections</SelectItem>
+  1535→              </SelectContent>
+  1536→            </Select>
+  1537→            <div className="relative flex-1 sm:w-72">
+  1538→              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+  1539→              <Input
+  1540→                placeholder="Search reference, title, client…"
+  1541→                value={search}
+  1542→                onChange={(e) => setSearch(e.target.value)}
+  1543→                className="pl-9"
+  1544→              />
+  1545→            </div>
+  1546→            <Button onClick={openNew} className="shrink-0">
+  1547→              <CalendarPlus className="h-4 w-4" />
+  1548→              Add Briefing
+  1549→            </Button>
+  1550→          </div>
+  1551→        </CardContent>
+  1552→      </Card>
+  1553→
+  1554→      {/* ---- Briefings list ---- */}
+  1555→      {allBriefings.length === 0 ? (
+  1556→        <Card className="border-dashed">
+  1557→          <CardContent>
+  1558→            <EmptyState
+  1559→              icon={MapPin}
+  1560→              title="No briefings scheduled"
+  1561→              message="Track compulsory briefings and site inspections for your tenders. Add your first briefing to stay on top of attendance requirements."
+  1562→              iconClass="bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+  1563→              action={
+  1564→                <Button onClick={openNew} className="mt-1">
+  1565→                  <CalendarPlus className="h-4 w-4" />
+  1566→                  Add your first briefing
+  1567→                </Button>
+  1568→              }
+  1569→            />
+  1570→          </CardContent>
+  1571→        </Card>
+  1572→      ) : filtered.length === 0 ? (
+  1573→        <Card className="border-dashed">
+  1574→          <CardContent>
+  1575→            <EmptyState
+  1576→              icon={Search}
+  1577→              title="No matches"
+  1578→              message={
+  1579→                view === "upcoming"
+  1580→                  ? "No upcoming briefings in the next 30 days match your filters. Switch to 'All' to see past briefings."
+  1581→                  : "No briefings match your search. Try a different reference or clear the filter."
+  1582→              }
+  1583→              iconClass="bg-muted text-muted-foreground"
+  1584→            />
+  1585→          </CardContent>
+  1586→        </Card>
+  1587→      ) : (
+  1588→        <div className="space-y-6">
+  1589→          {grouped.map(({ key, items, label, relative }) => {
+  1590→            const first = items[0];
+  1591→            const headingConfig = first ? URGENCY_CONFIG[first.urgency] : null;
+  1592→            return (
+  1593→              <div key={key} className="space-y-3">
+  1594→                <div className="flex items-center gap-2">
+  1595→                  <CalendarDays className="h-4 w-4 text-primary" />
+  1596→                  <h2 className="text-sm font-semibold text-foreground">
+  1597→                    {label}
+  1598→                  </h2>
+  1599→                  {relative && (
+  1600→                    <Badge
+  1601→                      variant="outline"
+  1602→                      className={cn(
+  1603→                        "border px-1.5 py-0 text-[10px] tabular-nums",
+  1604→                        headingConfig?.badge ||
+  1605→                          "bg-muted text-muted-foreground"
+  1606→                      )}
+  1607→                    >
+  1608→                      {relative}
+  1609→                    </Badge>
+  1610→                  )}
+  1611→                  <Badge
+  1612→                    variant="outline"
+  1613→                    className="px-1.5 py-0 text-[10px] tabular-nums"
+  1614→                  >
+  1615→                    {items.length} {items.length === 1 ? "item" : "items"}
+  1616→                  </Badge>
+  1617→                  <div className="ml-2 h-px flex-1 bg-border" />
+  1618→                </div>
+  1619→                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+  1620→                  {items.map((b) => (
+  1621→                    <BriefingCard
+  1622→                      key={b.id}
+  1623→                      briefing={b}
+  1624→                      onEdit={openEdit}
+  1625→                      onDelete={requestDelete}
+  1626→                      onOpenTender={openTender}
+  1627→                      onConfirmAttendance={handleConfirmAttendance}
+  1628→                      onUploadCertificate={handleUploadCertificate}
+  1629→                      onRemoveCertificate={handleRemoveCertificate}
+  1630→                      uploadingId={uploadingId}
+  1631→                      removingCertId={removingCertId}
+  1632→                    />
+  1633→                  ))}
+  1634→                </div>
+  1635→              </div>
+  1636→            );
+  1637→          })}
+  1638→        </div>
+  1639→      )}
+  1640→
+  1641→      {/* ---- Info banner ---- */}
+  1642→      <Alert>
+  1643→        <BellRing className="h-4 w-4" />
+  1644→        <AlertDescription className="text-xs">
+  1645→          <strong>How briefing alerts work:</strong> A briefing appears as an
+  1646→          alert when it is compulsory, falls within the next 7 days, and either
+  1647→          attendance is not confirmed or no person has been assigned to attend.
+  1648→          Upload an attendance certificate to automatically mark a briefing as
+  1649→          confirmed.
+  1650→        </AlertDescription>
+  1651→      </Alert>
+  1652→
+  1653→      {/* ---- Dialogs ---- */}
+  1654→      <BriefingDialog
+  1655→        open={dialogOpen}
+  1656→        editing={editingBriefing}
+  1657→        tenders={tenders}
+  1658→        tendersLoading={tendersLoading}
+  1659→        onClose={() => setDialogOpen(false)}
+  1660→        onSaved={() => fetchData(true)}
+  1661→      />
+  1662→      <DeleteDialog
+  1663→        open={deleteOpen}
+  1664→        briefing={deleteBriefing}
+  1665→        onClose={() => {
+  1666→          setDeleteOpen(false);
+  1667→          setDeleteBriefing(null);
+  1668→        }}
+  1669→        onConfirm={confirmDelete}
+  1670→        deleting={deleting}
+  1671→      />
+  1672→    </div>
+  1673→  );
+  1674→}
+  1675→

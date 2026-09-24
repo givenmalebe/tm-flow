@@ -1230,3 +1230,54 @@ Stage Summary:
 - All 15 questions available as one-click suggested questions in the AI Assistant UI
 - AI answers using real tender data from the system (not hallucinated)
 - Mission-driven: every answer helps the user win the tender
+
+---
+Task ID: 38
+Agent: Main Orchestrator
+Task: Verify AI Tender Summary produces all 17 fields in the exact specified format
+
+Work Log:
+- Verified the SUMMARY_SYSTEM prompt in ai_module.py already uses the EXACT format with all 17 fields:
+  Tender, Client, Reference, Closing Date, Contract Period, Location, Scope, Personnel Required,
+  PSIRA Requirements, Mandatory Requirements, Documents Required, Briefing Required,
+  Evaluation Criteria, Pricing Requirements, Submission Method, Important Risks/Disqualification Points,
+  Current Status, Outstanding Items
+- Verified generate_tender_summary() function passes both tender_data and AI-extracted info to the AI
+- Verified the POST /api/tenders/{id}/ai-summary endpoint saves the summary to tender.ai_summary
+- Verified the AI tab in tender-detail.tsx has:
+  * "AI Tender Summary" card with Bot icon
+  * "Generate" / "Regenerate" button (calls api.aiTenderSummary)
+  * Full summary displayed in pre-formatted text (whitespace-pre-wrap)
+  * Empty state when no summary exists
+- Verified via API test:
+  * Generated summary for E137/2025 tender
+  * All 17 fields PRESENT and correctly populated:
+    - Tender: Provision of Security Guards for Municipal Facilities
+    - Client: City of Cape Town
+    - Reference: E137/2025
+    - Closing Date: 2026-01-22 (updated by addendum)
+    - Contract Period: 36 months
+    - Location: Multiple municipal facilities
+    - Scope: 24-hour security guarding services at 15 municipal facilities requiring 45 guards
+    - Personnel Required: 45 security guards
+    - PSIRA Requirements: Grades C, B, A
+    - Mandatory Requirements: None specified
+    - Documents Required: ID copies, PSIRA certificates, B-BBEE, CIPC, SARS, COIDA, Company profile, 3 references, ISO 9001 certificate, BBBEE sworn affidavit
+    - Briefing Required: No (updated by addendum - was compulsory, now removed)
+    - Evaluation Criteria: Functionality 60 points, Price 40 points
+    - Pricing Requirements: Weekend rates (25% premium) required
+    - Submission Method: e-procurement portal at www.etenders.gov.za (updated by addendum)
+    - Important Risks/Disqualification Points: None specified
+    - Current Status: New Opportunity
+    - Outstanding Items: All checklist items marked as Outstanding
+  * The summary correctly reflects addendum changes (closing date, briefing no longer required, e-procurement submission, new documents)
+- Verified in browser:
+  * Opened tender E137/2025 → AI tab → saw "AI Tender Summary" with "Regenerate" button
+  * Full summary text displayed with all 17 fields
+  * No errors, lint clean
+
+Stage Summary:
+- AI Tender Summary fully operational — produces a simple summary for every tender with all 17 required fields in the exact specified format
+- The summary incorporates addendum changes (e.g., closing date updated, briefing no longer required, new documents added)
+- Accessible from the tender detail AI tab with a "Generate" / "Regenerate" button
+- The summary is saved to the tender record and can be viewed anytime

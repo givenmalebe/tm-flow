@@ -200,7 +200,7 @@ const FAQS = [
   },
   {
     q: "Can I track multiple tender teams?",
-    a: "Yes. The Pro plan supports 5 users per workspace, and you can organise tenders by team, region or client. Each tender has its own status pipeline, checklist and communication log.",
+    a: "Yes. The Pro plan manages up to 5 tenders with 5 users, Business manages 10+ tenders with unlimited users, and Custom supports 10+ tenders with dedicated support. You can organise tenders by team, region or client.",
   },
   {
     q: "Does it work for PSIRA / security tenders specifically?",
@@ -999,12 +999,12 @@ function Testimonial() {
 function Pricing({ onGetStarted }: LandingPageProps) {
   const tiers = [
     {
-      name: "Starter",
+      name: "Solo",
       price: "R 0",
       period: "/month",
-      tagline: "For solo bid managers getting organised.",
+      tagline: "For managing a single tender at a time.",
       features: [
-        "Core tender tracking",
+        "Manage 1 tender",
         "Tender database",
         "Deadline reminders",
         "Submission tracking",
@@ -1017,17 +1017,51 @@ function Pricing({ onGetStarted }: LandingPageProps) {
       name: "Pro",
       price: "R 1,499",
       period: "/month",
-      tagline: "For tender teams running multiple bids.",
+      tagline: "For tender teams running up to 5 bids.",
       features: [
-        "Everything in Starter, plus:",
+        "Everything in Solo, plus:",
+        "Manage up to 5 tenders",
         "AI document reading",
         "AI tender assistant",
         "Compliance document library",
-        "Unlimited tenders",
         "5 users",
       ],
       cta: "Get Pro",
       highlighted: true,
+    },
+    {
+      name: "Business",
+      price: "R 3,999",
+      period: "/month",
+      tagline: "For teams managing more than 10 tenders.",
+      features: [
+        "Everything in Pro, plus:",
+        "Manage more than 10 tenders",
+        "AI-generated tender documents",
+        "AI readiness reports",
+        "Tender discovery & scraper",
+        "Excel export",
+        "Unlimited users",
+      ],
+      cta: "Get Business",
+      highlighted: false,
+    },
+    {
+      name: "Custom",
+      price: "Custom",
+      period: "",
+      tagline: "For organisations managing 10+ tenders with custom needs.",
+      features: [
+        "Everything in Business, plus:",
+        "Manage 10+ tenders",
+        "Custom workflows",
+        "Priority support",
+        "Dedicated account manager",
+        "Custom integrations",
+        "SLA & onboarding",
+      ],
+      cta: "Contact us",
+      highlighted: false,
     },
   ];
 
@@ -1042,13 +1076,13 @@ function Pricing({ onGetStarted }: LandingPageProps) {
             Simple pricing for serious tender teams
           </h2>
           <p className="mt-3 text-muted-foreground">
-            Start free. Upgrade when you need AI reading and a team workspace.
+            From a single tender to your entire portfolio. Upgrade as you grow.
           </p>
         </Reveal>
 
-        <div className="mx-auto mt-12 grid max-w-4xl gap-6 md:grid-cols-2">
+        <div className="mx-auto mt-12 grid max-w-6xl gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {tiers.map((t, i) => (
-            <Reveal key={t.name} delay={i * 0.1}>
+            <Reveal key={t.name} delay={i * 0.08}>
               <Card
                 className={cn(
                   "relative h-full py-6",
@@ -1076,9 +1110,11 @@ function Pricing({ onGetStarted }: LandingPageProps) {
                     <span className="text-4xl font-bold tracking-tight text-foreground">
                       {t.price}
                     </span>
-                    <span className="text-sm text-muted-foreground">
-                      {t.period}
-                    </span>
+                    {t.period && (
+                      <span className="text-sm text-muted-foreground">
+                        {t.period}
+                      </span>
+                    )}
                   </div>
 
                   <ul className="mt-6 flex-1 space-y-3">
@@ -1087,7 +1123,7 @@ function Pricing({ onGetStarted }: LandingPageProps) {
                         key={f}
                         className={cn(
                           "flex items-start gap-2 text-sm",
-                          idx === 0 && t.highlighted
+                          idx === 0 && t.name !== "Solo"
                             ? "font-semibold text-foreground"
                             : "text-muted-foreground"
                         )}

@@ -771,19 +771,34 @@ def create_tender(payload: TenderCreate, db: Session = Depends(get_db), user: Us
 
 @app.get("/api/tenders/export")
 def export_tenders(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """Export the complete tender register as CSV (spreadsheet format).
+    """Export the complete tender register as an Excel (.xlsx) file.
     Includes all 16 required fields for every tender — including historical records."""
-    import csv
     import io
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
     from fastapi.responses import StreamingResponse
 
     all_tenders = db.query(Tender).order_by(desc(Tender.created_at)).all()
 
-    output = io.StringIO()
-    writer = csv.writer(output)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Tender Register"
+
+    # Define styles
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    header_fill = PatternFill(start_color="0F766E", end_color="0F766E", fill_type="solid")
+    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    cell_alignment = Alignment(vertical="top", wrap_text=True)
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
 
     # Header row with all required fields
-    writer.writerow([
+    headers = [
         "Tender/RFP Number",
         "Client/Organisation",
         "Tender Description",
@@ -804,22 +819,30 @@ def export_tenders(db: Session = Depends(get_db), user: User = Depends(get_curre
         "Notes and Comments",
         "Created At",
         "Last Updated",
-    ])
+    ]
 
-    for t in all_tenders:
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_alignment
+        cell.border = thin_border
+
+    # Data rows
+    for row_idx, t in enumerate(all_tenders, 2):
         checklist = t.checklist_items or []
         complete_docs = [c.name for c in checklist if c.status == "Complete"]
         outstanding_docs = [c.name for c in checklist if c.status == "Outstanding"]
 
-        writer.writerow([
+        row_data = [
             t.reference_number or "",
             t.client_company or "",
             t.description or t.title or "",
-            t.issue_date.isoformat() if t.issue_date else (t.created_at.isoformat() if t.created_at else ""),
+            t.issue_date.isoformat() if t.issue_date else (t.created_at.strftime("%Y-%m-%d") if t.created_at else ""),
             t.closing_date.isoformat() if t.closing_date else "",
             t.closing_time.strftime("%H:%M") if t.closing_time else "",
             t.location_site or "",
-            f"{t.estimated_value:.2f}" if t.estimated_value else "",
+            t.estimated_value if t.estimated_value else "",
             t.person_responsible or "",
             t.status or "",
             t.outcome or "Pending",
@@ -830,16 +853,57 @@ def export_tenders(db: Session = Depends(get_db), user: User = Depends(get_curre
             "; ".join(complete_docs) if complete_docs else "",
             "; ".join(outstanding_docs) if outstanding_docs else "",
             t.notes or "",
-            t.created_at.isoformat() if t.created_at else "",
-            t.updated_at.isoformat() if t.updated_at else "",
-        ])
+            t.created_at.strftime("%Y-%m-%d %H:%M") if t.created_at else "",
+            t.updated_at.strftime("%Y-%m-%d %H:%M") if t.updated_at else "",
+        ]
 
+        for col_idx, value in enumerate(row_data, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.alignment = cell_alignment
+            cell.border = thin_border
+            # Color-code outcome column
+            if col_idx == 11:  # Outcome column
+                if value == "Awarded":
+                    cell.fill = PatternFill(start_color="D1FAE5", end_color="D1FAE5", fill_type="solid")
+                    cell.font = Font(color="065F46", bold=True)
+                elif value == "Unsuccessful":
+                    cell.fill = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
+                    cell.font = Font(color="991B1B", bold=True)
+                elif value == "Withdrawn":
+                    cell.fill = PatternFill(start_color="F3F4F6", end_color="F3F4F6", fill_type="solid")
+                    cell.font = Font(color="6B7280", bold=True)
+                elif value == "Pending":
+                    cell.fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
+                    cell.font = Font(color="92400E", bold=True)
+            # Format tender value column
+            if col_idx == 8 and isinstance(value, (int, float)) and value:
+                cell.number_format = '#,##0.00'
+
+    # Auto-size columns
+    column_widths = {
+        1: 18, 2: 25, 3: 40, 4: 14, 5: 14, 6: 10, 7: 20, 8: 16,
+        9: 20, 10: 22, 11: 14, 12: 30, 13: 18, 14: 16, 15: 18,
+        16: 40, 17: 40, 18: 30, 19: 20, 20: 20,
+    }
+    for col_idx, width in column_widths.items():
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    # Freeze the header row
+    ws.freeze_panes = "A2"
+
+    # Auto-filter
+    ws.auto_filter.ref = ws.dimensions
+
+    # Save to bytes
+    output = io.BytesIO()
+    wb.save(output)
     output.seek(0)
+
     return StreamingResponse(
         iter([output.getvalue()]),
-        media_type="text/csv",
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
-            "Content-Disposition": f"attachment; filename=tender_register_{date.today().isoformat()}.csv"
+            "Content-Disposition": f"attachment; filename=tender_register_{date.today().isoformat()}.xlsx"
         }
     )
 

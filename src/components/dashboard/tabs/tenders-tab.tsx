@@ -173,19 +173,19 @@ export function TendersTab() {
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement("a");
                 a.href = url;
-                a.download = `tender_register_${new Date().toISOString().slice(0, 10)}.csv`;
+                a.download = `tender_register_${new Date().toISOString().slice(0, 10)}.xlsx`;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
-                toast.success("Tender register exported as CSV");
+                toast.success("Tender register exported as Excel");
               } catch (e: any) {
                 toast.error(e.message || "Export failed");
               }
             }}
           >
             <Download className="h-4 w-4" />
-            <span className="hidden sm:inline">Export CSV</span>
+            <span className="hidden sm:inline">Export Excel</span>
           </Button>
           <Button onClick={() => setShowCreate(true)} size="sm">
             <Plus className="h-4 w-4" />

@@ -2152,7 +2152,7 @@ def search_tenders(
 
 @app.get("/api/reminders")
 def get_reminders(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    return {"items": [{"id": r.id, "days_before": r.days_before, "enabled": r.enabled} for r in db.query(ReminderSetting).all()]}
+    return {"items": [{"id": r.id, "days_before": r.days_before, "enabled": r.enabled} for r in db.query(ReminderSetting).order_by(ReminderSetting.days_before.desc()).all()]}
 
 
 @app.put("/api/reminders/{reminder_id}")
@@ -2163,6 +2163,137 @@ def update_reminder(reminder_id: int, enabled: bool = True, db: Session = Depend
     r.enabled = enabled
     db.commit()
     return {"id": r.id, "enabled": r.enabled}
+
+
+@app.post("/api/reminders")
+def add_reminder(days_before: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Add a custom reminder period."""
+    if days_before < 1 or days_before > 365:
+        raise HTTPException(status_code=400, detail="Days before must be between 1 and 365")
+    existing = db.query(ReminderSetting).filter(ReminderSetting.days_before == days_before).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Reminder for {days_before} days already exists")
+    r = ReminderSetting(days_before=days_before, enabled=True)
+    db.add(r)
+    db.commit()
+    db.refresh(r)
+    return {"id": r.id, "days_before": r.days_before, "enabled": r.enabled}
+
+
+@app.delete("/api/reminders/{reminder_id}")
+def delete_reminder(reminder_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    r = db.query(ReminderSetting).filter(ReminderSetting.id == reminder_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    db.delete(r)
+    db.commit()
+    return {"deleted": True}
+
+
+# ---------------------- Deadline Management ----------------------
+
+@app.get("/api/deadlines")
+def get_deadlines(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """
+    Comprehensive deadline tracking for all tenders.
+    Returns each tender with:
+    - closing_date, closing_time
+    - days_remaining, hours_remaining (when close to deadline)
+    - is_closed (whether the tender has already closed)
+    - urgency level (critical/urgent/soon/normal/closed)
+    - which reminders should currently fire
+    """
+    now = datetime.utcnow()
+    today = now.date()
+    active_statuses = {"New Opportunity", "Under Review", "Interested", "Preparing",
+                       "Documents Outstanding", "Pricing in Progress", "Awaiting Information",
+                       "Ready for Submission", "Submitted", "Clarification Requested",
+                       "Clarification Submitted", "Shortlisted", "Interview/Presentation",
+                       "Negotiation"}
+
+    all_tenders = db.query(Tender).all()
+    reminders = db.query(ReminderSetting).filter(ReminderSetting.enabled == True).order_by(ReminderSetting.days_before.desc()).all()
+    reminder_days = [r.days_before for r in reminders]
+
+    deadlines = []
+    for t in all_tenders:
+        if not t.closing_date:
+            continue
+        # Combine closing date + time
+        closing_dt = datetime.combine(t.closing_date, t.closing_time or datetime.min.time())
+        diff = closing_dt - now
+        days_remaining = diff.days
+        hours_remaining = int(diff.total_seconds() / 3600)
+        is_closed = diff.total_seconds() <= 0
+
+        # Urgency level
+        if is_closed:
+            urgency = "closed"
+        elif hours_remaining <= 24:
+            urgency = "critical"
+        elif days_remaining <= 3:
+            urgency = "critical"
+        elif days_remaining <= 7:
+            urgency = "urgent"
+        elif days_remaining <= 14:
+            urgency = "soon"
+        elif days_remaining <= 30:
+            urgency = "normal"
+        else:
+            urgency = "normal"
+
+        # Which reminders should fire (the largest reminder period that is >= days_remaining)
+        active_reminders = []
+        if not is_closed and days_remaining >= 0:
+            for rd in reminder_days:
+                if days_remaining <= rd:
+                    active_reminders.append(rd)
+
+        # Check if tender is still active (not awarded/unsuccessful/withdrawn)
+        is_active = t.status in active_statuses
+
+        deadlines.append({
+            "id": t.id,
+            "reference_number": t.reference_number,
+            "title": t.title,
+            "client_company": t.client_company,
+            "status": t.status,
+            "outcome": t.outcome,
+            "closing_date": t.closing_date.isoformat(),
+            "closing_time": t.closing_time.strftime("%H:%M") if t.closing_time else None,
+            "days_remaining": days_remaining if not is_closed else None,
+            "hours_remaining": hours_remaining if (not is_closed and hours_remaining <= 72) else None,
+            "is_closed": is_closed,
+            "is_active": is_active,
+            "urgency": urgency,
+            "active_reminders": active_reminders,
+            "person_responsible": t.person_responsible,
+            "estimated_value": t.estimated_value,
+            "location_site": t.location_site,
+        })
+
+    # Sort: active first (by days_remaining ascending), then closed
+    deadlines.sort(key=lambda d: (
+        d["is_closed"],  # False (0) before True (1)
+        d["days_remaining"] if d["days_remaining"] is not None else 9999,
+    ))
+
+    # Summary
+    summary = {
+        "total_with_deadlines": len(deadlines),
+        "active_count": len([d for d in deadlines if d["is_active"] and not d["is_closed"]]),
+        "critical_count": len([d for d in deadlines if d["urgency"] == "critical"]),
+        "urgent_count": len([d for d in deadlines if d["urgency"] == "urgent"]),
+        "soon_count": len([d for d in deadlines if d["urgency"] == "soon"]),
+        "closed_count": len([d for d in deadlines if d["is_closed"]]),
+        "next_deadline": deadlines[0] if deadlines and not deadlines[0]["is_closed"] else None,
+        "reminder_periods": reminder_days,
+    }
+
+    return {"items": deadlines, "summary": summary, "reminders": [
+        {"id": r.id, "days_before": r.days_before, "enabled": r.enabled}
+        for r in db.query(ReminderSetting).order_by(ReminderSetting.days_before.desc()).all()
+    ]}
 
 
 # ---------------------- Health ----------------------

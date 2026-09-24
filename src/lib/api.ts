@@ -401,6 +401,23 @@ export const api = {
   async updateReminder(id: number, enabled: boolean) {
     return request<any>(`/reminders/${id}?enabled=${enabled}`, { method: "PUT" });
   },
+
+  async addReminder(daysBefore: number) {
+    return request<any>(`/reminders?days_before=${daysBefore}`, { method: "POST" });
+  },
+
+  async deleteReminder(id: number) {
+    return request<{ deleted: boolean }>(`/reminders/${id}`, { method: "DELETE" });
+  },
+
+  // ---- Deadlines ----
+  async getDeadlines() {
+    return request<{
+      items: any[];
+      summary: any;
+      reminders: any[];
+    }>(`/deadlines`);
+  },
 };
 
 // Tender status options (mirror backend)

@@ -9,6 +9,7 @@ export type DashboardTab =
   | "reader"
   | "library"
   | "company"
+  | "deadlines"
   | "briefings"
   | "pricing"
   | "submissions"

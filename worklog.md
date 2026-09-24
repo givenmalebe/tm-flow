@@ -617,3 +617,59 @@ Stage Summary:
 - All documents on company letterhead (company name, address, registration, PSIRA, B-BBEE)
 - Copy to clipboard + Download as .txt
 - Auto-linking to compliance library (from previous task) identifies relevant documents and attaches them to the tender checklist
+
+---
+Task ID: 25
+Agent: Main Orchestrator
+Task: Build Tender Deadline Management — automatic tracking, countdowns, adjustable reminders
+
+Work Log:
+- Added GET /api/deadlines endpoint to main.py — comprehensive deadline tracking that returns:
+  * Each tender with closing_date, closing_time, days_remaining, hours_remaining (when ≤72h), is_closed, urgency level, active_reminders
+  * Urgency levels: critical (≤3 days or ≤24 hours), urgent (≤7 days), soon (≤14 days), normal (≤30 days), closed
+  * Summary: active_count, critical_count, urgent_count, soon_count, closed_count, next_deadline, reminder_periods
+  * All reminders (30/14/7/3/1 + any custom) with enabled status
+  * Tenders sorted by urgency (active first by days ascending, then closed)
+- Enhanced reminder endpoints:
+  * POST /api/reminders?days_before=N — add custom reminder period (1-365 days)
+  * DELETE /api/reminders/{id} — remove a reminder
+  * GET /api/reminders — now sorted by days_before descending
+  * PUT /api/reminders/{id}?enabled=true/false — toggle (existing)
+- Added frontend API methods: addReminder, deleteReminder, getDeadlines
+- Added "deadlines" to DashboardTab type and dashboard shell navigation (CalendarClock icon, "Track & remind" description)
+- Created deadlines-tab.tsx (~380 lines):
+  * Header with Refresh button
+  * 6 summary cards: Active, Critical, Urgent (≤7d), Soon (≤14d), Closed, Total
+  * "Next Deadline" banner with big countdown number + "Open Tender" button
+  * Reminder Settings card with toggle switches for each period (30/21/14/7/3/1 days) + delete buttons + "Add custom reminder" input
+  * Deadline list sorted by urgency — each card shows:
+    - Urgency indicator (icon + colored badge: Critical=rose, Urgent=amber, Soon=yellow, Normal=emerald, Closed=zinc)
+    - Reference number, status badge, "Reminder active" badge if reminders firing
+    - Title, client, location, person responsible, estimated value
+    - Closing date + time
+    - Big countdown: days remaining OR hours remaining (when ≤72 hours) OR "Closed" icon
+    - "Reminders firing:" strip showing which reminder periods are active for this tender
+  - Info banner explaining how reminders work
+- Verified with API test:
+  * Created 3 test tenders with different closing dates (2 days, 5 days, 15 days from now)
+  * URG-001 (2 days): urgency=critical, 46 hours remaining, 6 reminders firing [30,21,14,7,3,1]
+  * URG-002 (5 days): urgency=urgent, 4 days remaining, 4 reminders firing [30,21,14,7]
+  * NRM-001 (15 days): urgency=soon, 14 days remaining, 3 reminders firing [30,21,14]
+  * E137/2025 (past): urgency=closed, no reminders
+  * Added custom 21-day reminder successfully
+- Verified with Agent Browser:
+  * Deadlines tab renders with all 6 summary cards
+  * Next Deadline banner shows the most urgent tender
+  * Reminder Settings shows all 6 periods with toggle switches + add/delete
+  * 4 tender deadline cards render with urgency colors, countdowns, and reminder badges
+  * No errors, lint clean
+
+Stage Summary:
+- Tender Deadline Management is fully operational
+- Shows: closing date, closing time, days remaining, hours remaining (when close to deadline), whether the tender has already closed
+- Adjustable reminders: default 30/14/7/3/1 days before + add custom periods (e.g. 21 days) + toggle on/off + delete
+- Visual urgency indicators: Critical (rose, ≤3 days), Urgent (amber, ≤7 days), Soon (yellow, ≤14 days), Normal (emerald, >14 days), Closed (zinc)
+- Hours remaining shown when within 72 hours of deadline
+- "Reminders firing" badges on each tender show which reminder periods are currently active
+- Next Deadline banner highlights the most urgent tender with a big countdown
+- Click any tender card to open the tender detail

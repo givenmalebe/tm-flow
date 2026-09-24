@@ -673,3 +673,97 @@ Stage Summary:
 - "Reminders firing" badges on each tender show which reminder periods are currently active
 - Next Deadline banner highlights the most urgent tender with a big countdown
 - Click any tender card to open the tender detail
+
+---
+Task ID: 26
+Agent: frontend-styling-expert
+Task: Rebuild briefings-tab with alerts, certificate upload, all fields
+
+Work Log:
+- Read worklog and shared context files: api.ts (briefings endpoints), dashboard-store.ts (helpers), deadlines-tab.tsx (visual reference), existing briefings-tab.tsx
+- Confirmed backend briefing shape via main.py: listBriefings returns all 14 fields; getBriefingAlerts adds days_until, is_past, is_today, urgency (today/critical/urgent/soon/normal) and a summary with total_alerts, today_count, critical_count, urgent_count, soon_count, unconfirmed_count, no_attendee_count
+- Completely rewrote /home/z/my-project/src/components/dashboard/tabs/briefings-tab.tsx (~1670 lines):
+  * Parallel data fetch on mount: api.getBriefingAlerts() + api.listBriefings(false, 30) — alerts for the banner, upcoming for the upcoming tab, allBriefings for the all tab
+  * toBriefingView() normaliser merges raw briefings into a unified BriefingAlert type with computed days_until/is_past/is_today/urgency (computeUrgency) so both data sources render through the same card
+  * URGENCY_CONFIG drives colour coding for today (rose filled strip), critical (rose border + strip), urgent (amber border + strip), soon (yellow border + strip), normal (emerald), past (muted + Completed strip)
+  * Header: title + subtitle + ghost Refresh button
+  * Alerts banner (CRITICAL): prominent rose Alert with BellRing icon, lists up to 4 alert briefings (reference, title, date, countdown, "Confirm attendance" button calling api.updateBriefing(id, {attendance_confirmed: true}))
+  * Separate "TODAY" banner (rose filled) when summary.today_count > 0
+  * Green success banner ("All upcoming briefings are confirmed") when total_alerts == 0 and total_upcoming > 0
+  * 6 summary stat cards: Upcoming, Today, Critical, Unconfirmed, No Attendee, Total — colour-coded with emerald/rose/amber/orange/primary
+  * Filter bar: Tabs (Upcoming 30 days / All), type filter Select (All / Briefings / Site Inspections), search Input, primary "Add Briefing" button
+  * BriefingCard renders all 11 required fields: tender reference (clickable → openTender via useDashboardStore setTab+selectTender), client, date with urgency colour, time, location, contact person, attendance required badge (Compulsory = rose / Optional = muted), attendance confirmed badge (Confirmed = emerald check / Not confirmed = amber clock), person attending ("Not assigned" in amber when compulsory & missing), certificate upload/view/remove section, notes (muted box)
+  * Urgency strip on each card shows label + countdown ("Today", "1 day left", "N days left", "Nd ago")
+  * Alert strips inside the card: amber strip when needsConfirmation (compulsory + unconfirmed + within 7 days), rose strip when noAttendee (compulsory + no person_attending)
+  * "Confirm attendance" button appears on card action row when needsConfirmation — calls api.updateBriefing(id, {attendance_confirmed: true})
+  * Certificate upload: hidden file input accepts .pdf,.doc,.docx,.jpg,.png; api.uploadBriefingCertificate(briefingId, file) with uploadingId loading state; on success toast "Certificate uploaded — attendance marked as confirmed" + refresh. When certificate exists: "View Certificate" link (opens certificate_url in new tab) + "Remove" button (api.deleteBriefingCertificate with removingCertId loading state)
+  * BriefingDialog (create/edit): tender selector (disabled in edit mode showing read-only reference+title), type Select, date Input (required), time Input, location Input, contact_person Input, attendance_required Switch (default on), attendance_confirmed Switch, person_attending Input, notes Textarea, Save button with loading state and validation
+  * DeleteDialog with AlertDialog confirmation
+  * Briefings grouped by date ascending with date heading + relative badge (Today/Tomorrow/In N days/Nd ago) + item count + urgency badge
+  * Info banner at bottom explaining how alerts work
+  * Loading skeletons for header + 6 stats + 4 cards; error state with retry button; empty state (no briefings) and no-matches state
+  * Emerald theme throughout (no blue/indigo), responsive grid (1 col mobile, 2 col lg), all shadcn components
+- Verified: bun run lint exit code 0 (no errors), bunx tsc --noEmit produces 0 errors in briefings-tab.tsx (the 8 reported errors are in other files: dashboard-tab, discover-tab, examples, skills — pre-existing, not in this file)
+
+Stage Summary:
+- Briefings & Site Inspections tab fully rebuilt with alerts system, certificate upload, and all 11 fields per card
+- File: /home/z/my-project/src/components/dashboard/tabs/briefings-tab.tsx (~1670 lines, single file, emerald theme, responsive)
+- Alerts banner is the headline feature: lists every compulsory briefing needing attention with one-click "Confirm attendance"
+- Certificate upload auto-marks attendance as confirmed (per backend behaviour) — full upload/view/remove lifecycle with loading states and toasts
+- All 6 summary stats, type filter, search, upcoming/all tabs, urgency colour coding, alert strips, and "Confirm attendance" inline action all wired to the live API
+- Lint clean, TypeScript clean for this file
+
+---
+Task ID: 27
+Agent: Main Orchestrator
+Task: Complete Briefings & Site Inspections — alerts, certificate upload, all 11 fields
+
+Work Log:
+- Added 3 new backend endpoints to main.py:
+  * POST /api/briefings/{id}/certificate — upload attendance confirmation/certificate file, auto-sets attendance_confirmed=True
+  * DELETE /api/briefings/{id}/certificate — remove certificate
+  * GET /api/briefings/alerts — comprehensive alerts system returning:
+    - alerts: briefings that are compulsory, upcoming (≤30 days), and either not confirmed or no person assigned
+    - upcoming: all briefings within next 30 days with urgency levels (today/critical/urgent/soon/normal)
+    - summary: total_upcoming, today_count, critical_count, urgent_count, soon_count, unconfirmed_count, no_attendee_count, total_alerts
+- Updated _serialize_tender and list_briefings to include certificate_path and certificate_url
+- Added frontend API methods: getBriefingAlerts, uploadBriefingCertificate, deleteBriefingCertificate
+- Delegated rebuild of briefings-tab.tsx to subagent (Task 26) — 1670 lines with:
+  * Alerts banner (rose) showing compulsory briefings needing attention with "Confirm attendance" buttons
+  * Separate "TODAY" banner for briefings happening today
+  * Green success banner when all briefings confirmed
+  * 6 summary stat cards: Upcoming, Today, Critical, Unconfirmed, No Attendee, Total
+  * Filter bar: Upcoming(30d)/All tabs, type filter, search, Add Briefing button
+  * Briefing cards showing ALL 11 fields: tender reference (clickable), client, date (urgency-colored), time, location, contact person, attendance required badge, attendance confirmed badge, person attending, certificate upload/view/remove, notes
+  * Urgency indicators: TODAY/CRITICAL/URGENT/SOON/Completed-Past with color coding
+  * Alert strips on cards: "Attendance confirmation required" and "No person assigned"
+  * Add/Edit dialog with all fields
+  * Certificate upload (PDF/DOC/DOCX/JPG/PNG) with auto-confirm attendance
+- Verified with API test:
+  * Created 4 test briefings: TODAY (not confirmed, no attendee), TOMORROW (confirmed, no attendee), 3-day (confirmed, has attendee), 10-day (optional)
+  * Alerts API correctly returned 2 alerts (today's briefing + tomorrow's site inspection with no attendee)
+  * Summary: 4 upcoming, 1 today, 1 critical, 1 unconfirmed, 2 no attendee, 2 total alerts
+  * Urgency levels correctly computed: today, critical, urgent, normal
+- Verified with Agent Browser:
+  * Briefings tab shows alerts banner with "Confirm attendance" buttons
+  * Summary stats show correct counts
+  * 4 briefing cards render with all fields, urgency colors, certificate upload buttons
+  * No errors, lint clean
+
+Stage Summary:
+- Briefings & Site Inspections fully operational with all 11 required fields:
+  1. Tender reference (clickable → opens tender)
+  2. Client
+  3. Date (with urgency coloring)
+  4. Time
+  5. Location
+  6. Contact person
+  7. Attendance required (Compulsory/Optional badge)
+  8. Attendance confirmed (Confirmed/Not confirmed badge)
+  9. Person attending (with "Not assigned" warning for compulsory)
+  10. Attendance confirmation/certificate (upload/view/remove)
+  11. Notes
+- Alert system: warns about upcoming compulsory briefings that need attention (not confirmed or no person assigned)
+- Urgency levels: TODAY, CRITICAL (≤1 day), URGENT (≤3 days), SOON (≤7 days), NORMAL (>7 days)
+- Certificate upload auto-marks attendance as confirmed
+- Summary dashboard with 6 stat cards

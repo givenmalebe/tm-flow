@@ -391,6 +391,8 @@ def _serialize_tender(t: Tender) -> dict:
                 "attendance_required": b.attendance_required,
                 "attendance_confirmed": b.attendance_confirmed,
                 "person_attending": b.person_attending,
+                "certificate_path": b.certificate_path,
+                "certificate_url": f"/uploads/{b.certificate_path}?XTransformPort=8000" if b.certificate_path else None,
                 "notes": b.notes,
             } for b in t.briefings
         ],
@@ -1267,6 +1269,8 @@ def list_briefings(
             "attendance_required": b.attendance_required,
             "attendance_confirmed": b.attendance_confirmed,
             "person_attending": b.person_attending,
+            "certificate_path": b.certificate_path,
+            "certificate_url": f"/uploads/{b.certificate_path}?XTransformPort=8000" if b.certificate_path else None,
             "notes": b.notes,
         })
     return {"items": result}
@@ -1294,6 +1298,126 @@ def delete_briefing(briefing_id: int, db: Session = Depends(get_db), user: User 
     db.delete(b)
     db.commit()
     return {"deleted": True}
+
+
+@app.post("/api/briefings/{briefing_id}/certificate")
+async def upload_briefing_certificate(
+    briefing_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Upload an attendance confirmation/certificate for a briefing."""
+    b = db.query(Briefing).filter(Briefing.id == briefing_id).first()
+    if not b:
+        raise HTTPException(status_code=404, detail="Briefing not found")
+    rel_path = _save_upload(file, subdir=f"briefings/{briefing_id}")
+    b.certificate_path = rel_path
+    # Auto-mark attendance as confirmed when certificate is uploaded
+    b.attendance_confirmed = True
+    db.commit()
+    db.refresh(b)
+    return {
+        "id": b.id,
+        "certificate_path": rel_path,
+        "certificate_url": f"/uploads/{rel_path}?XTransformPort=8000",
+        "attendance_confirmed": b.attendance_confirmed,
+    }
+
+
+@app.delete("/api/briefings/{briefing_id}/certificate")
+def delete_briefing_certificate(briefing_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Remove the attendance certificate from a briefing."""
+    b = db.query(Briefing).filter(Briefing.id == briefing_id).first()
+    if not b:
+        raise HTTPException(status_code=404, detail="Briefing not found")
+    if b.certificate_path:
+        full_path = os.path.join(UPLOAD_DIR, b.certificate_path)
+        if os.path.exists(full_path):
+            try:
+                os.unlink(full_path)
+            except OSError:
+                pass
+        b.certificate_path = None
+    db.commit()
+    return {"deleted": True}
+
+
+@app.get("/api/briefings/alerts")
+def get_briefing_alerts(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """
+    Get alerts for upcoming compulsory briefings and site inspections.
+    Returns briefings that:
+    - Are within the next 14 days
+    - Have attendance_required = True
+    - Are either: not confirmed, or confirmed but no person assigned
+    Also returns a summary of upcoming briefings by urgency.
+    """
+    today = date.today()
+    all_briefings = db.query(Briefing).join(Tender, Briefing.tender_id == Tender.id).all()
+
+    alerts = []
+    upcoming = []
+    for b in all_briefings:
+        if not b.date:
+            continue
+        days_until = (b.date - today).days
+        briefing_data = {
+            "id": b.id,
+            "tender_id": b.tender_id,
+            "tender_reference": b.tender.reference_number if b.tender else None,
+            "tender_title": b.tender.title if b.tender else None,
+            "client": b.tender.client_company if b.tender else None,
+            "briefing_type": b.briefing_type,
+            "date": b.date.isoformat(),
+            "time": b.time.strftime("%H:%M") if b.time else None,
+            "location": b.location,
+            "contact_person": b.contact_person,
+            "attendance_required": b.attendance_required,
+            "attendance_confirmed": b.attendance_confirmed,
+            "person_attending": b.person_attending,
+            "certificate_path": b.certificate_path,
+            "certificate_url": f"/uploads/{b.certificate_path}?XTransformPort=8000" if b.certificate_path else None,
+            "notes": b.notes,
+            "days_until": days_until,
+            "is_past": days_until < 0,
+            "is_today": days_until == 0,
+        }
+
+        # Upcoming = within next 30 days (or today)
+        if 0 <= days_until <= 30:
+            briefing_data["urgency"] = (
+                "today" if days_until == 0
+                else "critical" if days_until <= 1
+                else "urgent" if days_until <= 3
+                else "soon" if days_until <= 7
+                else "normal"
+            )
+            upcoming.append(briefing_data)
+            # Alert if compulsory and not confirmed, or no person attending
+            if b.attendance_required and (not b.attendance_confirmed or not b.person_attending):
+                alerts.append(briefing_data)
+
+    # Sort by date ascending
+    upcoming.sort(key=lambda x: x["date"])
+    alerts.sort(key=lambda x: x["date"])
+
+    summary = {
+        "total_upcoming": len(upcoming),
+        "total_alerts": len(alerts),
+        "today_count": len([b for b in upcoming if b["is_today"]]),
+        "critical_count": len([b for b in upcoming if b["urgency"] == "critical"]),
+        "urgent_count": len([b for b in upcoming if b["urgency"] == "urgent"]),
+        "soon_count": len([b for b in upcoming if b["urgency"] == "soon"]),
+        "unconfirmed_count": len([b for b in upcoming if b["attendance_required"] and not b["attendance_confirmed"]]),
+        "no_attendee_count": len([b for b in upcoming if b["attendance_required"] and not b["person_attending"]]),
+    }
+
+    return {
+        "alerts": alerts,
+        "upcoming": upcoming,
+        "summary": summary,
+    }
 
 
 # ---------------------- Pricing Routes ----------------------

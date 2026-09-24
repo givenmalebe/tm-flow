@@ -228,6 +228,14 @@ export const api = {
     );
   },
 
+  async getBriefingAlerts() {
+    return request<{
+      alerts: any[];
+      upcoming: any[];
+      summary: any;
+    }>(`/briefings/alerts`);
+  },
+
   async createBriefing(tenderId: number, payload: any) {
     return request<any>(`/tenders/${tenderId}/briefings`, { method: "POST", body: payload });
   },
@@ -238,6 +246,22 @@ export const api = {
 
   async deleteBriefing(id: number) {
     return request<{ deleted: boolean }>(`/briefings/${id}`, { method: "DELETE" });
+  },
+
+  async uploadBriefingCertificate(briefingId: number, file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    return request<any>(`/briefings/${briefingId}/certificate`, {
+      method: "POST",
+      body: form,
+      isForm: true,
+    });
+  },
+
+  async deleteBriefingCertificate(briefingId: number) {
+    return request<{ deleted: boolean }>(`/briefings/${briefingId}/certificate`, {
+      method: "DELETE",
+    });
   },
 
   // ---- Pricing ----

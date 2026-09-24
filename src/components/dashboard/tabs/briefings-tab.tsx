@@ -1,26 +1,30 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  MapPin,
-  CalendarPlus,
-  CalendarDays,
-  Clock,
-  User2,
-  Search,
-  RefreshCw,
-  Pencil,
-  Trash2,
   AlertTriangle,
-  CheckCircle2,
-  XCircle,
+  BellRing,
+  Building2,
+  Calendar,
   CalendarClock,
-  UserCheck,
-  Loader2,
-  ChevronDown,
-  ChevronUp,
+  CalendarDays,
+  CalendarPlus,
+  CheckCircle2,
+  Clock,
   ExternalLink,
-  ListChecks,
+  FileText,
+  Hourglass,
+  Loader2,
+  MapPin,
+  Pencil,
+  RefreshCw,
+  Search,
+  Timer,
+  Trash2,
+  Upload,
+  User,
+  UserCheck,
+  Zap,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -73,10 +77,14 @@ import {
 } from "@/lib/dashboard-store";
 import { cn } from "@/lib/utils";
 
-// ---- Types ----
+// =====================================================================
+// Types
+// =====================================================================
 type BriefingType = "Briefing" | "Site Inspection";
+type Urgency = "today" | "critical" | "urgent" | "soon" | "normal" | "past";
 
-interface Briefing {
+/** A briefing with computed urgency info — used everywhere in this tab. */
+interface BriefingAlert {
   id: number;
   tender_id: number;
   tender_reference: string | null;
@@ -90,7 +98,25 @@ interface Briefing {
   attendance_required: boolean;
   attendance_confirmed: boolean;
   person_attending: string | null;
+  certificate_path: string | null;
+  certificate_url: string | null;
   notes: string | null;
+  days_until: number;
+  is_past: boolean;
+  is_today: boolean;
+  urgency: Urgency;
+}
+
+interface BriefingSummary {
+  total_upcoming: number;
+  total_alerts: number;
+  today_count: number;
+  critical_count: number;
+  urgent_count: number;
+  soon_count: number;
+  unconfirmed_count: number;
+  no_attendee_count: number;
+  total_all?: number;
 }
 
 interface TenderOption {
@@ -127,55 +153,135 @@ const EMPTY_FORM: BriefingForm = {
 
 const BRIEFING_TYPES: BriefingType[] = ["Briefing", "Site Inspection"];
 
-// ---- Helpers ----
+// =====================================================================
+// Helpers
+// =====================================================================
+function computeUrgency(days: number): Urgency {
+  if (days < 0) return "past";
+  if (days === 0) return "today";
+  if (days <= 1) return "critical";
+  if (days <= 3) return "urgent";
+  if (days <= 7) return "soon";
+  return "normal";
+}
+
+/** Normalize a raw briefing (from listBriefings) into a BriefingAlert. */
+function toBriefingView(b: any): BriefingAlert {
+  const days = b.days_until ?? daysUntil(b.date) ?? -999;
+  return {
+    id: b.id,
+    tender_id: b.tender_id,
+    tender_reference: b.tender_reference ?? null,
+    tender_title: b.tender_title ?? null,
+    client: b.client ?? null,
+    briefing_type: b.briefing_type as BriefingType,
+    date: b.date ?? null,
+    time: b.time ?? null,
+    location: b.location ?? null,
+    contact_person: b.contact_person ?? null,
+    attendance_required: !!b.attendance_required,
+    attendance_confirmed: !!b.attendance_confirmed,
+    person_attending: b.person_attending ?? null,
+    certificate_path: b.certificate_path ?? null,
+    certificate_url: b.certificate_url ?? null,
+    notes: b.notes ?? null,
+    days_until: days,
+    is_past: days < 0,
+    is_today: days === 0,
+    urgency: (b.urgency as Urgency) ?? computeUrgency(days),
+  };
+}
+
+const URGENCY_CONFIG: Record<
+  Urgency,
+  {
+    label: string;
+    strip: string;
+    badge: string;
+    border: string;
+    todayBg: string;
+    text: string;
+    icon: LucideIcon;
+  }
+> = {
+  today: {
+    label: "TODAY",
+    strip: "bg-rose-600 text-white",
+    badge: "bg-rose-600 text-white border-rose-700",
+    border: "border-rose-300 dark:border-rose-800",
+    todayBg: "bg-rose-50 dark:bg-rose-950/20",
+    text: "text-rose-700 dark:text-rose-400",
+    icon: BellRing,
+  },
+  critical: {
+    label: "CRITICAL",
+    strip: "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300",
+    badge: "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border-rose-200 dark:border-rose-900",
+    border: "border-rose-300 dark:border-rose-800",
+    todayBg: "",
+    text: "text-rose-700 dark:text-rose-400",
+    icon: Zap,
+  },
+  urgent: {
+    label: "URGENT",
+    strip: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
+    badge: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border-amber-200 dark:border-amber-900",
+    border: "border-amber-300 dark:border-amber-800",
+    todayBg: "",
+    text: "text-amber-700 dark:text-amber-400",
+    icon: Timer,
+  },
+  soon: {
+    label: "SOON",
+    strip: "bg-yellow-100 text-yellow-800 dark:bg-yellow-950 dark:text-yellow-300",
+    badge: "bg-yellow-100 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-300 border-yellow-200 dark:border-yellow-900",
+    border: "border-yellow-300 dark:border-yellow-800",
+    todayBg: "",
+    text: "text-yellow-700 dark:text-yellow-500",
+    icon: Hourglass,
+  },
+  normal: {
+    label: "Upcoming",
+    strip: "",
+    badge: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900",
+    border: "border-border",
+    todayBg: "",
+    text: "text-emerald-700 dark:text-emerald-400",
+    icon: Calendar,
+  },
+  past: {
+    label: "Completed",
+    strip: "",
+    badge: "bg-muted text-muted-foreground",
+    border: "border-border",
+    todayBg: "",
+    text: "text-muted-foreground",
+    icon: CheckCircle2,
+  },
+};
+
 function typeBadgeClass(type: BriefingType): string {
   return type === "Briefing"
     ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900"
     : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border-amber-200 dark:border-amber-900";
 }
 
-function dateHeading(iso: string): { label: string; relative: string | null; diff: number } {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return { label: formatDate(iso), relative: null, diff: 0 };
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  d.setHours(0, 0, 0, 0);
-  const diff = Math.round((d.getTime() - today.getTime()) / 86400000);
-  const label = d.toLocaleDateString("en-ZA", {
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-  let relative: string | null = null;
-  if (diff === 0) relative = "Today";
-  else if (diff === 1) relative = "Tomorrow";
-  else if (diff === -1) relative = "Yesterday";
-  else if (diff > 1 && diff <= 7) relative = `In ${diff} days`;
-  else if (diff < 0) relative = `${Math.abs(diff)}d ago`;
-  return { label, relative, diff };
-}
-
-function relativeBadgeClass(diff: number): string {
-  if (diff < 0)
-    return "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border-rose-200 dark:border-rose-900";
-  if (diff <= 1)
-    return "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border-rose-200 dark:border-rose-900";
-  if (diff <= 3)
-    return "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border-amber-200 dark:border-amber-900";
-  return "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900";
-}
-
-// ---- Stat card ----
-interface StatCardProps {
+// =====================================================================
+// Stat card
+// =====================================================================
+function StatCard({
+  icon: Icon,
+  iconClass,
+  value,
+  label,
+  subtitle,
+}: {
   icon: LucideIcon;
   iconClass: string;
   value: number;
   label: string;
   subtitle: string;
-}
-
-function StatCard({ icon: Icon, iconClass, value, label, subtitle }: StatCardProps) {
+}) {
   return (
     <Card className="transition-shadow hover:shadow-md">
       <CardContent className="flex items-start justify-between gap-3">
@@ -214,7 +320,9 @@ function StatSkeleton() {
   );
 }
 
-// ---- Empty state ----
+// =====================================================================
+// Empty state
+// =====================================================================
 function EmptyState({
   icon: Icon,
   title,
@@ -233,7 +341,8 @@ function EmptyState({
       <div
         className={cn(
           "flex h-14 w-14 items-center justify-center rounded-2xl",
-          iconClass || "bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+          iconClass ||
+            "bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
         )}
       >
         <Icon className="h-7 w-7" />
@@ -247,40 +356,93 @@ function EmptyState({
   );
 }
 
-// ---- Briefing card ----
+// =====================================================================
+// Briefing card — shows all 11 fields + urgency strip + alert strips + certificate
+// =====================================================================
 interface BriefingCardProps {
-  briefing: Briefing;
-  onEdit: (b: Briefing) => void;
-  onDelete: (b: Briefing) => void;
+  briefing: BriefingAlert;
+  onEdit: (b: BriefingAlert) => void;
+  onDelete: (b: BriefingAlert) => void;
   onOpenTender: (id: number) => void;
+  onConfirmAttendance: (b: BriefingAlert) => void;
+  onUploadCertificate: (b: BriefingAlert, file: File) => void;
+  onRemoveCertificate: (b: BriefingAlert) => void;
+  uploadingId: number | null;
+  removingCertId: number | null;
 }
 
-function BriefingCard({ briefing, onEdit, onDelete, onOpenTender }: BriefingCardProps) {
-  const [notesExpanded, setNotesExpanded] = useState(false);
+function BriefingCard({
+  briefing,
+  onEdit,
+  onDelete,
+  onOpenTender,
+  onConfirmAttendance,
+  onUploadCertificate,
+  onRemoveCertificate,
+  uploadingId,
+  removingCertId,
+}: BriefingCardProps) {
+  const fileRef = useRef<HTMLInputElement>(null);
   const b = briefing;
-  const days = daysUntil(b.date);
+  const config = URGENCY_CONFIG[b.urgency];
+  const UrgencyIcon = config.icon;
+  const isPast = b.is_past;
+  const showStrip = b.urgency === "today" || b.urgency === "critical" || b.urgency === "urgent" || b.urgency === "soon";
   const needsConfirmation =
     b.attendance_required &&
     !b.attendance_confirmed &&
-    days !== null &&
-    days >= 0 &&
-    days <= 7;
-  const hasLongNotes = (b.notes?.length || 0) > 120;
+    !isPast &&
+    b.days_until >= 0 &&
+    b.days_until <= 7;
+  const noAttendee = b.attendance_required && !b.person_attending && !isPast;
+  const isUploading = uploadingId === b.id;
+  const isRemoving = removingCertId === b.id;
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) onUploadCertificate(b, f);
+    e.target.value = "";
+  };
+
+  const countdownLabel =
+    b.days_until === 0
+      ? "Today"
+      : b.days_until === 1
+      ? "1 day left"
+      : b.days_until > 0
+      ? `${b.days_until} days left`
+      : `${Math.abs(b.days_until)}d ago`;
 
   return (
     <Card
       className={cn(
-        "flex flex-col transition-shadow hover:shadow-md",
-        needsConfirmation && "border-amber-300 dark:border-amber-800"
+        "flex flex-col transition-shadow hover:shadow-md overflow-hidden",
+        config.border,
+        b.urgency === "today" && "border-2",
+        isPast && "opacity-70"
       )}
     >
-      {needsConfirmation && (
-        <div className="flex items-center gap-2 rounded-t-lg bg-amber-50 px-4 py-2 text-xs font-medium text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-          Attendance confirmation required!
+      {/* Urgency strip */}
+      {showStrip && (
+        <div
+          className={cn(
+            "flex items-center gap-2 px-4 py-1.5 text-xs font-semibold",
+            config.strip
+          )}
+        >
+          <UrgencyIcon className="h-3.5 w-3.5" />
+          <span>{config.label}</span>
+          <span className="ml-auto tabular-nums">{countdownLabel}</span>
         </div>
       )}
-      <CardContent className="flex flex-1 flex-col gap-3">
+      {isPast && (
+        <div className="flex items-center gap-2 bg-muted px-4 py-1.5 text-xs font-medium text-muted-foreground">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          <span>Completed / Past</span>
+        </div>
+      )}
+
+      <CardContent className="flex flex-1 flex-col gap-3 pt-4">
         {/* Header: tender + type */}
         <div className="flex items-start justify-between gap-2">
           <button
@@ -316,17 +478,23 @@ function BriefingCard({ briefing, onEdit, onDelete, onOpenTender }: BriefingCard
 
         {/* Client */}
         {b.client && (
-          <div className="text-xs text-muted-foreground">
+          <div className="flex items-center gap-1.5 text-xs">
+            <Building2 className="h-3 w-3 text-muted-foreground" />
             <span className="font-medium text-foreground">{b.client}</span>
           </div>
         )}
 
-        {/* Details grid */}
+        {/* Details grid — Date, Time, Location, Contact */}
         <div className="grid grid-cols-1 gap-2 rounded-lg bg-muted/40 p-3 text-xs sm:grid-cols-2">
           <div className="flex items-center gap-2">
             <CalendarDays className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             <span className="text-muted-foreground">Date:</span>
-            <span className="font-medium text-foreground tabular-nums">
+            <span
+              className={cn(
+                "font-medium tabular-nums",
+                !isPast && config.text
+              )}
+            >
               {formatDate(b.date)}
             </span>
           </div>
@@ -337,38 +505,31 @@ function BriefingCard({ briefing, onEdit, onDelete, onOpenTender }: BriefingCard
               {b.time || "—"}
             </span>
           </div>
-          {b.location && (
-            <div className="flex items-center gap-2 sm:col-span-2">
-              <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <span className="text-muted-foreground">Location:</span>
-              <span className="truncate font-medium text-foreground">{b.location}</span>
-            </div>
-          )}
-          {b.contact_person && (
-            <div className="flex items-center gap-2">
-              <User2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <span className="text-muted-foreground">Contact:</span>
-              <span className="truncate font-medium text-foreground">{b.contact_person}</span>
-            </div>
-          )}
-          {b.person_attending && (
-            <div className="flex items-center gap-2">
-              <UserCheck className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <span className="text-muted-foreground">Attending:</span>
-              <span className="truncate font-medium text-foreground">{b.person_attending}</span>
-            </div>
-          )}
+          <div className="flex items-center gap-2 sm:col-span-2">
+            <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="text-muted-foreground">Location:</span>
+            <span className="truncate font-medium text-foreground">
+              {b.location || "—"}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 sm:col-span-2">
+            <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="text-muted-foreground">Contact:</span>
+            <span className="truncate font-medium text-foreground">
+              {b.contact_person || "—"}
+            </span>
+          </div>
         </div>
 
-        {/* Attendance badges */}
+        {/* Attendance badges: required + confirmed */}
         <div className="flex flex-wrap items-center gap-2">
           {b.attendance_required ? (
             <Badge
               variant="outline"
-              className="bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900"
+              className="bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border-rose-200 dark:border-rose-900"
             >
               <UserCheck className="h-3 w-3" />
-              Attendance required
+              Compulsory
             </Badge>
           ) : (
             <Badge variant="outline" className="bg-muted text-muted-foreground">
@@ -386,48 +547,146 @@ function BriefingCard({ briefing, onEdit, onDelete, onOpenTender }: BriefingCard
           ) : (
             <Badge
               variant="outline"
-              className="bg-muted text-muted-foreground"
+              className="bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border-amber-200 dark:border-amber-900"
             >
-              <XCircle className="h-3 w-3" />
-              Unconfirmed
+              <Clock className="h-3 w-3" />
+              Not confirmed
             </Badge>
+          )}
+        </div>
+
+        {/* Person attending */}
+        <div className="flex items-center gap-2 text-xs">
+          <UserCheck className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="text-muted-foreground">Person attending:</span>
+          {b.person_attending ? (
+            <span className="font-medium text-foreground">{b.person_attending}</span>
+          ) : b.attendance_required ? (
+            <span className="font-medium text-amber-700 dark:text-amber-400">
+              Not assigned
+            </span>
+          ) : (
+            <span className="font-medium text-muted-foreground">—</span>
+          )}
+        </div>
+
+        {/* Alert strips */}
+        {(needsConfirmation || noAttendee) && (
+          <div className="space-y-1.5">
+            {needsConfirmation && (
+              <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  Attendance confirmation required — briefing is within{" "}
+                  <span className="font-bold">
+                    {b.days_until === 0
+                      ? "today"
+                      : `${b.days_until} day${b.days_until === 1 ? "" : "s"}`}
+                    !
+                  </span>
+                </span>
+              </div>
+            )}
+            {noAttendee && (
+              <div className="flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800 dark:border-rose-800 dark:bg-rose-950/50 dark:text-rose-300">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>No person assigned to attend this compulsory briefing.</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Certificate section */}
+        <div className="rounded-lg border border-border bg-muted/20 p-3">
+          <div className="mb-2 flex items-center gap-2">
+            <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-xs font-semibold text-foreground">
+              Attendance Certificate
+            </span>
+          </div>
+          {b.certificate_url ? (
+            <div className="flex items-center gap-2">
+              <a
+                href={b.certificate_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300 dark:hover:bg-emerald-900"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                View Certificate
+              </a>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950"
+                onClick={() => onRemoveCertificate(b)}
+                disabled={isRemoving}
+              >
+                {isRemoving ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="h-3.5 w-3.5" />
+                )}
+                Remove
+              </Button>
+            </div>
+          ) : (
+            <>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".pdf,.doc,.docx,.jpg,.png"
+                className="hidden"
+                onChange={handleFile}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 w-full justify-start text-xs"
+                onClick={() => fileRef.current?.click()}
+                disabled={isUploading}
+              >
+                {isUploading ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Uploading…
+                  </>
+                ) : (
+                  <>
+                    <Upload className="h-3.5 w-3.5" />
+                    Upload certificate
+                  </>
+                )}
+              </Button>
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                PDF, DOC, DOCX, JPG or PNG. Upload auto-marks attendance as
+                confirmed.
+              </p>
+            </>
           )}
         </div>
 
         {/* Notes */}
         {b.notes && (
-          <div className="text-xs">
-            <p
-              className={cn(
-                "text-muted-foreground whitespace-pre-wrap",
-                !notesExpanded && hasLongNotes && "line-clamp-2"
-              )}
-            >
-              {b.notes}
-            </p>
-            {hasLongNotes && (
-              <button
-                onClick={() => setNotesExpanded((v) => !v)}
-                className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
-              >
-                {notesExpanded ? (
-                  <>
-                    Show less
-                    <ChevronUp className="h-3 w-3" />
-                  </>
-                ) : (
-                  <>
-                    Show more
-                    <ChevronDown className="h-3 w-3" />
-                  </>
-                )}
-              </button>
-            )}
+          <div className="rounded-md bg-muted/40 px-3 py-2 text-xs">
+            <p className="mb-1 font-medium text-muted-foreground">Notes</p>
+            <p className="whitespace-pre-wrap text-foreground">{b.notes}</p>
           </div>
         )}
 
         {/* Actions */}
         <div className="mt-auto flex items-center justify-end gap-1 border-t pt-3">
+          {needsConfirmation && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 mr-auto border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300 dark:hover:bg-emerald-900"
+              onClick={() => onConfirmAttendance(b)}
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Confirm attendance
+            </Button>
+          )}
           <Button
             size="sm"
             variant="ghost"
@@ -435,7 +694,7 @@ function BriefingCard({ briefing, onEdit, onDelete, onOpenTender }: BriefingCard
             onClick={() => onEdit(b)}
           >
             <Pencil className="h-3.5 w-3.5" />
-            <span className="sr-only">Edit</span>
+            Edit
           </Button>
           <Button
             size="sm"
@@ -444,7 +703,7 @@ function BriefingCard({ briefing, onEdit, onDelete, onOpenTender }: BriefingCard
             onClick={() => onDelete(b)}
           >
             <Trash2 className="h-3.5 w-3.5" />
-            <span className="sr-only">Delete</span>
+            Delete
           </Button>
         </div>
       </CardContent>
@@ -452,10 +711,12 @@ function BriefingCard({ briefing, onEdit, onDelete, onOpenTender }: BriefingCard
   );
 }
 
-// ---- Briefing dialog (create / edit) ----
+// =====================================================================
+// Briefing dialog (create / edit)
+// =====================================================================
 interface BriefingDialogProps {
   open: boolean;
-  editing: Briefing | null;
+  editing: BriefingAlert | null;
   tenders: TenderOption[];
   tendersLoading: boolean;
   onClose: () => void;
@@ -528,7 +789,7 @@ function BriefingDialog({
         toast.success("Briefing updated");
       } else {
         const tenderId = Number(form.tender_id);
-        await api.createBriefing(tenderId, { ...payload, tender_id: tenderId });
+        await api.createBriefing(tenderId, payload);
         toast.success("Briefing added");
       }
       onSaved();
@@ -540,11 +801,9 @@ function BriefingDialog({
     }
   };
 
-  const selectedTender = tenders.find((t) => String(t.id) === form.tender_id);
-
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto scrollbar-thin">
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {isEdit ? (
@@ -567,7 +826,7 @@ function BriefingDialog({
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
-          {/* Tender selector */}
+          {/* Tender selector — disabled in edit mode */}
           <div className="grid gap-2">
             <Label htmlFor="b-tender">
               Tender <span className="text-rose-500">*</span>
@@ -589,7 +848,8 @@ function BriefingDialog({
               </div>
             ) : tenders.length === 0 ? (
               <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-                No tenders available. Create a tender first before scheduling a briefing.
+                No tenders available. Create a tender first before scheduling a
+                briefing.
               </div>
             ) : (
               <Select
@@ -602,7 +862,9 @@ function BriefingDialog({
                 <SelectContent>
                   {tenders.map((t) => (
                     <SelectItem key={t.id} value={String(t.id)}>
-                      <span className="font-mono text-xs">{t.reference_number}</span>
+                      <span className="font-mono text-xs">
+                        {t.reference_number}
+                      </span>
                       {" — "}
                       <span className="truncate">{t.title}</span>
                     </SelectItem>
@@ -610,17 +872,14 @@ function BriefingDialog({
                 </SelectContent>
               </Select>
             )}
-            {selectedTender && !isEdit && (
-              <p className="text-[11px] text-muted-foreground truncate">
-                {selectedTender.title}
-              </p>
-            )}
           </div>
 
           {/* Type + Date + Time */}
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="grid gap-2">
-              <Label htmlFor="b-type">Type</Label>
+              <Label htmlFor="b-type">
+                Type <span className="text-rose-500">*</span>
+              </Label>
               <Select
                 value={form.briefing_type}
                 onValueChange={(v) => update("briefing_type", v as BriefingType)}
@@ -699,7 +958,9 @@ function BriefingDialog({
                 <Label htmlFor="b-required" className="cursor-pointer">
                   Attendance required
                 </Label>
-                <p className="text-[11px] text-muted-foreground">Is attendance compulsory?</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Is attendance compulsory?
+                </p>
               </div>
               <Switch
                 id="b-required"
@@ -712,7 +973,9 @@ function BriefingDialog({
                 <Label htmlFor="b-confirmed" className="cursor-pointer">
                   Attendance confirmed
                 </Label>
-                <p className="text-[11px] text-muted-foreground">Have you confirmed?</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Have you confirmed?
+                </p>
               </div>
               <Switch
                 id="b-confirmed"
@@ -752,16 +1015,22 @@ function BriefingDialog({
   );
 }
 
-// ---- Delete confirmation ----
-interface DeleteDialogProps {
+// =====================================================================
+// Delete confirmation
+// =====================================================================
+function DeleteDialog({
+  open,
+  briefing,
+  onClose,
+  onConfirm,
+  deleting,
+}: {
   open: boolean;
-  briefing: Briefing | null;
+  briefing: BriefingAlert | null;
   onClose: () => void;
   onConfirm: () => void;
   deleting: boolean;
-}
-
-function DeleteDialog({ open, briefing, onClose, onConfirm, deleting }: DeleteDialogProps) {
+}) {
   return (
     <AlertDialog open={open} onOpenChange={(v) => !v && onClose()}>
       <AlertDialogContent>
@@ -801,32 +1070,52 @@ function DeleteDialog({ open, briefing, onClose, onConfirm, deleting }: DeleteDi
   );
 }
 
-// ---- Main Component ----
+// =====================================================================
+// Main component
+// =====================================================================
 export function BriefingsTab() {
-  const [briefings, setBriefings] = useState<Briefing[]>([]);
+  const [alerts, setAlerts] = useState<BriefingAlert[]>([]);
+  const [upcoming, setUpcoming] = useState<BriefingAlert[]>([]);
+  const [allBriefings, setAllBriefings] = useState<BriefingAlert[]>([]);
+  const [summary, setSummary] = useState<BriefingSummary | null>(null);
   const [tenders, setTenders] = useState<TenderOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [tendersLoading, setTendersLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [view, setView] = useState<"all" | "upcoming">("all");
+  const [view, setView] = useState<"upcoming" | "all">("upcoming");
+  const [typeFilter, setTypeFilter] = useState<"all" | BriefingType>("all");
   const [search, setSearch] = useState("");
 
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingBriefing, setEditingBriefing] = useState<Briefing | null>(null);
+  const [editingBriefing, setEditingBriefing] = useState<BriefingAlert | null>(
+    null
+  );
 
-  const [deleteBriefing, setDeleteBriefing] = useState<Briefing | null>(null);
+  const [deleteBriefing, setDeleteBriefing] = useState<BriefingAlert | null>(
+    null
+  );
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const fetchBriefings = useCallback(async (isRefresh = false) => {
+  const [uploadingId, setUploadingId] = useState<number | null>(null);
+  const [removingCertId, setRemovingCertId] = useState<number | null>(null);
+  const [confirmingId, setConfirmingId] = useState<number | null>(null);
+
+  const fetchData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
     setError(null);
     try {
-      const res = await api.listBriefings(false, 30);
-      setBriefings((res.items as Briefing[]) || []);
+      const [alertsRes, allRes] = await Promise.all([
+        api.getBriefingAlerts(),
+        api.listBriefings(false, 30),
+      ]);
+      setAlerts((alertsRes.alerts || []).map(toBriefingView));
+      setUpcoming((alertsRes.upcoming || []).map(toBriefingView));
+      setSummary(alertsRes.summary as BriefingSummary);
+      setAllBriefings((allRes.items || []).map(toBriefingView));
     } catch (e: any) {
       setError(e?.message || "Failed to load briefings");
     } finally {
@@ -854,87 +1143,80 @@ export function BriefingsTab() {
   }, []);
 
   useEffect(() => {
-    fetchBriefings();
-  }, [fetchBriefings]);
+    fetchData();
+  }, [fetchData]);
 
   const openTender = (id: number) => {
     useDashboardStore.getState().setTab("tenders");
     setTimeout(() => useDashboardStore.getState().selectTender(id), 50);
   };
 
-  // ---- Stats (computed from full list) ----
-  const stats = useMemo(() => {
-    const total = briefings.length;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const in30 = new Date(today);
-    in30.setDate(in30.getDate() + 30);
-    const upcoming = briefings.filter((b) => {
-      if (!b.date) return false;
-      const d = new Date(b.date);
-      d.setHours(0, 0, 0, 0);
-      return d >= today && d <= in30;
-    }).length;
-    const unconfirmed = briefings.filter(
-      (b) => b.attendance_required && !b.attendance_confirmed
-    ).length;
-    return { total, upcoming, unconfirmed };
-  }, [briefings]);
-
-  // ---- Client-side filtering ----
+  // ---- Filtering ----
   const filtered = useMemo(() => {
+    const source = view === "upcoming" ? upcoming : allBriefings;
     const q = search.trim().toLowerCase();
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const in30 = new Date(today);
-    in30.setDate(in30.getDate() + 30);
-    return briefings.filter((b) => {
-      if (view === "upcoming") {
-        if (!b.date) return false;
-        const d = new Date(b.date);
-        d.setHours(0, 0, 0, 0);
-        if (d < today || d > in30) return false;
-      }
+    return source.filter((b) => {
+      if (typeFilter !== "all" && b.briefing_type !== typeFilter) return false;
       if (q) {
-        const hay = `${b.tender_reference || ""} ${b.tender_title || ""} ${b.client || ""} ${b.location || ""}`.toLowerCase();
+        const hay =
+          `${b.tender_reference || ""} ${b.tender_title || ""} ${b.client || ""} ${b.location || ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [briefings, view, search]);
+  }, [view, upcoming, allBriefings, typeFilter, search]);
 
-  // ---- Group filtered briefings by date (ascending) ----
+  // ---- Group by date (ascending) ----
   const grouped = useMemo(() => {
     const sorted = [...filtered].sort((a, b) => {
       const da = a.date ? new Date(a.date).getTime() : 0;
       const db = b.date ? new Date(b.date).getTime() : 0;
       return da - db;
     });
-    const map = new Map<string, Briefing[]>();
+    const map = new Map<string, BriefingAlert[]>();
     for (const b of sorted) {
       const key = b.date || "no-date";
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(b);
     }
     return Array.from(map.entries()).map(([key, items]) => {
-      const heading = key !== "no-date" ? dateHeading(key) : null;
-      return { key, items, heading };
+      let label = "No date";
+      let relative: string | null = null;
+      if (key !== "no-date") {
+        label = formatDate(key);
+        const d = new Date(key);
+        if (!isNaN(d.getTime())) {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          d.setHours(0, 0, 0, 0);
+          const diff = Math.round(
+            (d.getTime() - today.getTime()) / 86400000
+          );
+          if (diff === 0) relative = "Today";
+          else if (diff === 1) relative = "Tomorrow";
+          else if (diff === -1) relative = "Yesterday";
+          else if (diff > 1 && diff <= 7) relative = `In ${diff} days`;
+          else if (diff < 0) relative = `${Math.abs(diff)}d ago`;
+        }
+      }
+      return { key, items, label, relative };
     });
   }, [filtered]);
 
+  // ---- Mutations ----
   const openNew = () => {
     setEditingBriefing(null);
     fetchTenders();
     setDialogOpen(true);
   };
 
-  const openEdit = (b: Briefing) => {
+  const openEdit = (b: BriefingAlert) => {
     setEditingBriefing(b);
     fetchTenders();
     setDialogOpen(true);
   };
 
-  const requestDelete = (b: Briefing) => {
+  const requestDelete = (b: BriefingAlert) => {
     setDeleteBriefing(b);
     setDeleteOpen(true);
   };
@@ -947,11 +1229,50 @@ export function BriefingsTab() {
       toast.success("Briefing deleted");
       setDeleteOpen(false);
       setDeleteBriefing(null);
-      fetchBriefings(true);
+      fetchData(true);
     } catch (e: any) {
       toast.error(e?.message || "Failed to delete briefing");
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleConfirmAttendance = async (b: BriefingAlert) => {
+    setConfirmingId(b.id);
+    try {
+      await api.updateBriefing(b.id, { attendance_confirmed: true });
+      toast.success("Attendance confirmed");
+      fetchData(true);
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to confirm attendance");
+    } finally {
+      setConfirmingId(null);
+    }
+  };
+
+  const handleUploadCertificate = async (b: BriefingAlert, file: File) => {
+    setUploadingId(b.id);
+    try {
+      await api.uploadBriefingCertificate(b.id, file);
+      toast.success("Certificate uploaded — attendance marked as confirmed");
+      fetchData(true);
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to upload certificate");
+    } finally {
+      setUploadingId(null);
+    }
+  };
+
+  const handleRemoveCertificate = async (b: BriefingAlert) => {
+    setRemovingCertId(b.id);
+    try {
+      await api.deleteBriefingCertificate(b.id);
+      toast.success("Certificate removed");
+      fetchData(true);
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to remove certificate");
+    } finally {
+      setRemovingCertId(null);
     }
   };
 
@@ -961,19 +1282,19 @@ export function BriefingsTab() {
       <div className="space-y-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-2">
-            <Skeleton className="h-8 w-64" />
-            <Skeleton className="h-4 w-80" />
+            <Skeleton className="h-8 w-72" />
+            <Skeleton className="h-4 w-96" />
           </div>
-          <Skeleton className="h-9 w-36" />
+          <Skeleton className="h-9 w-32" />
         </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          {Array.from({ length: 3 }).map((_, i) => (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          {Array.from({ length: 6 }).map((_, i) => (
             <StatSkeleton key={i} />
           ))}
         </div>
         <div className="space-y-4">
           {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-40 w-full rounded-xl" />
+            <Skeleton key={i} className="h-44 w-full rounded-xl" />
           ))}
         </div>
       </div>
@@ -985,7 +1306,9 @@ export function BriefingsTab() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Briefings &amp; Site Inspections</h1>
+          <h1 className="text-2xl font-bold tracking-tight">
+            Briefings &amp; Site Inspections
+          </h1>
           <p className="text-sm text-muted-foreground">
             Track compulsory briefings and site inspections
           </p>
@@ -998,7 +1321,7 @@ export function BriefingsTab() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => fetchBriefings()}
+              onClick={() => fetchData()}
               className="border-destructive/40 text-destructive hover:bg-destructive/10"
             >
               <RefreshCw className="h-3.5 w-3.5" />
@@ -1010,80 +1333,226 @@ export function BriefingsTab() {
     );
   }
 
+  const totalAll = allBriefings.length;
+  const hasAlerts = (summary?.total_alerts ?? 0) > 0;
+  const hasToday = (summary?.today_count ?? 0) > 0;
+
   return (
     <div className="space-y-6">
       {/* ---- Page header ---- */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Briefings &amp; Site Inspections</h1>
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+            <CalendarClock className="h-6 w-6 text-primary" />
+            Briefings &amp; Site Inspections
+          </h1>
           <p className="text-sm text-muted-foreground">
-            Track compulsory briefings and site inspections
+            Track compulsory tender briefings and site inspections
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            onClick={() => fetchBriefings(true)}
-            disabled={refreshing}
-          >
-            <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
-            <span className="hidden sm:inline">Refresh</span>
-          </Button>
-          <Button onClick={openNew}>
-            <CalendarPlus className="h-4 w-4" />
-            Add Briefing
-          </Button>
-        </div>
+        <Button
+          variant="ghost"
+          onClick={() => fetchData(true)}
+          disabled={refreshing}
+        >
+          <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
+          <span className="hidden sm:inline">Refresh</span>
+        </Button>
       </div>
 
-      {/* ---- Stats row ---- */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard
-          icon={ListChecks}
-          iconClass="bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
-          value={stats.total}
-          label="Total Briefings"
-          subtitle="All scheduled"
-        />
+      {/* ---- Alerts banner (CRITICAL) ---- */}
+      {hasAlerts && (
+        <Alert className="border-rose-300 bg-rose-50 dark:border-rose-800 dark:bg-rose-950/30">
+          <BellRing className="h-5 w-5 text-rose-600 dark:text-rose-400" />
+          <AlertTitle className="text-rose-800 dark:text-rose-300">
+            {summary!.total_alerts} compulsory briefing
+            {summary!.total_alerts === 1 ? "" : "s"} need attention — attendance
+            not confirmed or no person assigned
+          </AlertTitle>
+          <AlertDescription>
+            <div className="mt-2 space-y-2">
+              {alerts.slice(0, 4).map((b) => (
+                <div
+                  key={b.id}
+                  className="flex flex-col gap-2 rounded-md border border-rose-200 bg-card p-2.5 text-foreground dark:border-rose-900 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs font-semibold text-primary">
+                        {b.tender_reference || "—"}
+                      </span>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "border text-[10px]",
+                          b.days_until <= 1
+                            ? "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300"
+                            : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
+                        )}
+                      >
+                        {b.days_until === 0
+                          ? "Today"
+                          : b.days_until === 1
+                          ? "1 day"
+                          : `${b.days_until} days`}
+                      </Badge>
+                    </div>
+                    <div className="line-clamp-1 text-xs font-medium">
+                      {b.tender_title || "Untitled tender"}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {formatDate(b.date)}
+                      {b.time && ` • ${b.time}`}
+                      {!b.attendance_confirmed && " • Not confirmed"}
+                      {!b.person_attending && " • No attendee"}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 shrink-0 border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300 dark:hover:bg-emerald-900"
+                    onClick={() => handleConfirmAttendance(b)}
+                    disabled={confirmingId === b.id}
+                  >
+                    {confirmingId === b.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                    )}
+                    Confirm attendance
+                  </Button>
+                </div>
+              ))}
+              {alerts.length > 4 && (
+                <p className="text-[11px] text-rose-700 dark:text-rose-400">
+                  + {alerts.length - 4} more — see below
+                </p>
+              )}
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* ---- Today banner (separate) ---- */}
+      {hasToday && (
+        <Alert className="border-rose-400 bg-rose-100 dark:border-rose-700 dark:bg-rose-900/40">
+          <BellRing className="h-5 w-5 text-rose-700 dark:text-rose-300" />
+          <AlertTitle className="text-rose-900 dark:text-rose-200">
+            {summary!.today_count} briefing{summary!.today_count === 1 ? "" : "s"} happening today!
+          </AlertTitle>
+          <AlertDescription className="text-rose-800 dark:text-rose-300">
+            Check the list below — make sure attendance is confirmed and a person
+            is assigned.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* ---- Success banner (when no alerts) ---- */}
+      {!hasAlerts && !hasToday && (summary?.total_upcoming ?? 0) > 0 && (
+        <Alert className="border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30">
+          <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+          <AlertTitle className="text-emerald-800 dark:text-emerald-300">
+            All upcoming briefings are confirmed
+          </AlertTitle>
+          <AlertDescription className="text-emerald-700 dark:text-emerald-400">
+            {summary?.total_upcoming} upcoming briefing
+            {summary?.total_upcoming === 1 ? "" : "s"} — all have attendance
+            confirmed and a person assigned. Nice work!
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* ---- Summary stats row ---- */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <StatCard
           icon={CalendarClock}
-          iconClass="bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400"
-          value={stats.upcoming}
+          iconClass="bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+          value={summary?.total_upcoming ?? 0}
           label="Upcoming"
           subtitle="Next 30 days"
         />
         <StatCard
-          icon={AlertTriangle}
+          icon={BellRing}
           iconClass="bg-rose-100 text-rose-600 dark:bg-rose-950 dark:text-rose-400"
-          value={stats.unconfirmed}
+          value={summary?.today_count ?? 0}
+          label="Today"
+          subtitle="Happening today"
+        />
+        <StatCard
+          icon={Zap}
+          iconClass="bg-rose-100 text-rose-600 dark:bg-rose-950 dark:text-rose-400"
+          value={summary?.critical_count ?? 0}
+          label="Critical"
+          subtitle="≤ 1 day"
+        />
+        <StatCard
+          icon={Clock}
+          iconClass="bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400"
+          value={summary?.unconfirmed_count ?? 0}
           label="Unconfirmed"
           subtitle="Attendance pending"
         />
+        <StatCard
+          icon={User}
+          iconClass="bg-orange-100 text-orange-600 dark:bg-orange-950 dark:text-orange-400"
+          value={summary?.no_attendee_count ?? 0}
+          label="No Attendee"
+          subtitle="No person assigned"
+        />
+        <StatCard
+          icon={Calendar}
+          iconClass="bg-primary/10 text-primary"
+          value={totalAll}
+          label="Total"
+          subtitle="All briefings"
+        />
       </div>
 
-      {/* ---- Filters ---- */}
+      {/* ---- Filter bar ---- */}
       <Card>
-        <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <Tabs value={view} onValueChange={(v) => setView(v as "all" | "upcoming")}>
+        <CardContent className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <Tabs
+            value={view}
+            onValueChange={(v) => setView(v as "upcoming" | "all")}
+          >
             <TabsList>
-              <TabsTrigger value="all">All</TabsTrigger>
               <TabsTrigger value="upcoming">Upcoming (30 days)</TabsTrigger>
+              <TabsTrigger value="all">All</TabsTrigger>
             </TabsList>
           </Tabs>
-          <div className="relative flex-1 sm:max-w-xs">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search by tender ref, title, client…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
-            />
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
+            <Select
+              value={typeFilter}
+              onValueChange={(v) => setTypeFilter(v as "all" | BriefingType)}
+            >
+              <SelectTrigger className="h-9 w-full sm:w-44">
+                <SelectValue placeholder="Type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All types</SelectItem>
+                <SelectItem value="Briefing">Briefings</SelectItem>
+                <SelectItem value="Site Inspection">Site Inspections</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="relative flex-1 sm:w-72">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search reference, title, client…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <Button onClick={openNew} className="shrink-0">
+              <CalendarPlus className="h-4 w-4" />
+              Add Briefing
+            </Button>
           </div>
         </CardContent>
       </Card>
 
       {/* ---- Briefings list ---- */}
-      {briefings.length === 0 ? (
+      {allBriefings.length === 0 ? (
         <Card className="border-dashed">
           <CardContent>
             <EmptyState
@@ -1108,7 +1577,7 @@ export function BriefingsTab() {
               title="No matches"
               message={
                 view === "upcoming"
-                  ? "No briefings in the next 30 days. Switch to 'All' to see past briefings."
+                  ? "No upcoming briefings in the next 30 days match your filters. Switch to 'All' to see past briefings."
                   : "No briefings match your search. Try a different reference or clear the filter."
               }
               iconClass="bg-muted text-muted-foreground"
@@ -1117,44 +1586,69 @@ export function BriefingsTab() {
         </Card>
       ) : (
         <div className="space-y-6">
-          {grouped.map(({ key, items, heading }) => (
-            <div key={key} className="space-y-3">
-              <div className="flex items-center gap-2">
-                <CalendarDays className="h-4 w-4 text-primary" />
-                <h2 className="text-sm font-semibold text-foreground">
-                  {heading ? heading.label : "No date"}
-                </h2>
-                {heading?.relative && (
+          {grouped.map(({ key, items, label, relative }) => {
+            const first = items[0];
+            const headingConfig = first ? URGENCY_CONFIG[first.urgency] : null;
+            return (
+              <div key={key} className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <CalendarDays className="h-4 w-4 text-primary" />
+                  <h2 className="text-sm font-semibold text-foreground">
+                    {label}
+                  </h2>
+                  {relative && (
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "border px-1.5 py-0 text-[10px] tabular-nums",
+                        headingConfig?.badge ||
+                          "bg-muted text-muted-foreground"
+                      )}
+                    >
+                      {relative}
+                    </Badge>
+                  )}
                   <Badge
                     variant="outline"
-                    className={cn(
-                      "border px-1.5 py-0 text-[10px] tabular-nums",
-                      relativeBadgeClass(heading.diff)
-                    )}
+                    className="px-1.5 py-0 text-[10px] tabular-nums"
                   >
-                    {heading.relative}
+                    {items.length} {items.length === 1 ? "item" : "items"}
                   </Badge>
-                )}
-                <Badge variant="outline" className="px-1.5 py-0 text-[10px] tabular-nums">
-                  {items.length} {items.length === 1 ? "item" : "items"}
-                </Badge>
-                <div className="ml-2 h-px flex-1 bg-border" />
+                  <div className="ml-2 h-px flex-1 bg-border" />
+                </div>
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  {items.map((b) => (
+                    <BriefingCard
+                      key={b.id}
+                      briefing={b}
+                      onEdit={openEdit}
+                      onDelete={requestDelete}
+                      onOpenTender={openTender}
+                      onConfirmAttendance={handleConfirmAttendance}
+                      onUploadCertificate={handleUploadCertificate}
+                      onRemoveCertificate={handleRemoveCertificate}
+                      uploadingId={uploadingId}
+                      removingCertId={removingCertId}
+                    />
+                  ))}
+                </div>
               </div>
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                {items.map((b) => (
-                  <BriefingCard
-                    key={b.id}
-                    briefing={b}
-                    onEdit={openEdit}
-                    onDelete={requestDelete}
-                    onOpenTender={openTender}
-                  />
-                ))}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
+
+      {/* ---- Info banner ---- */}
+      <Alert>
+        <BellRing className="h-4 w-4" />
+        <AlertDescription className="text-xs">
+          <strong>How briefing alerts work:</strong> A briefing appears as an
+          alert when it is compulsory, falls within the next 7 days, and either
+          attendance is not confirmed or no person has been assigned to attend.
+          Upload an attendance certificate to automatically mark a briefing as
+          confirmed.
+        </AlertDescription>
+      </Alert>
 
       {/* ---- Dialogs ---- */}
       <BriefingDialog
@@ -1163,7 +1657,7 @@ export function BriefingsTab() {
         tenders={tenders}
         tendersLoading={tendersLoading}
         onClose={() => setDialogOpen(false)}
-        onSaved={() => fetchBriefings(true)}
+        onSaved={() => fetchData(true)}
       />
       <DeleteDialog
         open={deleteOpen}

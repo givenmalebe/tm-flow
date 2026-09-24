@@ -1,0 +1,1181 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→import { useCallback, useEffect, useMemo, useState } from "react";
+     4→     4→import {
+     5→     5→  MapPin,
+     6→     6→  CalendarPlus,
+     7→     7→  CalendarDays,
+     8→     8→  Clock,
+     9→     9→  User2,
+    10→    10→  Search,
+    11→    11→  RefreshCw,
+    12→    12→  Pencil,
+    13→    13→  Trash2,
+    14→    14→  AlertTriangle,
+    15→    15→  CheckCircle2,
+    16→    16→  XCircle,
+    17→    17→  CalendarClock,
+    18→    18→  UserCheck,
+    19→    19→  Loader2,
+    20→    20→  ChevronDown,
+    21→    21→  ChevronUp,
+    22→    22→  ExternalLink,
+    23→    23→  ListChecks,
+    24→    24→  type LucideIcon,
+    25→    25→} from "lucide-react";
+    26→    26→import { toast } from "sonner";
+    27→    27→import {
+    28→    28→  Card,
+    29→    29→  CardContent,
+    30→    30→  CardDescription,
+    31→    31→  CardHeader,
+    32→    32→  CardTitle,
+    33→    33→} from "@/components/ui/card";
+    34→    34→import { Button } from "@/components/ui/button";
+    35→    35→import { Input } from "@/components/ui/input";
+    36→    36→import { Label } from "@/components/ui/label";
+    37→    37→import { Textarea } from "@/components/ui/textarea";
+    38→    38→import { Badge } from "@/components/ui/badge";
+    39→    39→import { Skeleton } from "@/components/ui/skeleton";
+    40→    40→import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+    41→    41→import { Switch } from "@/components/ui/switch";
+    42→    42→import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+    43→    43→import {
+    44→    44→  Select,
+    45→    45→  SelectContent,
+    46→    46→  SelectItem,
+    47→    47→  SelectTrigger,
+    48→    48→  SelectValue,
+    49→    49→} from "@/components/ui/select";
+    50→    50→import {
+    51→    51→  Dialog,
+    52→    52→  DialogContent,
+    53→    53→  DialogDescription,
+    54→    54→  DialogFooter,
+    55→    55→  DialogHeader,
+    56→    56→  DialogTitle,
+    57→    57→} from "@/components/ui/dialog";
+    58→    58→import {
+    59→    59→  AlertDialog,
+    60→    60→  AlertDialogAction,
+    61→    61→  AlertDialogCancel,
+    62→    62→  AlertDialogContent,
+    63→    63→  AlertDialogDescription,
+    64→    64→  AlertDialogFooter,
+    65→    65→  AlertDialogHeader,
+    66→    66→  AlertDialogTitle,
+    67→    67→} from "@/components/ui/alert-dialog";
+    68→    68→import { api } from "@/lib/api";
+    69→    69→import {
+    70→    70→  useDashboardStore,
+    71→    71→  formatDate,
+    72→    72→  daysUntil,
+    73→    73→} from "@/lib/dashboard-store";
+    74→    74→import { cn } from "@/lib/utils";
+    75→    75→
+    76→    76→// ---- Types ----
+    77→    77→type BriefingType = "Briefing" | "Site Inspection";
+    78→    78→
+    79→    79→interface Briefing {
+    80→    80→  id: number;
+    81→    81→  tender_id: number;
+    82→    82→  tender_reference: string | null;
+    83→    83→  tender_title: string | null;
+    84→    84→  client: string | null;
+    85→    85→  briefing_type: BriefingType;
+    86→    86→  date: string | null;
+    87→    87→  time: string | null;
+    88→    88→  location: string | null;
+    89→    89→  contact_person: string | null;
+    90→    90→  attendance_required: boolean;
+    91→    91→  attendance_confirmed: boolean;
+    92→    92→  person_attending: string | null;
+    93→    93→  notes: string | null;
+    94→    94→}
+    95→    95→
+    96→    96→interface TenderOption {
+    97→    97→  id: number;
+    98→    98→  reference_number: string;
+    99→    99→  title: string;
+   100→   100→}
+   101→   101→
+   102→   102→interface BriefingForm {
+   103→   103→  tender_id: string;
+   104→   104→  briefing_type: BriefingType;
+   105→   105→  date: string;
+   106→   106→  time: string;
+   107→   107→  location: string;
+   108→   108→  contact_person: string;
+   109→   109→  attendance_required: boolean;
+   110→   110→  attendance_confirmed: boolean;
+   111→   111→  person_attending: string;
+   112→   112→  notes: string;
+   113→   113→}
+   114→   114→
+   115→   115→const EMPTY_FORM: BriefingForm = {
+   116→   116→  tender_id: "",
+   117→   117→  briefing_type: "Briefing",
+   118→   118→  date: "",
+   119→   119→  time: "",
+   120→   120→  location: "",
+   121→   121→  contact_person: "",
+   122→   122→  attendance_required: true,
+   123→   123→  attendance_confirmed: false,
+   124→   124→  person_attending: "",
+   125→   125→  notes: "",
+   126→   126→};
+   127→   127→
+   128→   128→const BRIEFING_TYPES: BriefingType[] = ["Briefing", "Site Inspection"];
+   129→   129→
+   130→   130→// ---- Helpers ----
+   131→   131→function typeBadgeClass(type: BriefingType): string {
+   132→   132→  return type === "Briefing"
+   133→   133→    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900"
+   134→   134→    : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border-amber-200 dark:border-amber-900";
+   135→   135→}
+   136→   136→
+   137→   137→function dateHeading(iso: string): { label: string; relative: string | null; diff: number } {
+   138→   138→  const d = new Date(iso);
+   139→   139→  if (isNaN(d.getTime())) return { label: formatDate(iso), relative: null, diff: 0 };
+   140→   140→  const today = new Date();
+   141→   141→  today.setHours(0, 0, 0, 0);
+   142→   142→  d.setHours(0, 0, 0, 0);
+   143→   143→  const diff = Math.round((d.getTime() - today.getTime()) / 86400000);
+   144→   144→  const label = d.toLocaleDateString("en-ZA", {
+   145→   145→    weekday: "short",
+   146→   146→    day: "2-digit",
+   147→   147→    month: "short",
+   148→   148→    year: "numeric",
+   149→   149→  });
+   150→   150→  let relative: string | null = null;
+   151→   151→  if (diff === 0) relative = "Today";
+   152→   152→  else if (diff === 1) relative = "Tomorrow";
+   153→   153→  else if (diff === -1) relative = "Yesterday";
+   154→   154→  else if (diff > 1 && diff <= 7) relative = `In ${diff} days`;
+   155→   155→  else if (diff < 0) relative = `${Math.abs(diff)}d ago`;
+   156→   156→  return { label, relative, diff };
+   157→   157→}
+   158→   158→
+   159→   159→function relativeBadgeClass(diff: number): string {
+   160→   160→  if (diff < 0)
+   161→   161→    return "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border-rose-200 dark:border-rose-900";
+   162→   162→  if (diff <= 1)
+   163→   163→    return "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border-rose-200 dark:border-rose-900";
+   164→   164→  if (diff <= 3)
+   165→   165→    return "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border-amber-200 dark:border-amber-900";
+   166→   166→  return "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900";
+   167→   167→}
+   168→   168→
+   169→   169→// ---- Stat card ----
+   170→   170→interface StatCardProps {
+   171→   171→  icon: LucideIcon;
+   172→   172→  iconClass: string;
+   173→   173→  value: number;
+   174→   174→  label: string;
+   175→   175→  subtitle: string;
+   176→   176→}
+   177→   177→
+   178→   178→function StatCard({ icon: Icon, iconClass, value, label, subtitle }: StatCardProps) {
+   179→   179→  return (
+   180→   180→    <Card className="transition-shadow hover:shadow-md">
+   181→   181→      <CardContent className="flex items-start justify-between gap-3">
+   182→   182→        <div className="min-w-0">
+   183→   183→          <div className="text-3xl font-bold tracking-tight tabular-nums text-foreground">
+   184→   184→            {value}
+   185→   185→          </div>
+   186→   186→          <div className="mt-1 text-sm font-medium text-foreground">{label}</div>
+   187→   187→          <div className="text-xs text-muted-foreground mt-0.5">{subtitle}</div>
+   188→   188→        </div>
+   189→   189→        <div
+   190→   190→          className={cn(
+   191→   191→            "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl",
+   192→   192→            iconClass
+   193→   193→          )}
+   194→   194→        >
+   195→   195→          <Icon className="h-5 w-5" />
+   196→   196→        </div>
+   197→   197→      </CardContent>
+   198→   198→    </Card>
+   199→   199→  );
+   200→   200→}
+   201→   201→
+   202→   202→function StatSkeleton() {
+   203→   203→  return (
+   204→   204→    <Card>
+   205→   205→      <CardContent className="flex items-start justify-between gap-3">
+   206→   206→        <div className="flex-1 space-y-2">
+   207→   207→          <Skeleton className="h-8 w-16" />
+   208→   208→          <Skeleton className="h-4 w-24" />
+   209→   209→          <Skeleton className="h-3 w-20" />
+   210→   210→        </div>
+   211→   211→        <Skeleton className="h-11 w-11 rounded-xl" />
+   212→   212→      </CardContent>
+   213→   213→    </Card>
+   214→   214→  );
+   215→   215→}
+   216→   216→
+   217→   217→// ---- Empty state ----
+   218→   218→function EmptyState({
+   219→   219→  icon: Icon,
+   220→   220→  title,
+   221→   221→  message,
+   222→   222→  iconClass,
+   223→   223→  action,
+   224→   224→}: {
+   225→   225→  icon: LucideIcon;
+   226→   226→  title: string;
+   227→   227→  message: string;
+   228→   228→  iconClass?: string;
+   229→   229→  action?: React.ReactNode;
+   230→   230→}) {
+   231→   231→  return (
+   232→   232→    <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+   233→   233→      <div
+   234→   234→        className={cn(
+   235→   235→          "flex h-14 w-14 items-center justify-center rounded-2xl",
+   236→   236→          iconClass || "bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+   237→   237→        )}
+   238→   238→      >
+   239→   239→        <Icon className="h-7 w-7" />
+   240→   240→      </div>
+   241→   241→      <div className="space-y-1">
+   242→   242→        <p className="text-base font-semibold text-foreground">{title}</p>
+   243→   243→        <p className="text-sm text-muted-foreground max-w-sm">{message}</p>
+   244→   244→      </div>
+   245→   245→      {action}
+   246→   246→    </div>
+   247→   247→  );
+   248→   248→}
+   249→   249→
+   250→   250→// ---- Briefing card ----
+   251→   251→interface BriefingCardProps {
+   252→   252→  briefing: Briefing;
+   253→   253→  onEdit: (b: Briefing) => void;
+   254→   254→  onDelete: (b: Briefing) => void;
+   255→   255→  onOpenTender: (id: number) => void;
+   256→   256→}
+   257→   257→
+   258→   258→function BriefingCard({ briefing, onEdit, onDelete, onOpenTender }: BriefingCardProps) {
+   259→   259→  const [notesExpanded, setNotesExpanded] = useState(false);
+   260→   260→  const b = briefing;
+   261→   261→  const days = daysUntil(b.date);
+   262→   262→  const needsConfirmation =
+   263→   263→    b.attendance_required &&
+   264→   264→    !b.attendance_confirmed &&
+   265→   265→    days !== null &&
+   266→   266→    days >= 0 &&
+   267→   267→    days <= 7;
+   268→   268→  const hasLongNotes = (b.notes?.length || 0) > 120;
+   269→   269→
+   270→   270→  return (
+   271→   271→    <Card
+   272→   272→      className={cn(
+   273→   273→        "flex flex-col transition-shadow hover:shadow-md",
+   274→   274→        needsConfirmation && "border-amber-300 dark:border-amber-800"
+   275→   275→      )}
+   276→   276→    >
+   277→   277→      {needsConfirmation && (
+   278→   278→        <div className="flex items-center gap-2 rounded-t-lg bg-amber-50 px-4 py-2 text-xs font-medium text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
+   279→   279→          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+   280→   280→          Attendance confirmation required!
+   281→   281→        </div>
+   282→   282→      )}
+   283→   283→      <CardContent className="flex flex-1 flex-col gap-3">
+   284→   284→        {/* Header: tender + type */}
+   285→   285→        <div className="flex items-start justify-between gap-2">
+   286→   286→          <button
+   287→   287→            onClick={() => onOpenTender(b.tender_id)}
+   288→   288→            className="group flex min-w-0 items-start gap-2 text-left"
+   289→   289→            title="Open tender"
+   290→   290→          >
+   291→   291→            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+   292→   292→              <MapPin className="h-4 w-4" />
+   293→   293→            </div>
+   294→   294→            <div className="min-w-0">
+   295→   295→              <div className="flex items-center gap-1.5">
+   296→   296→                <span className="font-mono text-xs font-semibold text-primary group-hover:underline">
+   297→   297→                  {b.tender_reference || "—"}
+   298→   298→                </span>
+   299→   299→                <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+   300→   300→              </div>
+   301→   301→              <div
+   302→   302→                className="line-clamp-2 text-sm font-semibold text-foreground group-hover:underline"
+   303→   303→                title={b.tender_title || ""}
+   304→   304→              >
+   305→   305→                {b.tender_title || "Untitled tender"}
+   306→   306→              </div>
+   307→   307→            </div>
+   308→   308→          </button>
+   309→   309→          <Badge
+   310→   310→            variant="outline"
+   311→   311→            className={cn("shrink-0 border", typeBadgeClass(b.briefing_type))}
+   312→   312→          >
+   313→   313→            {b.briefing_type}
+   314→   314→          </Badge>
+   315→   315→        </div>
+   316→   316→
+   317→   317→        {/* Client */}
+   318→   318→        {b.client && (
+   319→   319→          <div className="text-xs text-muted-foreground">
+   320→   320→            <span className="font-medium text-foreground">{b.client}</span>
+   321→   321→          </div>
+   322→   322→        )}
+   323→   323→
+   324→   324→        {/* Details grid */}
+   325→   325→        <div className="grid grid-cols-1 gap-2 rounded-lg bg-muted/40 p-3 text-xs sm:grid-cols-2">
+   326→   326→          <div className="flex items-center gap-2">
+   327→   327→            <CalendarDays className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+   328→   328→            <span className="text-muted-foreground">Date:</span>
+   329→   329→            <span className="font-medium text-foreground tabular-nums">
+   330→   330→              {formatDate(b.date)}
+   331→   331→            </span>
+   332→   332→          </div>
+   333→   333→          <div className="flex items-center gap-2">
+   334→   334→            <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+   335→   335→            <span className="text-muted-foreground">Time:</span>
+   336→   336→            <span className="font-medium text-foreground tabular-nums">
+   337→   337→              {b.time || "—"}
+   338→   338→            </span>
+   339→   339→          </div>
+   340→   340→          {b.location && (
+   341→   341→            <div className="flex items-center gap-2 sm:col-span-2">
+   342→   342→              <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+   343→   343→              <span className="text-muted-foreground">Location:</span>
+   344→   344→              <span className="truncate font-medium text-foreground">{b.location}</span>
+   345→   345→            </div>
+   346→   346→          )}
+   347→   347→          {b.contact_person && (
+   348→   348→            <div className="flex items-center gap-2">
+   349→   349→              <User2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+   350→   350→              <span className="text-muted-foreground">Contact:</span>
+   351→   351→              <span className="truncate font-medium text-foreground">{b.contact_person}</span>
+   352→   352→            </div>
+   353→   353→          )}
+   354→   354→          {b.person_attending && (
+   355→   355→            <div className="flex items-center gap-2">
+   356→   356→              <UserCheck className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+   357→   357→              <span className="text-muted-foreground">Attending:</span>
+   358→   358→              <span className="truncate font-medium text-foreground">{b.person_attending}</span>
+   359→   359→            </div>
+   360→   360→          )}
+   361→   361→        </div>
+   362→   362→
+   363→   363→        {/* Attendance badges */}
+   364→   364→        <div className="flex flex-wrap items-center gap-2">
+   365→   365→          {b.attendance_required ? (
+   366→   366→            <Badge
+   367→   367→              variant="outline"
+   368→   368→              className="bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900"
+   369→   369→            >
+   370→   370→              <UserCheck className="h-3 w-3" />
+   371→   371→              Attendance required
+   372→   372→            </Badge>
+   373→   373→          ) : (
+   374→   374→            <Badge variant="outline" className="bg-muted text-muted-foreground">
+   375→   375→              Optional
+   376→   376→            </Badge>
+   377→   377→          )}
+   378→   378→          {b.attendance_confirmed ? (
+   379→   379→            <Badge
+   380→   380→              variant="outline"
+   381→   381→              className="bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900"
+   382→   382→            >
+   383→   383→              <CheckCircle2 className="h-3 w-3" />
+   384→   384→              Confirmed
+   385→   385→            </Badge>
+   386→   386→          ) : (
+   387→   387→            <Badge
+   388→   388→              variant="outline"
+   389→   389→              className="bg-muted text-muted-foreground"
+   390→   390→            >
+   391→   391→              <XCircle className="h-3 w-3" />
+   392→   392→              Unconfirmed
+   393→   393→            </Badge>
+   394→   394→          )}
+   395→   395→        </div>
+   396→   396→
+   397→   397→        {/* Notes */}
+   398→   398→        {b.notes && (
+   399→   399→          <div className="text-xs">
+   400→   400→            <p
+   401→   401→              className={cn(
+   402→   402→                "text-muted-foreground whitespace-pre-wrap",
+   403→   403→                !notesExpanded && hasLongNotes && "line-clamp-2"
+   404→   404→              )}
+   405→   405→            >
+   406→   406→              {b.notes}
+   407→   407→            </p>
+   408→   408→            {hasLongNotes && (
+   409→   409→              <button
+   410→   410→                onClick={() => setNotesExpanded((v) => !v)}
+   411→   411→                className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+   412→   412→              >
+   413→   413→                {notesExpanded ? (
+   414→   414→                  <>
+   415→   415→                    Show less
+   416→   416→                    <ChevronUp className="h-3 w-3" />
+   417→   417→                  </>
+   418→   418→                ) : (
+   419→   419→                  <>
+   420→   420→                    Show more
+   421→   421→                    <ChevronDown className="h-3 w-3" />
+   422→   422→                  </>
+   423→   423→                )}
+   424→   424→              </button>
+   425→   425→            )}
+   426→   426→          </div>
+   427→   427→        )}
+   428→   428→
+   429→   429→        {/* Actions */}
+   430→   430→        <div className="mt-auto flex items-center justify-end gap-1 border-t pt-3">
+   431→   431→          <Button
+   432→   432→            size="sm"
+   433→   433→            variant="ghost"
+   434→   434→            className="h-8 px-2"
+   435→   435→            onClick={() => onEdit(b)}
+   436→   436→          >
+   437→   437→            <Pencil className="h-3.5 w-3.5" />
+   438→   438→            <span className="sr-only">Edit</span>
+   439→   439→          </Button>
+   440→   440→          <Button
+   441→   441→            size="sm"
+   442→   442→            variant="ghost"
+   443→   443→            className="h-8 px-2 text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950"
+   444→   444→            onClick={() => onDelete(b)}
+   445→   445→          >
+   446→   446→            <Trash2 className="h-3.5 w-3.5" />
+   447→   447→            <span className="sr-only">Delete</span>
+   448→   448→          </Button>
+   449→   449→        </div>
+   450→   450→      </CardContent>
+   451→   451→    </Card>
+   452→   452→  );
+   453→   453→}
+   454→   454→
+   455→   455→// ---- Briefing dialog (create / edit) ----
+   456→   456→interface BriefingDialogProps {
+   457→   457→  open: boolean;
+   458→   458→  editing: Briefing | null;
+   459→   459→  tenders: TenderOption[];
+   460→   460→  tendersLoading: boolean;
+   461→   461→  onClose: () => void;
+   462→   462→  onSaved: () => void;
+   463→   463→}
+   464→   464→
+   465→   465→function BriefingDialog({
+   466→   466→  open,
+   467→   467→  editing,
+   468→   468→  tenders,
+   469→   469→  tendersLoading,
+   470→   470→  onClose,
+   471→   471→  onSaved,
+   472→   472→}: BriefingDialogProps) {
+   473→   473→  const [form, setForm] = useState<BriefingForm>(EMPTY_FORM);
+   474→   474→  const [saving, setSaving] = useState(false);
+   475→   475→  const isEdit = editing !== null;
+   476→   476→
+   477→   477→  useEffect(() => {
+   478→   478→    if (open) {
+   479→   479→      if (editing) {
+   480→   480→        setForm({
+   481→   481→          tender_id: String(editing.tender_id),
+   482→   482→          briefing_type: editing.briefing_type || "Briefing",
+   483→   483→          date: editing.date || "",
+   484→   484→          time: editing.time || "",
+   485→   485→          location: editing.location || "",
+   486→   486→          contact_person: editing.contact_person || "",
+   487→   487→          attendance_required: editing.attendance_required,
+   488→   488→          attendance_confirmed: editing.attendance_confirmed,
+   489→   489→          person_attending: editing.person_attending || "",
+   490→   490→          notes: editing.notes || "",
+   491→   491→        });
+   492→   492→      } else {
+   493→   493→        setForm(EMPTY_FORM);
+   494→   494→      }
+   495→   495→    }
+   496→   496→  }, [open, editing]);
+   497→   497→
+   498→   498→  const update = <K extends keyof BriefingForm>(key: K, value: BriefingForm[K]) =>
+   499→   499→    setForm((f) => ({ ...f, [key]: value }));
+   500→   500→
+   501→   501→  const canSave =
+   502→   502→    form.date.length > 0 && (isEdit || form.tender_id.length > 0);
+   503→   503→
+   504→   504→  const handleSave = async () => {
+   505→   505→    if (!form.date) {
+   506→   506→      toast.error("Date is required");
+   507→   507→      return;
+   508→   508→    }
+   509→   509→    if (!isEdit && !form.tender_id) {
+   510→   510→      toast.error("Please select a tender");
+   511→   511→      return;
+   512→   512→    }
+   513→   513→    setSaving(true);
+   514→   514→    try {
+   515→   515→      const payload: Record<string, any> = {
+   516→   516→        briefing_type: form.briefing_type,
+   517→   517→        date: form.date,
+   518→   518→        time: form.time || null,
+   519→   519→        location: form.location || null,
+   520→   520→        contact_person: form.contact_person || null,
+   521→   521→        attendance_required: form.attendance_required,
+   522→   522→        attendance_confirmed: form.attendance_confirmed,
+   523→   523→        person_attending: form.person_attending || null,
+   524→   524→        notes: form.notes || null,
+   525→   525→      };
+   526→   526→      if (isEdit && editing) {
+   527→   527→        await api.updateBriefing(editing.id, payload);
+   528→   528→        toast.success("Briefing updated");
+   529→   529→      } else {
+   530→   530→        const tenderId = Number(form.tender_id);
+   531→   531→        await api.createBriefing(tenderId, { ...payload, tender_id: tenderId });
+   532→   532→        toast.success("Briefing added");
+   533→   533→      }
+   534→   534→      onSaved();
+   535→   535→      onClose();
+   536→   536→    } catch (e: any) {
+   537→   537→      toast.error(e?.message || "Failed to save briefing");
+   538→   538→    } finally {
+   539→   539→      setSaving(false);
+   540→   540→    }
+   541→   541→  };
+   542→   542→
+   543→   543→  const selectedTender = tenders.find((t) => String(t.id) === form.tender_id);
+   544→   544→
+   545→   545→  return (
+   546→   546→    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+   547→   547→      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto scrollbar-thin">
+   548→   548→        <DialogHeader>
+   549→   549→          <DialogTitle className="flex items-center gap-2">
+   550→   550→            {isEdit ? (
+   551→   551→              <>
+   552→   552→                <Pencil className="h-4 w-4 text-primary" />
+   553→   553→                Edit Briefing
+   554→   554→              </>
+   555→   555→            ) : (
+   556→   556→              <>
+   557→   557→                <CalendarPlus className="h-4 w-4 text-primary" />
+   558→   558→                Add Briefing
+   559→   559→              </>
+   560→   560→            )}
+   561→   561→          </DialogTitle>
+   562→   562→          <DialogDescription>
+   563→   563→            {isEdit
+   564→   564→              ? "Update the briefing or site inspection details."
+   565→   565→              : "Schedule a compulsory briefing or site inspection for a tender."}
+   566→   566→          </DialogDescription>
+   567→   567→        </DialogHeader>
+   568→   568→
+   569→   569→        <div className="grid gap-4 py-2">
+   570→   570→          {/* Tender selector */}
+   571→   571→          <div className="grid gap-2">
+   572→   572→            <Label htmlFor="b-tender">
+   573→   573→              Tender <span className="text-rose-500">*</span>
+   574→   574→            </Label>
+   575→   575→            {isEdit ? (
+   576→   576→              <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+   577→   577→                <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
+   578→   578→                <span className="truncate text-muted-foreground">
+   579→   579→                  <span className="font-mono text-xs font-semibold text-foreground">
+   580→   580→                    {editing?.tender_reference}
+   581→   581→                  </span>{" "}
+   582→   582→                  — {editing?.tender_title}
+   583→   583→                </span>
+   584→   584→              </div>
+   585→   585→            ) : tendersLoading ? (
+   586→   586→              <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+   587→   587→                <Loader2 className="h-4 w-4 animate-spin" />
+   588→   588→                Loading tenders…
+   589→   589→              </div>
+   590→   590→            ) : tenders.length === 0 ? (
+   591→   591→              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+   592→   592→                No tenders available. Create a tender first before scheduling a briefing.
+   593→   593→              </div>
+   594→   594→            ) : (
+   595→   595→              <Select
+   596→   596→                value={form.tender_id}
+   597→   597→                onValueChange={(v) => update("tender_id", v)}
+   598→   598→              >
+   599→   599→                <SelectTrigger id="b-tender" className="w-full">
+   600→   600→                  <SelectValue placeholder="Select a tender" />
+   601→   601→                </SelectTrigger>
+   602→   602→                <SelectContent>
+   603→   603→                  {tenders.map((t) => (
+   604→   604→                    <SelectItem key={t.id} value={String(t.id)}>
+   605→   605→                      <span className="font-mono text-xs">{t.reference_number}</span>
+   606→   606→                      {" — "}
+   607→   607→                      <span className="truncate">{t.title}</span>
+   608→   608→                    </SelectItem>
+   609→   609→                  ))}
+   610→   610→                </SelectContent>
+   611→   611→              </Select>
+   612→   612→            )}
+   613→   613→            {selectedTender && !isEdit && (
+   614→   614→              <p className="text-[11px] text-muted-foreground truncate">
+   615→   615→                {selectedTender.title}
+   616→   616→              </p>
+   617→   617→            )}
+   618→   618→          </div>
+   619→   619→
+   620→   620→          {/* Type + Date + Time */}
+   621→   621→          <div className="grid gap-4 sm:grid-cols-3">
+   622→   622→            <div className="grid gap-2">
+   623→   623→              <Label htmlFor="b-type">Type</Label>
+   624→   624→              <Select
+   625→   625→                value={form.briefing_type}
+   626→   626→                onValueChange={(v) => update("briefing_type", v as BriefingType)}
+   627→   627→              >
+   628→   628→                <SelectTrigger id="b-type" className="w-full">
+   629→   629→                  <SelectValue />
+   630→   630→                </SelectTrigger>
+   631→   631→                <SelectContent>
+   632→   632→                  {BRIEFING_TYPES.map((t) => (
+   633→   633→                    <SelectItem key={t} value={t}>
+   634→   634→                      {t}
+   635→   635→                    </SelectItem>
+   636→   636→                  ))}
+   637→   637→                </SelectContent>
+   638→   638→              </Select>
+   639→   639→            </div>
+   640→   640→            <div className="grid gap-2">
+   641→   641→              <Label htmlFor="b-date">
+   642→   642→                Date <span className="text-rose-500">*</span>
+   643→   643→              </Label>
+   644→   644→              <Input
+   645→   645→                id="b-date"
+   646→   646→                type="date"
+   647→   647→                value={form.date}
+   648→   648→                onChange={(e) => update("date", e.target.value)}
+   649→   649→              />
+   650→   650→            </div>
+   651→   651→            <div className="grid gap-2">
+   652→   652→              <Label htmlFor="b-time">Time</Label>
+   653→   653→              <Input
+   654→   654→                id="b-time"
+   655→   655→                type="time"
+   656→   656→                value={form.time}
+   657→   657→                onChange={(e) => update("time", e.target.value)}
+   658→   658→              />
+   659→   659→            </div>
+   660→   660→          </div>
+   661→   661→
+   662→   662→          {/* Location + Contact */}
+   663→   663→          <div className="grid gap-4 sm:grid-cols-2">
+   664→   664→            <div className="grid gap-2">
+   665→   665→              <Label htmlFor="b-location">Location</Label>
+   666→   666→              <Input
+   667→   667→                id="b-location"
+   668→   668→                value={form.location}
+   669→   669→                onChange={(e) => update("location", e.target.value)}
+   670→   670→                placeholder="e.g. Client head office, Boardroom A"
+   671→   671→              />
+   672→   672→            </div>
+   673→   673→            <div className="grid gap-2">
+   674→   674→              <Label htmlFor="b-contact">Contact person</Label>
+   675→   675→              <Input
+   676→   676→                id="b-contact"
+   677→   677→                value={form.contact_person}
+   678→   678→                onChange={(e) => update("contact_person", e.target.value)}
+   679→   679→                placeholder="e.g. Jane Doe — 011 555 0100"
+   680→   680→              />
+   681→   681→            </div>
+   682→   682→          </div>
+   683→   683→
+   684→   684→          {/* Person attending */}
+   685→   685→          <div className="grid gap-2">
+   686→   686→            <Label htmlFor="b-attending">Person attending</Label>
+   687→   687→            <Input
+   688→   688→              id="b-attending"
+   689→   689→              value={form.person_attending}
+   690→   690→              onChange={(e) => update("person_attending", e.target.value)}
+   691→   691→              placeholder="Who will attend from your side"
+   692→   692→            />
+   693→   693→          </div>
+   694→   694→
+   695→   695→          {/* Attendance switches */}
+   696→   696→          <div className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
+   697→   697→            <div className="flex items-center justify-between gap-3">
+   698→   698→              <div className="min-w-0">
+   699→   699→                <Label htmlFor="b-required" className="cursor-pointer">
+   700→   700→                  Attendance required
+   701→   701→                </Label>
+   702→   702→                <p className="text-[11px] text-muted-foreground">Is attendance compulsory?</p>
+   703→   703→              </div>
+   704→   704→              <Switch
+   705→   705→                id="b-required"
+   706→   706→                checked={form.attendance_required}
+   707→   707→                onCheckedChange={(v) => update("attendance_required", v)}
+   708→   708→              />
+   709→   709→            </div>
+   710→   710→            <div className="flex items-center justify-between gap-3">
+   711→   711→              <div className="min-w-0">
+   712→   712→                <Label htmlFor="b-confirmed" className="cursor-pointer">
+   713→   713→                  Attendance confirmed
+   714→   714→                </Label>
+   715→   715→                <p className="text-[11px] text-muted-foreground">Have you confirmed?</p>
+   716→   716→              </div>
+   717→   717→              <Switch
+   718→   718→                id="b-confirmed"
+   719→   719→                checked={form.attendance_confirmed}
+   720→   720→                onCheckedChange={(v) => update("attendance_confirmed", v)}
+   721→   721→              />
+   722→   722→            </div>
+   723→   723→          </div>
+   724→   724→
+   725→   725→          {/* Notes */}
+   726→   726→          <div className="grid gap-2">
+   727→   727→            <Label htmlFor="b-notes">Notes</Label>
+   728→   728→            <Textarea
+   729→   729→              id="b-notes"
+   730→   730→              value={form.notes}
+   731→   731→              onChange={(e) => update("notes", e.target.value)}
+   732→   732→              placeholder="Parking, security clearance, documents to bring, etc."
+   733→   733→              rows={3}
+   734→   734→            />
+   735→   735→          </div>
+   736→   736→        </div>
+   737→   737→
+   738→   738→        <DialogFooter>
+   739→   739→          <Button variant="outline" onClick={onClose} disabled={saving}>
+   740→   740→            Cancel
+   741→   741→          </Button>
+   742→   742→          <Button
+   743→   743→            onClick={handleSave}
+   744→   744→            disabled={saving || !canSave || (!isEdit && tenders.length === 0)}
+   745→   745→          >
+   746→   746→            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+   747→   747→            {isEdit ? "Save changes" : "Add briefing"}
+   748→   748→          </Button>
+   749→   749→        </DialogFooter>
+   750→   750→      </DialogContent>
+   751→   751→    </Dialog>
+   752→   752→  );
+   753→   753→}
+   754→   754→
+   755→   755→// ---- Delete confirmation ----
+   756→   756→interface DeleteDialogProps {
+   757→   757→  open: boolean;
+   758→   758→  briefing: Briefing | null;
+   759→   759→  onClose: () => void;
+   760→   760→  onConfirm: () => void;
+   761→   761→  deleting: boolean;
+   762→   762→}
+   763→   763→
+   764→   764→function DeleteDialog({ open, briefing, onClose, onConfirm, deleting }: DeleteDialogProps) {
+   765→   765→  return (
+   766→   766→    <AlertDialog open={open} onOpenChange={(v) => !v && onClose()}>
+   767→   767→      <AlertDialogContent>
+   768→   768→        <AlertDialogHeader>
+   769→   769→          <AlertDialogTitle className="flex items-center gap-2">
+   770→   770→            <AlertTriangle className="h-5 w-5 text-rose-600" />
+   771→   771→            Delete briefing
+   772→   772→          </AlertDialogTitle>
+   773→   773→          <AlertDialogDescription>
+   774→   774→            Are you sure you want to delete this{" "}
+   775→   775→            <span className="font-semibold text-foreground">
+   776→   776→              {briefing?.briefing_type.toLowerCase()}
+   777→   777→            </span>{" "}
+   778→   778→            on{" "}
+   779→   779→            <span className="font-semibold text-foreground">
+   780→   780→              {formatDate(briefing?.date)}
+   781→   781→            </span>
+   782→   782→            ? This action cannot be undone.
+   783→   783→          </AlertDialogDescription>
+   784→   784→        </AlertDialogHeader>
+   785→   785→        <AlertDialogFooter>
+   786→   786→          <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+   787→   787→          <AlertDialogAction
+   788→   788→            onClick={(e) => {
+   789→   789→              e.preventDefault();
+   790→   790→              onConfirm();
+   791→   791→            }}
+   792→   792→            disabled={deleting}
+   793→   793→            className="bg-rose-600 text-white hover:bg-rose-700 focus-visible:ring-rose-600/30"
+   794→   794→          >
+   795→   795→            {deleting && <Loader2 className="h-4 w-4 animate-spin" />}
+   796→   796→            Delete
+   797→   797→          </AlertDialogAction>
+   798→   798→        </AlertDialogFooter>
+   799→   799→      </AlertDialogContent>
+   800→   800→    </AlertDialog>
+   801→   801→  );
+   802→   802→}
+   803→   803→
+   804→   804→// ---- Main Component ----
+   805→   805→export function BriefingsTab() {
+   806→   806→  const [briefings, setBriefings] = useState<Briefing[]>([]);
+   807→   807→  const [tenders, setTenders] = useState<TenderOption[]>([]);
+   808→   808→  const [loading, setLoading] = useState(true);
+   809→   809→  const [tendersLoading, setTendersLoading] = useState(false);
+   810→   810→  const [refreshing, setRefreshing] = useState(false);
+   811→   811→  const [error, setError] = useState<string | null>(null);
+   812→   812→
+   813→   813→  const [view, setView] = useState<"all" | "upcoming">("all");
+   814→   814→  const [search, setSearch] = useState("");
+   815→   815→
+   816→   816→  const [dialogOpen, setDialogOpen] = useState(false);
+   817→   817→  const [editingBriefing, setEditingBriefing] = useState<Briefing | null>(null);
+   818→   818→
+   819→   819→  const [deleteBriefing, setDeleteBriefing] = useState<Briefing | null>(null);
+   820→   820→  const [deleteOpen, setDeleteOpen] = useState(false);
+   821→   821→  const [deleting, setDeleting] = useState(false);
+   822→   822→
+   823→   823→  const fetchBriefings = useCallback(async (isRefresh = false) => {
+   824→   824→    if (isRefresh) setRefreshing(true);
+   825→   825→    else setLoading(true);
+   826→   826→    setError(null);
+   827→   827→    try {
+   828→   828→      const res = await api.listBriefings(false, 30);
+   829→   829→      setBriefings((res.items as Briefing[]) || []);
+   830→   830→    } catch (e: any) {
+   831→   831→      setError(e?.message || "Failed to load briefings");
+   832→   832→    } finally {
+   833→   833→      setLoading(false);
+   834→   834→      setRefreshing(false);
+   835→   835→    }
+   836→   836→  }, []);
+   837→   837→
+   838→   838→  const fetchTenders = useCallback(async () => {
+   839→   839→    setTendersLoading(true);
+   840→   840→    try {
+   841→   841→      const res = await api.listTenders();
+   842→   842→      setTenders(
+   843→   843→        (res.items || []).map((t: any) => ({
+   844→   844→          id: t.id,
+   845→   845→          reference_number: t.reference_number,
+   846→   846→          title: t.title,
+   847→   847→        }))
+   848→   848→      );
+   849→   849→    } catch {
+   850→   850→      // silent — dialog will show empty state
+   851→   851→    } finally {
+   852→   852→      setTendersLoading(false);
+   853→   853→    }
+   854→   854→  }, []);
+   855→   855→
+   856→   856→  useEffect(() => {
+   857→   857→    fetchBriefings();
+   858→   858→  }, [fetchBriefings]);
+   859→   859→
+   860→   860→  const openTender = (id: number) => {
+   861→   861→    useDashboardStore.getState().setTab("tenders");
+   862→   862→    setTimeout(() => useDashboardStore.getState().selectTender(id), 50);
+   863→   863→  };
+   864→   864→
+   865→   865→  // ---- Stats (computed from full list) ----
+   866→   866→  const stats = useMemo(() => {
+   867→   867→    const total = briefings.length;
+   868→   868→    const today = new Date();
+   869→   869→    today.setHours(0, 0, 0, 0);
+   870→   870→    const in30 = new Date(today);
+   871→   871→    in30.setDate(in30.getDate() + 30);
+   872→   872→    const upcoming = briefings.filter((b) => {
+   873→   873→      if (!b.date) return false;
+   874→   874→      const d = new Date(b.date);
+   875→   875→      d.setHours(0, 0, 0, 0);
+   876→   876→      return d >= today && d <= in30;
+   877→   877→    }).length;
+   878→   878→    const unconfirmed = briefings.filter(
+   879→   879→      (b) => b.attendance_required && !b.attendance_confirmed
+   880→   880→    ).length;
+   881→   881→    return { total, upcoming, unconfirmed };
+   882→   882→  }, [briefings]);
+   883→   883→
+   884→   884→  // ---- Client-side filtering ----
+   885→   885→  const filtered = useMemo(() => {
+   886→   886→    const q = search.trim().toLowerCase();
+   887→   887→    const today = new Date();
+   888→   888→    today.setHours(0, 0, 0, 0);
+   889→   889→    const in30 = new Date(today);
+   890→   890→    in30.setDate(in30.getDate() + 30);
+   891→   891→    return briefings.filter((b) => {
+   892→   892→      if (view === "upcoming") {
+   893→   893→        if (!b.date) return false;
+   894→   894→        const d = new Date(b.date);
+   895→   895→        d.setHours(0, 0, 0, 0);
+   896→   896→        if (d < today || d > in30) return false;
+   897→   897→      }
+   898→   898→      if (q) {
+   899→   899→        const hay = `${b.tender_reference || ""} ${b.tender_title || ""} ${b.client || ""} ${b.location || ""}`.toLowerCase();
+   900→   900→        if (!hay.includes(q)) return false;
+   901→   901→      }
+   902→   902→      return true;
+   903→   903→    });
+   904→   904→  }, [briefings, view, search]);
+   905→   905→
+   906→   906→  // ---- Group filtered briefings by date (ascending) ----
+   907→   907→  const grouped = useMemo(() => {
+   908→   908→    const sorted = [...filtered].sort((a, b) => {
+   909→   909→      const da = a.date ? new Date(a.date).getTime() : 0;
+   910→   910→      const db = b.date ? new Date(b.date).getTime() : 0;
+   911→   911→      return da - db;
+   912→   912→    });
+   913→   913→    const map = new Map<string, Briefing[]>();
+   914→   914→    for (const b of sorted) {
+   915→   915→      const key = b.date || "no-date";
+   916→   916→      if (!map.has(key)) map.set(key, []);
+   917→   917→      map.get(key)!.push(b);
+   918→   918→    }
+   919→   919→    return Array.from(map.entries()).map(([key, items]) => {
+   920→   920→      const heading = key !== "no-date" ? dateHeading(key) : null;
+   921→   921→      return { key, items, heading };
+   922→   922→    });
+   923→   923→  }, [filtered]);
+   924→   924→
+   925→   925→  const openNew = () => {
+   926→   926→    setEditingBriefing(null);
+   927→   927→    fetchTenders();
+   928→   928→    setDialogOpen(true);
+   929→   929→  };
+   930→   930→
+   931→   931→  const openEdit = (b: Briefing) => {
+   932→   932→    setEditingBriefing(b);
+   933→   933→    fetchTenders();
+   934→   934→    setDialogOpen(true);
+   935→   935→  };
+   936→   936→
+   937→   937→  const requestDelete = (b: Briefing) => {
+   938→   938→    setDeleteBriefing(b);
+   939→   939→    setDeleteOpen(true);
+   940→   940→  };
+   941→   941→
+   942→   942→  const confirmDelete = async () => {
+   943→   943→    if (!deleteBriefing) return;
+   944→   944→    setDeleting(true);
+   945→   945→    try {
+   946→   946→      await api.deleteBriefing(deleteBriefing.id);
+   947→   947→      toast.success("Briefing deleted");
+   948→   948→      setDeleteOpen(false);
+   949→   949→      setDeleteBriefing(null);
+   950→   950→      fetchBriefings(true);
+   951→   951→    } catch (e: any) {
+   952→   952→      toast.error(e?.message || "Failed to delete briefing");
+   953→   953→    } finally {
+   954→   954→      setDeleting(false);
+   955→   955→    }
+   956→   956→  };
+   957→   957→
+   958→   958→  // ---- Loading state ----
+   959→   959→  if (loading) {
+   960→   960→    return (
+   961→   961→      <div className="space-y-6">
+   962→   962→        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+   963→   963→          <div className="space-y-2">
+   964→   964→            <Skeleton className="h-8 w-64" />
+   965→   965→            <Skeleton className="h-4 w-80" />
+   966→   966→          </div>
+   967→   967→          <Skeleton className="h-9 w-36" />
+   968→   968→        </div>
+   969→   969→        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+   970→   970→          {Array.from({ length: 3 }).map((_, i) => (
+   971→   971→            <StatSkeleton key={i} />
+   972→   972→          ))}
+   973→   973→        </div>
+   974→   974→        <div className="space-y-4">
+   975→   975→          {Array.from({ length: 4 }).map((_, i) => (
+   976→   976→            <Skeleton key={i} className="h-40 w-full rounded-xl" />
+   977→   977→          ))}
+   978→   978→        </div>
+   979→   979→      </div>
+   980→   980→    );
+   981→   981→  }
+   982→   982→
+   983→   983→  // ---- Error state ----
+   984→   984→  if (error) {
+   985→   985→    return (
+   986→   986→      <div className="space-y-6">
+   987→   987→        <div>
+   988→   988→          <h1 className="text-2xl font-bold tracking-tight">Briefings &amp; Site Inspections</h1>
+   989→   989→          <p className="text-sm text-muted-foreground">
+   990→   990→            Track compulsory briefings and site inspections
+   991→   991→          </p>
+   992→   992→        </div>
+   993→   993→        <Alert variant="destructive">
+   994→   994→          <AlertTriangle className="h-4 w-4" />
+   995→   995→          <AlertTitle>Couldn&apos;t load your briefings</AlertTitle>
+   996→   996→          <AlertDescription>
+   997→   997→            <p className="mb-3">{error}</p>
+   998→   998→            <Button
+   999→   999→              size="sm"
+  1000→  1000→              variant="outline"
+  1001→  1001→              onClick={() => fetchBriefings()}
+  1002→  1002→              className="border-destructive/40 text-destructive hover:bg-destructive/10"
+  1003→  1003→            >
+  1004→  1004→              <RefreshCw className="h-3.5 w-3.5" />
+  1005→  1005→              Try again
+  1006→  1006→            </Button>
+  1007→  1007→          </AlertDescription>
+  1008→  1008→        </Alert>
+  1009→  1009→      </div>
+  1010→  1010→    );
+  1011→  1011→  }
+  1012→  1012→
+  1013→  1013→  return (
+  1014→  1014→    <div className="space-y-6">
+  1015→  1015→      {/* ---- Page header ---- */}
+  1016→  1016→      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+  1017→  1017→        <div>
+  1018→  1018→          <h1 className="text-2xl font-bold tracking-tight">Briefings &amp; Site Inspections</h1>
+  1019→  1019→          <p className="text-sm text-muted-foreground">
+  1020→  1020→            Track compulsory briefings and site inspections
+  1021→  1021→          </p>
+  1022→  1022→        </div>
+  1023→  1023→        <div className="flex items-center gap-2">
+  1024→  1024→          <Button
+  1025→  1025→            variant="ghost"
+  1026→  1026→            onClick={() => fetchBriefings(true)}
+  1027→  1027→            disabled={refreshing}
+  1028→  1028→          >
+  1029→  1029→            <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
+  1030→  1030→            <span className="hidden sm:inline">Refresh</span>
+  1031→  1031→          </Button>
+  1032→  1032→          <Button onClick={openNew}>
+  1033→  1033→            <CalendarPlus className="h-4 w-4" />
+  1034→  1034→            Add Briefing
+  1035→  1035→          </Button>
+  1036→  1036→        </div>
+  1037→  1037→      </div>
+  1038→  1038→
+  1039→  1039→      {/* ---- Stats row ---- */}
+  1040→  1040→      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+  1041→  1041→        <StatCard
+  1042→  1042→          icon={ListChecks}
+  1043→  1043→          iconClass="bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+  1044→  1044→          value={stats.total}
+  1045→  1045→          label="Total Briefings"
+  1046→  1046→          subtitle="All scheduled"
+  1047→  1047→        />
+  1048→  1048→        <StatCard
+  1049→  1049→          icon={CalendarClock}
+  1050→  1050→          iconClass="bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400"
+  1051→  1051→          value={stats.upcoming}
+  1052→  1052→          label="Upcoming"
+  1053→  1053→          subtitle="Next 30 days"
+  1054→  1054→        />
+  1055→  1055→        <StatCard
+  1056→  1056→          icon={AlertTriangle}
+  1057→  1057→          iconClass="bg-rose-100 text-rose-600 dark:bg-rose-950 dark:text-rose-400"
+  1058→  1058→          value={stats.unconfirmed}
+  1059→  1059→          label="Unconfirmed"
+  1060→  1060→          subtitle="Attendance pending"
+  1061→  1061→        />
+  1062→  1062→      </div>
+  1063→  1063→
+  1064→  1064→      {/* ---- Filters ---- */}
+  1065→  1065→      <Card>
+  1066→  1066→        <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+  1067→  1067→          <Tabs value={view} onValueChange={(v) => setView(v as "all" | "upcoming")}>
+  1068→  1068→            <TabsList>
+  1069→  1069→              <TabsTrigger value="all">All</TabsTrigger>
+  1070→  1070→              <TabsTrigger value="upcoming">Upcoming (30 days)</TabsTrigger>
+  1071→  1071→            </TabsList>
+  1072→  1072→          </Tabs>
+  1073→  1073→          <div className="relative flex-1 sm:max-w-xs">
+  1074→  1074→            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+  1075→  1075→            <Input
+  1076→  1076→              placeholder="Search by tender ref, title, client…"
+  1077→  1077→              value={search}
+  1078→  1078→              onChange={(e) => setSearch(e.target.value)}
+  1079→  1079→              className="pl-9"
+  1080→  1080→            />
+  1081→  1081→          </div>
+  1082→  1082→        </CardContent>
+  1083→  1083→      </Card>
+  1084→  1084→
+  1085→  1085→      {/* ---- Briefings list ---- */}
+  1086→  1086→      {briefings.length === 0 ? (
+  1087→  1087→        <Card className="border-dashed">
+  1088→  1088→          <CardContent>
+  1089→  1089→            <EmptyState
+  1090→  1090→              icon={MapPin}
+  1091→  1091→              title="No briefings scheduled"
+  1092→  1092→              message="Track compulsory briefings and site inspections for your tenders. Add your first briefing to stay on top of attendance requirements."
+  1093→  1093→              iconClass="bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+  1094→  1094→              action={
+  1095→  1095→                <Button onClick={openNew} className="mt-1">
+  1096→  1096→                  <CalendarPlus className="h-4 w-4" />
+  1097→  1097→                  Add your first briefing
+  1098→  1098→                </Button>
+  1099→  1099→              }
+  1100→  1100→            />
+  1101→  1101→          </CardContent>
+  1102→  1102→        </Card>
+  1103→  1103→      ) : filtered.length === 0 ? (
+  1104→  1104→        <Card className="border-dashed">
+  1105→  1105→          <CardContent>
+  1106→  1106→            <EmptyState
+  1107→  1107→              icon={Search}
+  1108→  1108→              title="No matches"
+  1109→  1109→              message={
+  1110→  1110→                view === "upcoming"
+  1111→  1111→                  ? "No briefings in the next 30 days. Switch to 'All' to see past briefings."
+  1112→  1112→                  : "No briefings match your search. Try a different reference or clear the filter."
+  1113→  1113→              }
+  1114→  1114→              iconClass="bg-muted text-muted-foreground"
+  1115→  1115→            />
+  1116→  1116→          </CardContent>
+  1117→  1117→        </Card>
+  1118→  1118→      ) : (
+  1119→  1119→        <div className="space-y-6">
+  1120→  1120→          {grouped.map(({ key, items, heading }) => (
+  1121→  1121→            <div key={key} className="space-y-3">
+  1122→  1122→              <div className="flex items-center gap-2">
+  1123→  1123→                <CalendarDays className="h-4 w-4 text-primary" />
+  1124→  1124→                <h2 className="text-sm font-semibold text-foreground">
+  1125→  1125→                  {heading ? heading.label : "No date"}
+  1126→  1126→                </h2>
+  1127→  1127→                {heading?.relative && (
+  1128→  1128→                  <Badge
+  1129→  1129→                    variant="outline"
+  1130→  1130→                    className={cn(
+  1131→  1131→                      "border px-1.5 py-0 text-[10px] tabular-nums",
+  1132→  1132→                      relativeBadgeClass(heading.diff)
+  1133→  1133→                    )}
+  1134→  1134→                  >
+  1135→  1135→                    {heading.relative}
+  1136→  1136→                  </Badge>
+  1137→  1137→                )}
+  1138→  1138→                <Badge variant="outline" className="px-1.5 py-0 text-[10px] tabular-nums">
+  1139→  1139→                  {items.length} {items.length === 1 ? "item" : "items"}
+  1140→  1140→                </Badge>
+  1141→  1141→                <div className="ml-2 h-px flex-1 bg-border" />
+  1142→  1142→              </div>
+  1143→  1143→              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+  1144→  1144→                {items.map((b) => (
+  1145→  1145→                  <BriefingCard
+  1146→  1146→                    key={b.id}
+  1147→  1147→                    briefing={b}
+  1148→  1148→                    onEdit={openEdit}
+  1149→  1149→                    onDelete={requestDelete}
+  1150→  1150→                    onOpenTender={openTender}
+  1151→  1151→                  />
+  1152→  1152→                ))}
+  1153→  1153→              </div>
+  1154→  1154→            </div>
+  1155→  1155→          ))}
+  1156→  1156→        </div>
+  1157→  1157→      )}
+  1158→  1158→
+  1159→  1159→      {/* ---- Dialogs ---- */}
+  1160→  1160→      <BriefingDialog
+  1161→  1161→        open={dialogOpen}
+  1162→  1162→        editing={editingBriefing}
+  1163→  1163→        tenders={tenders}
+  1164→  1164→        tendersLoading={tendersLoading}
+  1165→  1165→        onClose={() => setDialogOpen(false)}
+  1166→  1166→        onSaved={() => fetchBriefings(true)}
+  1167→  1167→      />
+  1168→  1168→      <DeleteDialog
+  1169→  1169→        open={deleteOpen}
+  1170→  1170→        briefing={deleteBriefing}
+  1171→  1171→        onClose={() => {
+  1172→  1172→          setDeleteOpen(false);
+  1173→  1173→          setDeleteBriefing(null);
+  1174→  1174→        }}
+  1175→  1175→        onConfirm={confirmDelete}
+  1176→  1176→        deleting={deleting}
+  1177→  1177→      />
+  1178→  1178→    </div>
+  1179→  1179→  );
+  1180→  1180→}
+  1181→  1181→

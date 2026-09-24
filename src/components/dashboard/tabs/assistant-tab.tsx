@@ -96,12 +96,44 @@ const SUGGESTED_QUESTIONS: { q: string; label: string }[] = [
     label: "Unsuccessful & why",
   },
   {
-    q: "What are the potential disqualification requirements for tenders?",
+    q: "What are the potential disqualification requirements for my tenders?",
     label: "Disqualifications",
   },
   {
     q: "Summarise my most urgent tender.",
     label: "Most urgent",
+  },
+  {
+    q: "What PSIRA grades are required for my tenders?",
+    label: "PSIRA grades",
+  },
+  {
+    q: "How many guards are required for my tenders?",
+    label: "Guards required",
+  },
+  {
+    q: "What's in the tender document I uploaded? Give me the key details.",
+    label: "Tender document",
+  },
+  {
+    q: "What are the evaluation criteria for my tenders?",
+    label: "Evaluation criteria",
+  },
+  {
+    q: "What's our pricing for each tender?",
+    label: "Pricing",
+  },
+  {
+    q: "What changed in the addendums for my tenders?",
+    label: "Addendum changes",
+  },
+  {
+    q: "Which of our compliance documents are expiring soon?",
+    label: "Expiring docs",
+  },
+  {
+    q: "What should I do next to win my most urgent tender? Give me a prioritized action plan.",
+    label: "Help me win",
   },
 ];
 
@@ -280,8 +312,8 @@ function MessageBubble({
             <Database className="h-3 w-3" />
             <span>
               Based on {message.contextTenders}{" "}
-              {message.contextTenders === 1 ? "tender" : "tenders"} in your
-              workspace
+              {message.contextTenders === 1 ? "tender" : "tenders"}, all
+              uploaded documents & your compliance library
             </span>
           </div>
         )}
@@ -318,12 +350,12 @@ function EmptyHero({ onPick }: { onPick: (q: string) => void }) {
 
         <div className="space-y-1.5">
           <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">
-            How can I help with your tenders today?
+            How can I help you win your tenders today?
           </h2>
           <p className="mx-auto max-w-md text-sm text-muted-foreground">
-            Ask anything about your tenders, deadlines, documents, briefings,
-            submissions and outcomes. The AI answers using your real tender
-            data.
+            I know everything in your system — every tender, every uploaded document's
+            content, your compliance library, checklists, pricing, briefings, submissions
+            and communications. My mission is to help you win. Ask me anything.
           </p>
         </div>
 
@@ -355,6 +387,8 @@ function LeftRailContent({
   onFocusChange,
   onPickQuestion,
   totalTenders,
+  totalDocuments,
+  totalLibraryDocs,
 }: {
   tenders: TenderOption[];
   tendersLoading: boolean;
@@ -362,6 +396,8 @@ function LeftRailContent({
   onFocusChange: (id: number | null, label?: string) => void;
   onPickQuestion: (q: string) => void;
   totalTenders: number | null;
+  totalDocuments: number | null;
+  totalLibraryDocs: number | null;
 }) {
   const focusedTender = tenders.find((t) => t.id === focusTenderId) || null;
 
@@ -466,23 +502,34 @@ function LeftRailContent({
 
       {/* Stats footer */}
       <Card className="mt-auto bg-muted/30">
-        <CardContent className="flex items-center gap-3 p-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-            <Database className="h-4 w-4" />
+        <CardContent className="p-3 space-y-2">
+          <div className="flex items-center gap-2 text-xs font-medium text-foreground">
+            <Database className="h-3.5 w-3.5 text-emerald-600" />
+            AI Knowledge Base
           </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-baseline gap-1">
-              <span className="text-lg font-bold tabular-nums text-foreground">
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-lg bg-background p-1.5">
+              <div className="text-base font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
                 {totalTenders ?? "—"}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {totalTenders === 1 ? "tender" : "tenders"}
-              </span>
+              </div>
+              <div className="text-[10px] text-muted-foreground">Tenders</div>
             </div>
-            <p className="text-[11px] text-muted-foreground">
-              The AI has access to your full tender database.
-            </p>
+            <div className="rounded-lg bg-background p-1.5">
+              <div className="text-base font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                {totalDocuments ?? "—"}
+              </div>
+              <div className="text-[10px] text-muted-foreground">Documents</div>
+            </div>
+            <div className="rounded-lg bg-background p-1.5">
+              <div className="text-base font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                {totalLibraryDocs ?? "—"}
+              </div>
+              <div className="text-[10px] text-muted-foreground">Library</div>
+            </div>
           </div>
+          <p className="text-[10px] text-muted-foreground leading-tight">
+            The AI has read all uploaded documents and knows every checklist, briefing, pricing version and communication.
+          </p>
         </CardContent>
       </Card>
     </div>
@@ -498,6 +545,8 @@ export function AssistantTab() {
   const [tendersLoading, setTendersLoading] = useState(true);
   const [focusTenderId, setFocusTenderId] = useState<number | null>(null);
   const [totalTenders, setTotalTenders] = useState<number | null>(null);
+  const [totalDocuments, setTotalDocuments] = useState<number | null>(null);
+  const [totalLibraryDocs, setTotalLibraryDocs] = useState<number | null>(null);
   const [showEmptyBanner, setShowEmptyBanner] = useState(false);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
 
@@ -592,6 +641,12 @@ export function AssistantTab() {
         if (typeof res.context_tenders === "number") {
           setTotalTenders(res.context_tenders);
         }
+        if (typeof res.context_documents === "number") {
+          setTotalDocuments(res.context_documents);
+        }
+        if (typeof res.context_library_docs === "number") {
+          setTotalLibraryDocs(res.context_library_docs);
+        }
         if (res.context_tenders === 0) {
           setShowEmptyBanner(true);
         }
@@ -669,6 +724,8 @@ export function AssistantTab() {
           onFocusChange={handleFocusChange}
           onPickQuestion={handlePickQuestion}
           totalTenders={totalTenders}
+          totalDocuments={totalDocuments}
+          totalLibraryDocs={totalLibraryDocs}
         />
       </aside>
 
@@ -705,6 +762,8 @@ export function AssistantTab() {
                 }}
                 onPickQuestion={handlePickQuestion}
                 totalTenders={totalTenders}
+                totalDocuments={totalDocuments}
+                totalLibraryDocs={totalLibraryDocs}
               />
             </SheetContent>
           </Sheet>

@@ -396,3 +396,47 @@ Stage Summary:
 - All tenders are REAL with real reference numbers, real clients, real closing dates, and direct links to the source tender pages
 - Users can click "View Tender & Get Documents" to go directly to the source portal and download documents
 - Users can click "Import to My Tenders" to add any discovered tender to their database
+
+---
+Task ID: 21
+Agent: Main Orchestrator
+Task: Upgrade AI Assistant to know all tabs, all documents, and be a mission-driven tender-winning coach
+
+Work Log:
+- Rewrote ASSISTANT_SYSTEM prompt in ai_module.py — now defines the AI as a mission-driven tender-winning coach with:
+  * Full knowledge of ALL system data (tenders, documents, library, checklists, briefings, pricing, submissions, communications, addendums, dashboard)
+  * 8 answering principles: be specific, actionable, a coach, honest, structured, SA-aware (PSIRA/B-BBEE/CIPC/SARS/COIDA), deadline-focused, compliance-focused
+  * 15 example question types it can answer
+  * Professional, encouraging, direct tone — "you are the user's bid manager"
+- Added _build_full_system_context() to main.py — builds COMPREHENSIVE context including:
+  * Dashboard stats (active, closing this week, awarded, unsuccessful)
+  * Full compliance library with expiry dates and status (Active/Expiring/Expired)
+  * Every tender with ALL fields: reference, title, client, description, scope, category, location, closing date+time, days_until_close, estimated value, contract period, status, outcome, unsuccessful_reason, person responsible, contact info, notes, ai_extracted_info, ai_summary
+  * Checklist per tender (every item with status) + checklist_summary (total/complete/outstanding/expired + outstanding_items list)
+  * Documents per tender WITH EXTRACTED TEXT (capped at 3000 chars per doc) — the AI can now answer questions about document content
+  * Briefings per tender (type, date, time, location, attendance required/confirmed, days_until_briefing)
+  * Pricing versions per tender (line items, subtotal, VAT, total) + latest_pricing
+  * Submission details (method, date, confirmation reference, final pricing)
+  * Communications per tender (type, subject, body, date, from/to)
+  * Addendums per tender (with AI-detected changes)
+- API now returns context_tenders, context_documents, context_library_docs counts
+- Updated assistant-tab.tsx frontend:
+  * Added 8 new suggested questions: PSIRA grades, Guards required, Tender document, Evaluation criteria, Pricing, Addendum changes, Expiring docs, Help me win
+  * Updated empty hero subtitle: "How can I help you win your tenders today?" + "I know everything in your system — every tender, every uploaded document's content, your compliance library, checklists, pricing, briefings, submissions and communications. My mission is to help you win."
+  * Updated left rail stats footer to show 3 stats: Tenders / Documents / Library (AI Knowledge Base)
+  * Updated AI message footer: "Based on X tenders, all uploaded documents & your compliance library"
+  * Added totalDocuments and totalLibraryDocs state, populated from API response
+- Verified with Agent Browser:
+  * Asked "What's in the tender document I uploaded?" → AI read the uploaded document and returned full details: tender number E137/2025, 45 guards, PSIRA grades C/B/A, compulsory briefing on Nov 20, evaluation criteria (functionality 60/price 40), disqualification risks, and recommended immediate action
+  * Asked "What should I do next to win my most urgent tender?" → AI gave a full prioritized action plan: immediate actions (attend briefing, complete 25 missing documents, prepare pricing), high-priority actions (gather guard IDs, compile references, prepare technical proposal), critical deadlines, risk mitigation, and next steps
+  * AI referenced the tender by reference number (E137), knew the checklist status (1/26 complete), knew the pricing status (no versions), and gave actionable coaching
+  * No errors, lint clean
+
+Stage Summary:
+- AI Assistant now has full system knowledge — every tab, every document's content, every checklist, every briefing, every pricing version, every communication, every addendum
+- Mission-driven: every answer moves the user toward winning the tender
+- Can answer questions about document content (reads uploaded PDFs/DOCX/TXT)
+- Can give prioritized action plans to win specific tenders
+- Knows SA procurement specifics (PSIRA grades, B-BBEE, CIPC, SARS, COIDA, 80/20 evaluation)
+- Flags deadlines, missing documents, expired compliance docs, and disqualification risks
+- Left rail shows AI Knowledge Base stats: Tenders / Documents / Library counts

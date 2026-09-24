@@ -310,7 +310,12 @@ export const api = {
 
   // ---- AI Assistant ----
   async askAssistant(question: string, tenderId?: number) {
-    return request<{ answer: string; context_tenders: number }>(`/ai/assistant`, {
+    return request<{
+      answer: string;
+      context_tenders: number;
+      context_documents?: number;
+      context_library_docs?: number;
+    }>(`/ai/assistant`, {
       method: "POST",
       body: { question, tender_id: tenderId },
     });

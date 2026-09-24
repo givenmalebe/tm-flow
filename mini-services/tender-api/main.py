@@ -1364,55 +1364,221 @@ def import_discovered_tender(
 
 # ---------------------- AI Assistant ----------------------
 
+def _build_full_system_context(db: Session, user: User, tender_id: Optional[int] = None) -> dict:
+    """
+    Build a COMPREHENSIVE context containing ALL data from every tab in the system:
+    - Dashboard stats
+    - All tenders with full details, AI-extracted info, checklists, documents, briefings, pricing, submissions, communications, addendums
+    - The compliance document library with expiry dates
+    - Extracted text from uploaded tender documents (capped per doc to fit context)
+    """
+    import os as _os
+
+    # ---- Dashboard stats ----
+    today = date.today()
+    all_tenders = db.query(Tender).all()
+    active_statuses = {"New Opportunity", "Under Review", "Interested", "Preparing",
+                       "Documents Outstanding", "Pricing in Progress", "Awaiting Information",
+                       "Ready for Submission", "Submitted", "Clarification Requested",
+                       "Clarification Submitted", "Shortlisted", "Interview/Presentation",
+                       "Negotiation"}
+    active = [t for t in all_tenders if t.status in active_statuses]
+    closing_this_week = [t for t in all_tenders if t.closing_date and t.status in active_statuses
+                         and 0 <= (t.closing_date - today).days <= 7]
+
+    # ---- Compliance library ----
+    library_docs = db.query(LibraryDocument).all()
+    library_data = []
+    for d in library_docs:
+        days_to_expiry = None
+        status = "Active"
+        if d.expiry_date:
+            days_to_expiry = (d.expiry_date - today).days
+            if days_to_expiry < 0:
+                status = "Expired"
+            elif days_to_expiry <= 30:
+                status = "Expiring Soon"
+        library_data.append({
+            "id": d.id, "name": d.name, "category": d.category,
+            "issue_date": d.issue_date.isoformat() if d.issue_date else None,
+            "expiry_date": d.expiry_date.isoformat() if d.expiry_date else None,
+            "days_to_expiry": days_to_expiry, "status": status,
+            "notes": d.notes,
+        })
+
+    # ---- All tenders with FULL detail ----
+    tenders_data = []
+    for t in all_tenders:
+        tender_dict = {
+            "id": t.id,
+            "reference_number": t.reference_number,
+            "title": t.title,
+            "client_company": t.client_company,
+            "description": t.description,
+            "scope_of_work": t.scope_of_work,
+            "category": t.category,
+            "location_site": t.location_site,
+            "closing_date": t.closing_date.isoformat() if t.closing_date else None,
+            "closing_time": t.closing_time.strftime("%H:%M") if t.closing_time else None,
+            "days_until_close": (t.closing_date - today).days if t.closing_date else None,
+            "estimated_value": t.estimated_value,
+            "contract_period": t.contract_period,
+            "status": t.status,
+            "outcome": t.outcome,
+            "unsuccessful_reason": t.unsuccessful_reason,
+            "person_responsible": t.person_responsible,
+            "submission_method": t.submission_method,
+            "validity_period": t.validity_period,
+            "contact_person": t.contact_person,
+            "contact_email": t.contact_email,
+            "contact_telephone": t.contact_telephone,
+            "notes": t.notes,
+            "ai_extracted_info": t.ai_extracted_info,
+            "ai_summary": t.ai_summary,
+        }
+
+        # Checklist
+        tender_dict["checklist"] = [
+            {"name": c.name, "status": c.status, "notes": c.notes,
+             "linked_library_doc_id": c.linked_library_doc_id}
+            for c in t.checklist_items
+        ]
+        tender_dict["checklist_summary"] = {
+            "total": len(t.checklist_items),
+            "complete": len([c for c in t.checklist_items if c.status == "Complete"]),
+            "outstanding": len([c for c in t.checklist_items if c.status == "Outstanding"]),
+            "expired": len([c for c in t.checklist_items if c.status == "Expired"]),
+            "outstanding_items": [c.name for c in t.checklist_items if c.status == "Outstanding"],
+        }
+
+        # Documents — include extracted text (capped)
+        docs_data = []
+        for doc in t.documents:
+            full_path = _os.path.join(UPLOAD_DIR, doc.file_path)
+            doc_text = ""
+            if _os.path.exists(full_path):
+                try:
+                    doc_text = ai_module.extract_text_from_file(full_path, doc.original_filename)
+                    # Cap each document's text to 3000 chars to fit context
+                    if len(doc_text) > 3000:
+                        doc_text = doc_text[:3000] + "...[truncated]"
+                except Exception:
+                    doc_text = ""
+            docs_data.append({
+                "id": doc.id,
+                "filename": doc.original_filename,
+                "file_type": doc.file_type,
+                "file_size": doc.file_size,
+                "is_primary": doc.is_primary,
+                "uploaded_at": doc.uploaded_at.isoformat() if doc.uploaded_at else None,
+                "extracted_text": doc_text,
+            })
+        tender_dict["documents"] = docs_data
+
+        # Briefings
+        tender_dict["briefings"] = [
+            {"id": b.id, "type": b.briefing_type,
+             "date": b.date.isoformat() if b.date else None,
+             "time": b.time.strftime("%H:%M") if b.time else None,
+             "location": b.location, "contact_person": b.contact_person,
+             "attendance_required": b.attendance_required,
+             "attendance_confirmed": b.attendance_confirmed,
+             "person_attending": b.person_attending,
+             "days_until_briefing": (b.date - today).days if b.date else None,
+             "notes": b.notes}
+            for b in t.briefings
+        ]
+
+        # Pricing versions
+        tender_dict["pricing_versions"] = [
+            {"version": p.version_number, "label": p.version_label,
+             "line_items": p.line_items,
+             "subtotal": p.subtotal, "vat": p.vat, "total": p.total,
+             "notes": p.notes}
+            for p in t.pricing_versions
+        ]
+        if t.pricing_versions:
+            latest = t.pricing_versions[-1]
+            tender_dict["latest_pricing"] = {
+                "version": latest.version_number, "total": latest.total,
+                "vat": latest.vat, "subtotal": latest.subtotal,
+            }
+
+        # Submission
+        if t.submission:
+            tender_dict["submission"] = {
+                "submission_date": t.submission.submission_date.isoformat() if t.submission.submission_date else None,
+                "submission_time": t.submission.submission_time.strftime("%H:%M") if t.submission.submission_time else None,
+                "submission_method": t.submission.submission_method,
+                "submitted_by": t.submission.submitted_by,
+                "confirmation_reference": t.submission.confirmation_reference,
+                "final_pricing": t.submission.final_pricing,
+                "notes": t.submission.notes,
+            }
+
+        # Communications
+        tender_dict["communications"] = [
+            {"type": c.comm_type, "subject": c.subject,
+             "body": (c.body or "")[:500],
+             "date": c.comm_date.isoformat() if c.comm_date else None,
+             "from": c.from_party, "to": c.to_party}
+            for c in t.communications
+        ]
+
+        # Addendums (with AI-detected changes)
+        tender_dict["addendums"] = [
+            {"number": a.addendum_number, "title": a.title,
+             "description": a.description,
+             "issued_date": a.issued_date.isoformat() if a.issued_date else None,
+             "ai_changes": a.ai_changes}
+            for a in t.addendums
+        ]
+
+        tenders_data.append(tender_dict)
+
+    context = {
+        "user": {"full_name": user.full_name, "company_name": user.company_name, "email": user.email},
+        "system_date": today.isoformat(),
+        "dashboard": {
+            "total_tenders": len(all_tenders),
+            "active_tenders": len(active),
+            "closing_this_week": len(closing_this_week),
+            "closing_this_week_list": [
+                {"ref": t.reference_number, "title": t.title,
+                 "closing_date": t.closing_date.isoformat(),
+                 "days_remaining": (t.closing_date - today).days}
+                for t in closing_this_week
+            ],
+            "awarded_this_year": len([t for t in all_tenders if t.outcome == "Awarded" and t.updated_at and t.updated_at.year == today.year]),
+            "unsuccessful": len([t for t in all_tenders if t.outcome == "Unsuccessful"]),
+        },
+        "compliance_library": library_data,
+        "tenders": tenders_data,
+    }
+
+    # If a focus tender is specified, also include its full serialized form
+    if tender_id:
+        t = db.query(Tender).filter(Tender.id == tender_id).first()
+        if t:
+            context["focus_tender_id"] = tender_id
+
+    return context
+
+
 @app.post("/api/ai/assistant")
 def ai_assistant(payload: AIQuestion, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     question = payload.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="Question is required")
-    # Build context: all tenders (summarized) + optionally focused tender
-    all_tenders = db.query(Tender).all()
-    tender_summaries = []
-    for t in all_tenders:
-        tender_summaries.append({
-            "id": t.id,
-            "reference_number": t.reference_number,
-            "title": t.title,
-            "client_company": t.client_company,
-            "status": t.status,
-            "outcome": t.outcome,
-            "closing_date": t.closing_date.isoformat() if t.closing_date else None,
-            "category": t.category,
-            "location_site": t.location_site,
-            "person_responsible": t.person_responsible,
-            "estimated_value": t.estimated_value,
-            "contract_period": t.contract_period,
-            "unsuccessful_reason": t.unsuccessful_reason,
-            "ai_extracted_info": t.ai_extracted_info,
-            "missing_checklist": [
-                {"name": c.name} for c in t.checklist_items if c.status == "Outstanding"
-            ],
-            "has_briefing": len(t.briefings) > 0,
-            "briefings": [
-                {"date": b.date.isoformat() if b.date else None, "attendance_required": b.attendance_required}
-                for b in t.briefings
-            ],
-            "submission": (
-                {"submission_date": t.submission.submission_date.isoformat() if t.submission.submission_date else None,
-                 "submitted_by": t.submission.submitted_by}
-                if t.submission else None
-            ),
-        })
-    context = {
-        "user": {"full_name": user.full_name, "company_name": user.company_name},
-        "total_tenders": len(all_tenders),
-        "tenders": tender_summaries,
-    }
-    if payload.tender_id:
-        t = db.query(Tender).filter(Tender.id == payload.tender_id).first()
-        if t:
-            context["focus_tender"] = _serialize_tender(t)
+    # Build COMPREHENSIVE context: all tenders, all documents (with text), library, etc.
+    context = _build_full_system_context(db, user, tender_id=payload.tender_id)
     answer = ai_module.assistant_answer(question, context)
-    return {"answer": answer, "context_tenders": len(tender_summaries)}
+    return {
+        "answer": answer,
+        "context_tenders": len(context["tenders"]),
+        "context_documents": sum(len(t["documents"]) for t in context["tenders"]),
+        "context_library_docs": len(context["compliance_library"]),
+    }
 
 
 # ---------------------- Search/Filter helper ----------------------

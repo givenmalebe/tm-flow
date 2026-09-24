@@ -274,3 +274,157 @@ def extract_text_from_file(file_path: str, filename: str) -> str:
         except Exception as e:
             return f"[DOCX extraction error: {e}]"
     return f"[Unsupported file type: {filename}]"
+
+
+# ---- AI Tender Discovery (web search) ----
+
+def _run_zai_web_search(query: str, num: int = 10) -> List[Dict[str, Any]]:
+    """Run the z-ai web_search function CLI and return search results."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        out_path = f.name
+    try:
+        args = json.dumps({"query": query, "num": num})
+        cmd = [Z_AI_CLI, "function", "-n", "web_search", "-a", args, "-o", out_path]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if proc.returncode != 0:
+            raise RuntimeError(f"z-ai web_search failed: {proc.stderr[:500]}")
+        with open(out_path, "r") as fp:
+            data = json.load(fp)
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict) and "results" in data:
+            return data["results"]
+        return []
+    except (json.JSONDecodeError, RuntimeError, Exception):
+        return []
+    finally:
+        try:
+            os.unlink(out_path)
+        except OSError:
+            pass
+
+
+# South African tender portals to prioritize in search
+TENDER_SITES = [
+    "tenderbulletins.co.za",
+    "tenderalerts.co.za",
+    "etenders.gov.za",
+    "globaltenders.com",
+    "tenderflow.co.za",
+    "easytenders.co.za",
+    "security.co.za",
+    "psira.co.za",
+    "municipalities.co.za",
+    "gov.za",
+]
+
+DISCOVER_SYSTEM = """You are a tender discovery analyst specializing in South African procurement.
+You analyze web search results and identify real, open tender opportunities.
+You MUST respond with ONLY a valid JSON array (no markdown, no code fences, no extra text).
+Each element in the array must follow this schema:
+{
+  "title": string (the tender title),
+  "client": string (the organisation/client issuing the tender, or "Unknown" if not clear),
+  "category": string (e.g. "Security Services", "Cleaning", "Construction"),
+  "location": string (region/city/province, or "South Africa" if not specified),
+  "closing_date": string (ISO format YYYY-MM-DD if mentioned, or null),
+  "description": string (1-3 sentence summary of what the tender is about),
+  "source_site": string (the domain name of the source),
+  "url": string (the direct link to the tender page),
+  "reference_number": string (if a tender/RFP number is mentioned, else null),
+  "estimated_value": string (if a value is mentioned, else null),
+  "relevance": "high" | "medium" | "low" (how relevant this is to the user's search)
+}
+Only include results that are ACTUAL tender opportunities (not news articles, not blog posts, not generic pages).
+If no results are actual tenders, return an empty array [].
+Deduplicate by URL."""
+
+
+def discover_tenders(
+    category: str,
+    keywords: str = "",
+    location: str = "South Africa",
+    num_results: int = 15,
+) -> Dict[str, Any]:
+    """
+    Search the web for open tenders matching the given criteria.
+    Returns a dict with 'query', 'results' (list of structured tenders), and 'raw_count'.
+    """
+    # Build an optimized search query
+    parts = []
+    if category:
+        parts.append(category)
+    if keywords:
+        parts.append(keywords)
+    parts.append("tender")
+    parts.append("open")
+    if location:
+        parts.append(location)
+    query = " ".join(parts)
+
+    # Do the web search
+    raw_results = _run_zai_web_search(query, num=num_results)
+
+    if not raw_results:
+        return {
+            "query": query,
+            "results": [],
+            "raw_count": 0,
+            "error": "No search results returned. Please try different keywords.",
+        }
+
+    # Use AI to structure the raw results into clean tender entries
+    raw_text = json.dumps(raw_results, indent=2, default=str)[:20000]
+    prompt = f"""Analyze these web search results and extract ONLY actual tender opportunities.
+If a result is a news article, blog post, or generic page (not an actual tender listing), EXCLUDE it.
+
+The user is looking for: {category} {keywords} in {location}
+
+RAW SEARCH RESULTS (JSON):
+{raw_text}
+
+Return ONLY the JSON array as specified. Exclude non-tender results."""
+    try:
+        response = _run_zai_chat(prompt, system=DISCOVER_SYSTEM)
+        # Parse the JSON array from the response
+        response = response.strip()
+        if response.startswith("```"):
+            response = response.split("\n", 1)[1] if "\n" in response else response[3:]
+            if response.endswith("```"):
+                response = response[:-3]
+            response = response.strip()
+        if response.startswith("json"):
+            response = response[4:].strip()
+        # Find first [ and last ]
+        first = response.find("[")
+        last = response.rfind("]")
+        if first >= 0 and last > first:
+            response = response[first:last + 1]
+        structured = json.loads(response)
+        if not isinstance(structured, list):
+            structured = []
+    except (json.JSONDecodeError, RuntimeError) as e:
+        # Fallback: return raw results in a simpler format
+        structured = [
+            {
+                "title": r.get("name", ""),
+                "client": "Unknown",
+                "category": category,
+                "location": location,
+                "closing_date": None,
+                "description": r.get("snippet", ""),
+                "source_site": r.get("host_name", ""),
+                "url": r.get("url", ""),
+                "reference_number": None,
+                "estimated_value": None,
+                "relevance": "medium",
+            }
+            for r in raw_results
+        ]
+
+    return {
+        "query": query,
+        "results": structured,
+        "raw_count": len(raw_results),
+    }
+

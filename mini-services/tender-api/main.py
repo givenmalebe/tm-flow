@@ -1282,6 +1282,86 @@ def dashboard(db: Session = Depends(get_db), user: User = Depends(get_current_us
     }
 
 
+# ---------------------- AI Tender Discovery ----------------------
+
+class DiscoverRequest(BaseModel):
+    category: str
+    keywords: Optional[str] = None
+    location: Optional[str] = "South Africa"
+    num_results: int = 15
+
+
+@app.post("/api/tenders/discover")
+def discover_tenders_api(
+    payload: DiscoverRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """AI-powered tender discovery. Searches the web for open tenders matching the criteria."""
+    if not payload.category or not payload.category.strip():
+        raise HTTPException(status_code=400, detail="Category is required")
+    result = ai_module.discover_tenders(
+        category=payload.category.strip(),
+        keywords=(payload.keywords or "").strip(),
+        location=(payload.location or "South Africa").strip(),
+        num_results=min(max(payload.num_results, 5), 30),
+    )
+    return result
+
+
+@app.post("/api/tenders/import-discovered")
+def import_discovered_tender(
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Import a discovered tender into the tender database."""
+    title = payload.get("title", "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title is required")
+    # Generate a reference number if none provided
+    ref = payload.get("reference_number") or f"DISC-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    t = Tender(
+        reference_number=ref,
+        title=title,
+        client_company=payload.get("client", "Unknown") or "Unknown",
+        description=payload.get("description"),
+        category=payload.get("category"),
+        location_site=payload.get("location"),
+        closing_date=None,
+        status="New Opportunity",
+        submission_method=payload.get("url") and f"Apply via: {payload['url']}" or None,
+        person_responsible=user.full_name,
+        notes=f"Discovered via AI Tender Finder.\nSource: {payload.get('source_site', 'Unknown')}\nURL: {payload.get('url', 'N/A')}",
+        created_by=user.id,
+    )
+    # Try to parse closing date
+    cd = payload.get("closing_date")
+    if cd:
+        try:
+            t.closing_date = date.fromisoformat(str(cd)[:10])
+        except Exception:
+            pass
+    # Try to parse estimated value
+    ev = payload.get("estimated_value")
+    if ev:
+        try:
+            # Extract numeric part
+            import re
+            nums = re.findall(r"[\d,.]+", str(ev).replace(",", ""))
+            if nums:
+                t.estimated_value = float(nums[0])
+        except Exception:
+            pass
+    db.add(t)
+    db.commit()
+    db.refresh(t)
+    _build_default_checklist(t.id, db)
+    db.commit()
+    db.refresh(t)
+    return _serialize_tender(t)
+
+
 # ---------------------- AI Assistant ----------------------
 
 @app.post("/api/ai/assistant")

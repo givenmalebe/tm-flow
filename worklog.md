@@ -315,3 +315,46 @@ Stage Summary:
 - All 4 KPI cards are now interactive and lead to real information
 - Two cards navigate to tabs (Active Tenders → Tenders, Documents Expiring → Library)
 - Two cards open detail dialogs (Closing This Week, Awarded This Year) with clickable tender rows that open the tender detail
+
+---
+Task ID: 19
+Agent: Main Orchestrator
+Task: Add AI tender scraper/finder that searches the web for open tenders by category
+
+Work Log:
+- Added _run_zai_web_search() to ai_module.py — uses z-ai CLI `function -n web_search` to search the web
+- Added discover_tenders() to ai_module.py — constructs optimized query, runs web search, then uses AI chat to structure raw results into clean tender entries (title, client, category, location, closing_date, description, source_site, url, reference_number, estimated_value, relevance)
+- Added 2 new API endpoints to main.py:
+  * POST /api/tenders/discover — takes {category, keywords?, location?, num_results?} and returns structured tender list
+  * POST /api/tenders/import-discovered — imports a discovered tender into the user's tender database with auto-generated reference number, source URL in notes, and default checklist
+- Added discoverTenders() and importDiscoveredTender() methods to frontend api.ts
+- Added "discover" to DashboardTab type in dashboard-store.ts
+- Added "Discover Tenders" nav item (Radar icon) to dashboard-shell.tsx sidebar, between Tenders and Compliance Library
+- Created discover-tab.tsx (~430 lines) with:
+  * Search form: category dropdown (15 presets + custom), location dropdown (SA provinces + cities), keywords input, max results selector
+  * Animated loading state with pulsing radar icon
+  * Result cards showing: title, relevance badge, reference number, source site, client, location, closing date with countdown, estimated value, description
+  * "View Tender & Get Documents" button → opens source URL in new tab
+  * "Import to My Tenders" button → calls import endpoint, then navigates to the imported tender's detail page
+  * Empty state with quick-select category chips
+  * Bottom help card explaining how to use the results
+- Verified with Agent Browser:
+  * Signed in as Thabo Nkosi
+  * Navigated to Discover Tenders tab
+  * Selected "Security Guards" category, added "PSIRA armed response" keywords
+  * Clicked "Find Tenders" — AI searched the web and found 3 real security guard tenders
+  * Results included: "Provision of security guards on an as-and-when required basis for 3 years", "Appointment of service provider for guarding security services for Department of Transport in Gauteng", "RFP for provision of security guard services for 36 months"
+  * Each result had "View Tender & Get Documents" link (opens source site) and "Import to My Tenders" button
+  * Clicked "Import to My Tenders" on first result — tender was imported and detail page opened showing the tender with source URL in notes
+  * No errors, lint passes clean
+
+Stage Summary:
+- AI Tender Finder fully operational
+- Searches real South African tender portals (etenders.gov.za, tenderbulletins.co.za, PSIRA, globaltenders.com, security.co.za, etc.)
+- Returns structured list of actual open tenders with direct links to source documents
+- One-click import into the user's tender database
+- Category presets + custom category support
+- Region filtering (all SA provinces + major cities)
+- Keyword refinement for precise searches
+- Relevance scoring (high/medium/low)
+- Closing date extraction with countdown

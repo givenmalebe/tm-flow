@@ -16,6 +16,7 @@ import {
   Bell,
   Search,
   User2,
+  Radar,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +43,7 @@ import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { DashboardTab as DashboardTabView } from "./tabs/dashboard-tab";
 import { TendersTab } from "./tabs/tenders-tab";
+import { DiscoverTab } from "./tabs/discover-tab";
 import { LibraryTab } from "./tabs/library-tab";
 import { BriefingsTab } from "./tabs/briefings-tab";
 import { PricingTab } from "./tabs/pricing-tab";
@@ -61,6 +63,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, description: "Overview & alerts" },
   { id: "tenders", label: "Tenders", icon: FileStack, description: "Tender register" },
+  { id: "discover", label: "Discover Tenders", icon: Radar, description: "AI tender finder" },
   { id: "library", label: "Compliance Library", icon: FolderCheck, description: "Company documents" },
   { id: "briefings", label: "Briefings", icon: MapPin, description: "Site inspections" },
   { id: "pricing", label: "Pricing", icon: Calculator, description: "Pricing versions" },
@@ -333,6 +336,7 @@ export function DashboardShell() {
           <div className="p-4 lg:p-6 max-w-[1600px] mx-auto animate-fade-in">
             {activeTab === "dashboard" && <DashboardTabView />}
             {activeTab === "tenders" && <TendersTab />}
+            {activeTab === "discover" && <DiscoverTab />}
             {activeTab === "library" && <LibraryTab />}
             {activeTab === "briefings" && <BriefingsTab />}
             {activeTab === "pricing" && <PricingTab />}

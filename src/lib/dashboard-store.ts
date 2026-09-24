@@ -5,6 +5,7 @@ import { create } from "zustand";
 export type DashboardTab =
   | "dashboard"
   | "tenders"
+  | "discover"
   | "library"
   | "briefings"
   | "pricing"

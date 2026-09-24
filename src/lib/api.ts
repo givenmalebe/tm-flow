@@ -288,6 +288,26 @@ export const api = {
     return request<any>(`/dashboard`);
   },
 
+  // ---- AI Tender Discovery ----
+  async discoverTenders(params: {
+    category: string;
+    keywords?: string;
+    location?: string;
+    num_results?: number;
+  }) {
+    return request<{ query: string; results: any[]; raw_count: number; error?: string }>(
+      `/tenders/discover`,
+      { method: "POST", body: params }
+    );
+  },
+
+  async importDiscoveredTender(payload: any) {
+    return request<any>(`/tenders/import-discovered`, {
+      method: "POST",
+      body: payload,
+    });
+  },
+
   // ---- AI Assistant ----
   async askAssistant(question: string, tenderId?: number) {
     return request<{ answer: string; context_tenders: number }>(`/ai/assistant`, {

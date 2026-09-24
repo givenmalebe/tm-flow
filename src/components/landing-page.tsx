@@ -456,15 +456,15 @@ function Hero({ onGetStarted }: LandingPageProps) {
   return (
     <section
       id="top"
-      className="relative overflow-hidden border-b"
+      className="relative isolate overflow-hidden border-b bg-background"
     >
       {/* animated gradient mesh background */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 -z-10"
+        className="pointer-events-none absolute inset-0 z-0"
         style={{
           background:
-            "linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(20,184,166,0.06) 25%, rgba(16,185,129,0.04) 50%, rgba(13,148,136,0.07) 75%, rgba(16,185,129,0.05) 100%)",
+            "linear-gradient(135deg, rgba(16,185,129,0.12) 0%, rgba(20,184,166,0.10) 25%, rgba(16,185,129,0.06) 50%, rgba(13,148,136,0.10) 75%, rgba(16,185,129,0.08) 100%)",
           backgroundSize: "400% 400%",
           animation: "tf-hero-gradient 12s ease infinite",
         }}
@@ -472,44 +472,44 @@ function Hero({ onGetStarted }: LandingPageProps) {
       {/* animated floating orbs */}
       <motion.div
         aria-hidden
-        className="pointer-events-none absolute -top-20 left-[10%] -z-10 h-72 w-72 rounded-full bg-emerald-400/20 blur-3xl"
+        className="pointer-events-none absolute -top-20 left-[10%] z-0 h-72 w-72 rounded-full bg-emerald-400/30 blur-3xl"
         animate={{
           x: [0, 40, 0],
           y: [0, 30, 0],
           scale: [1, 1.15, 1],
-          opacity: [0.3, 0.5, 0.3],
+          opacity: [0.4, 0.6, 0.4],
         }}
         transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
       />
       <motion.div
         aria-hidden
-        className="pointer-events-none absolute top-10 right-[15%] -z-10 h-96 w-96 rounded-full bg-teal-400/15 blur-3xl"
+        className="pointer-events-none absolute top-10 right-[15%] z-0 h-96 w-96 rounded-full bg-teal-400/25 blur-3xl"
         animate={{
           x: [0, -50, 0],
           y: [0, 40, 0],
           scale: [1, 1.2, 1],
-          opacity: [0.2, 0.4, 0.2],
+          opacity: [0.3, 0.5, 0.3],
         }}
         transition={{ duration: 10, repeat: Infinity, ease: "easeInOut", delay: 1 }}
       />
       <motion.div
         aria-hidden
-        className="pointer-events-none absolute bottom-0 left-[40%] -z-10 h-80 w-80 rounded-full bg-emerald-500/10 blur-3xl"
+        className="pointer-events-none absolute bottom-0 left-[40%] z-0 h-80 w-80 rounded-full bg-emerald-500/20 blur-3xl"
         animate={{
           x: [0, 30, -20, 0],
           y: [0, -20, 10, 0],
           scale: [1, 1.1, 0.95, 1],
-          opacity: [0.15, 0.3, 0.15],
+          opacity: [0.2, 0.4, 0.2],
         }}
         transition={{ duration: 14, repeat: Infinity, ease: "easeInOut", delay: 2 }}
       />
-      {/* animated dot grid with shimmer */}
+      {/* dot grid overlay */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 -z-10 opacity-50"
+        className="pointer-events-none absolute inset-0 z-0 opacity-40"
         style={{
           backgroundImage:
-            "radial-gradient(circle at 1px 1px, rgba(16,185,129,0.18) 1px, transparent 0)",
+            "radial-gradient(circle at 1px 1px, rgba(16,185,129,0.25) 1px, transparent 0)",
           backgroundSize: "24px 24px",
           maskImage:
             "radial-gradient(ellipse 80% 60% at 50% 0%, #000 40%, transparent 100%)",
@@ -520,21 +520,21 @@ function Hero({ onGetStarted }: LandingPageProps) {
       {/* animated sweeping light beam */}
       <motion.div
         aria-hidden
-        className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
+        className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
       >
         <motion.div
           className="absolute top-0 -left-1/2 h-full w-1/2"
           style={{
             background:
-              "linear-gradient(90deg, transparent 0%, rgba(16,185,129,0.06) 45%, rgba(20,184,166,0.10) 50%, rgba(16,185,129,0.06) 55%, transparent 100%)",
-            filter: "blur(8px)",
+              "linear-gradient(90deg, transparent 0%, rgba(16,185,129,0.08) 45%, rgba(20,184,166,0.15) 50%, rgba(16,185,129,0.08) 55%, transparent 100%)",
+            filter: "blur(12px)",
           }}
           animate={{ x: ["0%", "300%"] }}
           transition={{ duration: 8, repeat: Infinity, ease: "easeInOut", repeatDelay: 3 }}
         />
       </motion.div>
 
-      <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-28">
+      <div className="relative z-10 mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-28">
         <div className="grid items-center gap-12 lg:grid-cols-2">
           {/* Copy */}
           <motion.div

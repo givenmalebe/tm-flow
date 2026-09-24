@@ -629,17 +629,27 @@ function Hero({ onGetStarted }: LandingPageProps) {
 
 function StatsBar() {
   return (
-    <section className="border-b bg-gradient-to-b from-emerald-50/60 to-background">
-      <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-2 gap-8 md:grid-cols-4">
+    <section className="relative isolate overflow-hidden border-b bg-gradient-to-b from-emerald-50/80 via-emerald-50/30 to-background">
+      <motion.div
+        aria-hidden
+        className="pointer-events-none absolute left-1/2 top-1/2 -z-10 h-64 w-[60%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-300/10 blur-3xl"
+        animate={{ scale: [1, 1.1, 1], opacity: [0.3, 0.5, 0.3] }}
+        transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
+      />
+      <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
+        <div className="grid grid-cols-2 gap-6 md:grid-cols-4">
           {STATS.map((s, i) => (
-            <Reveal key={s.label} delay={i * 0.08} className="text-center">
-              <div className="text-4xl font-bold text-emerald-600 sm:text-5xl">
-                {s.value}
-              </div>
-              <div className="mt-1 text-sm text-muted-foreground">
-                {s.label}
-              </div>
+            <Reveal key={s.label} delay={i * 0.08}>
+              <Card className="border-emerald-100 bg-background/70 backdrop-blur-sm transition-all hover:shadow-md hover:-translate-y-0.5">
+                <CardContent className="text-center py-6">
+                  <div className="bg-gradient-to-br from-emerald-600 to-teal-500 bg-clip-text text-4xl font-bold text-transparent sm:text-5xl">
+                    {s.value}
+                  </div>
+                  <div className="mt-1.5 text-sm font-medium text-muted-foreground">
+                    {s.label}
+                  </div>
+                </CardContent>
+              </Card>
             </Reveal>
           ))}
         </div>
@@ -654,10 +664,12 @@ function StatsBar() {
 
 function FeaturesGrid() {
   return (
-    <section id="features" className="scroll-mt-20 border-b">
+    <section id="features" className="relative isolate scroll-mt-20 overflow-hidden border-b">
+      {/* subtle background gradient */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-b from-background via-emerald-50/20 to-background" />
       <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
         <Reveal className="mx-auto max-w-2xl text-center">
-          <Badge variant="outline" className="border-emerald-300 text-emerald-700">
+          <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-700">
             <Zap className="size-3.5" /> 16 capabilities
           </Badge>
           <h2 className="mt-4 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
@@ -679,10 +691,10 @@ function FeaturesGrid() {
           {FEATURES.map((f) => {
             const Icon = f.icon;
             return (
-              <motion.div key={f.title} variants={fadeUp}>
-                <Card className="group h-full transition-shadow hover:shadow-md hover:border-emerald-300">
+              <motion.div key={f.title} variants={fadeUp} whileHover={{ y: -4 }} transition={{ type: "spring", stiffness: 300 }}>
+                <Card className="group h-full border-border/60 transition-all hover:border-emerald-300 hover:shadow-lg">
                   <CardContent className="flex flex-col gap-3">
-                    <div className="flex size-11 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 transition-colors group-hover:bg-emerald-100">
+                    <div className="flex size-11 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 text-white shadow-sm transition-transform group-hover:scale-110">
                       <Icon className="size-5" />
                     </div>
                     <div>
@@ -710,10 +722,16 @@ function FeaturesGrid() {
 
 function HowItWorks() {
   return (
-    <section id="how-it-works" className="scroll-mt-20 border-b bg-muted/30">
+    <section id="how-it-works" className="relative isolate scroll-mt-20 overflow-hidden border-b bg-gradient-to-b from-muted/40 via-emerald-50/10 to-background">
+      <motion.div
+        aria-hidden
+        className="pointer-events-none absolute right-0 top-1/4 -z-10 h-80 w-80 rounded-full bg-teal-300/10 blur-3xl"
+        animate={{ x: [0, -30, 0], y: [0, 20, 0] }}
+        transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
+      />
       <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
         <Reveal className="mx-auto max-w-2xl text-center">
-          <Badge variant="outline" className="border-emerald-300 text-emerald-700">
+          <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-700">
             <TrendingUp className="size-3.5" /> Workflow
           </Badge>
           <h2 className="mt-4 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
@@ -729,7 +747,7 @@ function HowItWorks() {
           {/* connecting line on desktop */}
           <div
             aria-hidden
-            className="absolute left-0 right-0 top-8 hidden h-0.5 bg-gradient-to-r from-emerald-200 via-emerald-400 to-emerald-200 lg:block"
+            className="absolute left-0 right-0 top-8 hidden h-0.5 bg-gradient-to-r from-emerald-200 via-emerald-400 to-teal-400 lg:block"
           />
           <motion.ol
             initial="hidden"
@@ -741,18 +759,18 @@ function HowItWorks() {
             {HOW_IT_WORKS.map((s) => {
               const Icon = s.icon;
               return (
-                <motion.li key={s.step} variants={fadeUp} className="relative text-center lg:text-left">
+                <motion.li key={s.step} variants={fadeUp} whileHover={{ y: -4 }} className="relative text-center lg:text-left">
                   <div className="flex flex-col items-center lg:items-start">
-                    <div className="relative z-10 flex size-16 items-center justify-center rounded-2xl border border-emerald-200 bg-background text-emerald-600 shadow-sm">
+                    <div className="relative z-10 flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20">
                       <Icon className="size-7" />
-                      <span className="absolute -right-2 -top-2 flex size-6 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
+                      <span className="absolute -right-2 -top-2 flex size-7 items-center justify-center rounded-full bg-background text-xs font-bold text-emerald-600 shadow-md border border-emerald-200">
                         {s.step}
                       </span>
                     </div>
                     <h3 className="mt-4 text-lg font-semibold text-foreground">
                       {s.title}
                     </h3>
-                    <p className="mt-1 text-sm text-muted-foreground">
+                    <p className="mt-1 text-sm text-muted-foreground leading-relaxed">
                       {s.desc}
                     </p>
                   </div>
@@ -772,12 +790,18 @@ function HowItWorks() {
 
 function AIHighlight() {
   return (
-    <section className="border-b">
+    <section className="relative isolate overflow-hidden border-b">
+      <motion.div
+        aria-hidden
+        className="pointer-events-none absolute left-[20%] top-0 -z-10 h-72 w-72 rounded-full bg-emerald-300/10 blur-3xl"
+        animate={{ x: [0, 40, 0], y: [0, 20, 0] }}
+        transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
+      />
       <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
         <Reveal>
-          <div className="relative overflow-hidden rounded-3xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-emerald-50/40 to-teal-50/30 p-6 sm:p-10 lg:p-14">
-            {/* decorative dot pattern */}
-            <div
+          <div className="relative overflow-hidden rounded-3xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-teal-50/40 to-emerald-50/20 p-6 shadow-lg sm:p-10 lg:p-14">
+            {/* animated dot pattern */}
+            <motion.div
               aria-hidden
               className="pointer-events-none absolute inset-0 opacity-40"
               style={{
@@ -789,6 +813,8 @@ function AIHighlight() {
                 WebkitMaskImage:
                   "radial-gradient(ellipse 60% 60% at 80% 40%, #000 0%, transparent 80%)",
               }}
+              animate={{ opacity: [0.3, 0.5, 0.3] }}
+              transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
             />
             <div className="relative grid gap-10 lg:grid-cols-2 lg:gap-16">
               {/* left: bullets */}
@@ -806,29 +832,33 @@ function AIHighlight() {
                 </p>
 
                 <ul className="mt-6 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {AI_EXTRACTS.map((item) => (
-                    <li
+                  {AI_EXTRACTS.map((item, i) => (
+                    <motion.li
                       key={item}
+                      initial={{ opacity: 0, x: -10 }}
+                      whileInView={{ opacity: 1, x: 0 }}
+                      viewport={{ once: true }}
+                      transition={{ delay: i * 0.04 }}
                       className="flex items-start gap-2 text-sm text-foreground"
                     >
                       <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" />
                       <span>{item}</span>
-                    </li>
+                    </motion.li>
                   ))}
                 </ul>
               </div>
 
               {/* right: mock extracted card */}
               <div className="relative">
-                <Card className="overflow-hidden p-0 shadow-xl">
-                  <div className="flex items-center justify-between border-b bg-muted/40 px-4 py-3">
+                <Card className="overflow-hidden p-0 shadow-xl border-emerald-100">
+                  <div className="flex items-center justify-between border-b bg-gradient-to-r from-emerald-50 to-teal-50 px-4 py-3">
                     <div className="flex items-center gap-2">
                       <Bot className="size-4 text-emerald-600" />
                       <span className="text-sm font-semibold">
                         AI Extracted — E137
                       </span>
                     </div>
-                    <Badge className="gap-1">
+                    <Badge className="gap-1 bg-emerald-600">
                       <Sparkles className="size-3" /> Auto
                     </Badge>
                   </div>
@@ -879,10 +909,10 @@ function DeadlineLadder() {
   };
 
   return (
-    <section className="border-b bg-muted/30">
+    <section className="relative isolate overflow-hidden border-b bg-gradient-to-b from-muted/40 via-background to-background">
       <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
         <Reveal className="mx-auto max-w-2xl text-center">
-          <Badge variant="outline" className="border-emerald-300 text-emerald-700">
+          <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-700">
             <Bell className="size-3.5" /> Reminders
           </Badge>
           <h2 className="mt-4 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
@@ -900,13 +930,13 @@ function DeadlineLadder() {
           whileInView="show"
           viewport={{ once: true, amount: 0.15 }}
           variants={stagger}
-          className="relative mt-12 space-y-6 before:absolute before:left-[27px] before:top-2 before:h-[calc(100%-1rem)] before:w-0.5 before:bg-gradient-to-b before:from-emerald-300 before:via-emerald-400 before:to-rose-400 sm:before:left-8"
+          className="relative mt-12 space-y-5 before:absolute before:left-[27px] before:top-2 before:h-[calc(100%-1rem)] before:w-0.5 before:bg-gradient-to-b before:from-emerald-300 before:via-amber-400 before:to-rose-400 sm:before:left-8"
         >
           {REMINDERS.map((r) => (
-            <motion.li key={r.days} variants={fadeUp} className="relative pl-16 sm:pl-20">
+            <motion.li key={r.days} variants={fadeUp} whileHover={{ x: 4 }} className="relative pl-16 sm:pl-20">
               <div
                 className={cn(
-                  "absolute left-0 top-0 flex size-14 items-center justify-center rounded-full border-2 bg-background shadow-sm",
+                  "absolute left-0 top-0 flex size-14 items-center justify-center rounded-full border-2 bg-background shadow-md",
                   r.tone === "calm" && "border-emerald-400",
                   r.tone === "warn" && "border-amber-400",
                   r.tone === "urgent" && "border-rose-400"
@@ -921,8 +951,8 @@ function DeadlineLadder() {
                   )}
                 />
               </div>
-              <Card className="py-4">
-                <CardContent className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <Card className="border-border/60 transition-all hover:shadow-md hover:border-emerald-200">
+                <CardContent className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between py-4">
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold text-foreground">
@@ -957,11 +987,17 @@ function DeadlineLadder() {
 
 function Testimonial() {
   return (
-    <section className="border-b">
+    <section className="relative isolate overflow-hidden border-b">
+      <motion.div
+        aria-hidden
+        className="pointer-events-none absolute left-1/2 top-0 -z-10 h-64 w-[50%] -translate-x-1/2 rounded-full bg-emerald-200/15 blur-3xl"
+        animate={{ scale: [1, 1.15, 1], opacity: [0.2, 0.4, 0.2] }}
+        transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+      />
       <div className="mx-auto max-w-4xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
         <Reveal>
-          <Card className="relative overflow-hidden border-l-4 border-l-emerald-500 py-8 sm:py-10">
-            <span className="absolute right-6 top-2 select-none font-serif text-7xl text-emerald-100">
+          <Card className="relative overflow-hidden border-l-4 border-l-emerald-500 shadow-lg py-8 sm:py-10">
+            <span className="absolute right-6 top-2 select-none font-serif text-7xl text-emerald-100/80">
               &ldquo;
             </span>
             <CardContent className="relative">
@@ -972,7 +1008,7 @@ function Testimonial() {
                 submission.&rdquo;
               </p>
               <div className="mt-6 flex items-center gap-3">
-                <div className="flex size-10 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                <div className="flex size-10 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 text-white shadow-sm">
                   <Bot className="size-5" />
                 </div>
                 <div>
@@ -1077,10 +1113,10 @@ function Pricing({ onGetStarted }: LandingPageProps) {
   ];
 
   return (
-    <section id="pricing" className="scroll-mt-20 border-b bg-muted/30">
+    <section id="pricing" className="relative isolate scroll-mt-20 overflow-hidden border-b bg-gradient-to-b from-muted/40 via-emerald-50/10 to-background">
       <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
         <Reveal className="mx-auto max-w-2xl text-center">
-          <Badge variant="outline" className="border-emerald-300 text-emerald-700">
+          <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-700">
             <Users className="size-3.5" /> Pricing
           </Badge>
           <h2 className="mt-4 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
@@ -1096,10 +1132,10 @@ function Pricing({ onGetStarted }: LandingPageProps) {
             <Reveal key={t.name} delay={i * 0.08}>
               <Card
                 className={cn(
-                  "relative h-full py-6",
+                  "relative h-full py-6 transition-all hover:shadow-lg hover:-translate-y-1",
                   t.highlighted
                     ? "border-emerald-400 shadow-lg ring-1 ring-emerald-200"
-                    : ""
+                    : "hover:border-emerald-300"
                 )}
               >
                 {t.highlighted && (
@@ -1170,10 +1206,16 @@ function Pricing({ onGetStarted }: LandingPageProps) {
 
 function FAQ() {
   return (
-    <section id="faq" className="scroll-mt-20 border-b">
+    <section id="faq" className="relative isolate scroll-mt-20 overflow-hidden border-b">
+      <motion.div
+        aria-hidden
+        className="pointer-events-none absolute right-[10%] bottom-0 -z-10 h-72 w-72 rounded-full bg-teal-200/10 blur-3xl"
+        animate={{ scale: [1, 1.1, 1], opacity: [0.2, 0.35, 0.2] }}
+        transition={{ duration: 9, repeat: Infinity, ease: "easeInOut" }}
+      />
       <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
         <Reveal className="text-center">
-          <Badge variant="outline" className="border-emerald-300 text-emerald-700">
+          <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-700">
             FAQ
           </Badge>
           <h2 className="mt-4 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
@@ -1185,12 +1227,12 @@ function FAQ() {
         </Reveal>
 
         <Reveal className="mt-10" delay={0.1}>
-          <Card className="px-6">
+          <Card className="px-6 shadow-md border-emerald-100">
             <CardContent>
               <Accordion type="single" collapsible className="w-full">
                 {FAQS.map((f, i) => (
                   <AccordionItem key={i} value={`item-${i}`}>
-                    <AccordionTrigger className="text-left text-base font-medium">
+                    <AccordionTrigger className="text-left text-base font-medium hover:text-emerald-700 transition-colors">
                       {f.q}
                     </AccordionTrigger>
                     <AccordionContent className="text-sm text-muted-foreground leading-relaxed">
@@ -1213,12 +1255,12 @@ function FAQ() {
 
 function FinalCTA({ onGetStarted }: LandingPageProps) {
   return (
-    <section className="border-b">
+    <section className="relative isolate overflow-hidden border-b">
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
         <Reveal>
-          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-600 via-emerald-600 to-teal-600 px-6 py-14 text-center shadow-xl sm:px-12 sm:py-20">
-            {/* dot pattern */}
-            <div
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-600 via-emerald-700 to-teal-700 px-6 py-14 text-center shadow-xl sm:px-12 sm:py-20">
+            {/* animated dot pattern */}
+            <motion.div
               aria-hidden
               className="pointer-events-none absolute inset-0 opacity-25"
               style={{
@@ -1226,15 +1268,21 @@ function FinalCTA({ onGetStarted }: LandingPageProps) {
                   "radial-gradient(circle at 1px 1px, rgba(255,255,255,0.6) 1px, transparent 0)",
                 backgroundSize: "24px 24px",
               }}
+              animate={{ opacity: [0.2, 0.35, 0.2] }}
+              transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
             />
-            {/* decorative blur */}
-            <div
+            {/* animated decorative blurs */}
+            <motion.div
               aria-hidden
               className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-white/15 blur-3xl"
+              animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.5, 0.3] }}
+              transition={{ duration: 7, repeat: Infinity, ease: "easeInOut" }}
             />
-            <div
+            <motion.div
               aria-hidden
               className="pointer-events-none absolute -bottom-24 -left-16 h-64 w-64 rounded-full bg-teal-300/20 blur-3xl"
+              animate={{ scale: [1, 1.3, 1], opacity: [0.2, 0.4, 0.2] }}
+              transition={{ duration: 9, repeat: Infinity, ease: "easeInOut", delay: 1 }}
             />
 
             <div className="relative mx-auto max-w-2xl">

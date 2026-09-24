@@ -1281,3 +1281,62 @@ Stage Summary:
 - The summary incorporates addendum changes (e.g., closing date updated, briefing no longer required, new documents added)
 - Accessible from the tender detail AI tab with a "Generate" / "Regenerate" button
 - The summary is saved to the tender record and can be viewed anytime
+
+---
+Task ID: 39
+Agent: Main Orchestrator
+Task: Build Search and Filtering — all 11 filter criteria for tenders
+
+Work Log:
+- Enhanced backend GET /api/tenders endpoint with new filter parameters:
+  * location (partial match) — for filtering by location
+  * closing_date_from / closing_date_to — for closing date range filtering
+  * value_min / value_max — for estimated value range filtering
+  * submission_date_from / submission_date_to — for submission date range filtering (joins with Submission table)
+- Added new sort options: client_company, location_site, category, person_responsible
+- Added q.distinct() to avoid duplicates from the submission date outerjoin
+- Updated frontend api.ts listTenders() to accept all new parameters
+- Updated tenders-tab.tsx with enhanced filter UI:
+  * Row 1 (always visible): Search input, Status filter, Outcome filter, Sort dropdown (9 options), Sort order toggle, Advanced button
+  * Row 2 (collapsible "Advanced" section):
+    - Category (text input)
+    - Location (text input)
+    - Person Responsible (text input)
+    - Closing Date From (date input)
+    - Closing Date To (date input)
+    - Min Value ZAR (number input)
+    - Max Value ZAR (number input)
+  * "Clear advanced filters" button when any advanced filter is active
+  * Advanced button shows a "!" badge when filters are active
+- Verified all 11 filter criteria work:
+  1. Tender number → search by reference_number ✓
+  2. Client → search + sort by client_company ✓
+  3. Tender title → search by title ✓
+  4. Location → search + advanced filter by location ✓
+  5. Closing date → advanced filter (date range) + sort ✓
+  6. Status → status filter dropdown (all 20 statuses) ✓
+  7. Tender category → advanced filter by category ✓
+  8. Value → advanced filter (min/max range) + sort by estimated_value ✓
+  9. Submission date → backend filter (date range, joins Submission table) ✓
+  10. Outcome → outcome filter dropdown (Pending/Awarded/Unsuccessful/Withdrawn) ✓
+  11. Person responsible → advanced filter + sort by person_responsible ✓
+- Verified via API tests: search by reference, filter by status, filter by location, filter by closing date range, filter by value range, sort by client — all returned correct results
+- Verified in browser: Tenders tab shows all filters, Advanced section expands/collapses, sort dropdown has all 9 options
+- No errors, lint clean
+
+Stage Summary:
+- Search and Filtering fully operational with all 11 required criteria:
+  1. Tender number ✓ (text search)
+  2. Client ✓ (text search + sort)
+  3. Tender title ✓ (text search + sort)
+  4. Location ✓ (text search + advanced filter + sort)
+  5. Closing date ✓ (advanced filter: date range + sort)
+  6. Status ✓ (dropdown filter: all 20 statuses)
+  7. Tender category ✓ (advanced filter + sort)
+  8. Value ✓ (advanced filter: min/max range + sort)
+  9. Submission date ✓ (backend filter: date range)
+  10. Outcome ✓ (dropdown filter: Pending/Awarded/Unsuccessful/Withdrawn)
+  11. Person responsible ✓ (advanced filter + sort)
+- All filters can be combined (e.g., search for "E137" + status "New Opportunity" + closing date range + value range)
+- Sort by any of 9 fields in ascending or descending order
+- Collapsible "Advanced" section keeps the UI clean when basic filters suffice

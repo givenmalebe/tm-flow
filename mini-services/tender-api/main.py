@@ -645,6 +645,13 @@ def list_tenders(
     category: Optional[str] = None,
     person_responsible: Optional[str] = None,
     outcome: Optional[str] = None,
+    location: Optional[str] = None,
+    closing_date_from: Optional[str] = None,
+    closing_date_to: Optional[str] = None,
+    value_min: Optional[float] = None,
+    value_max: Optional[float] = None,
+    submission_date_from: Optional[str] = None,
+    submission_date_to: Optional[str] = None,
     sort: str = "updated_at",
     order: str = "desc",
     skip: int = 0,
@@ -653,6 +660,7 @@ def list_tenders(
     user: User = Depends(get_current_user),
 ):
     q = db.query(Tender)
+    # Text search across multiple fields
     if search:
         like = f"%{search}%"
         q = q.filter(or_(
@@ -662,6 +670,7 @@ def list_tenders(
             Tender.location_site.ilike(like),
             Tender.person_responsible.ilike(like),
         ))
+    # Exact filters
     if status:
         q = q.filter(Tender.status == status)
     if category:
@@ -670,6 +679,40 @@ def list_tenders(
         q = q.filter(Tender.person_responsible == person_responsible)
     if outcome:
         q = q.filter(Tender.outcome == outcome)
+    # Location filter (partial match)
+    if location:
+        q = q.filter(Tender.location_site.ilike(f"%{location}%"))
+    # Closing date range
+    if closing_date_from:
+        try:
+            q = q.filter(Tender.closing_date >= date.fromisoformat(closing_date_from))
+        except ValueError:
+            pass
+    if closing_date_to:
+        try:
+            q = q.filter(Tender.closing_date <= date.fromisoformat(closing_date_to))
+        except ValueError:
+            pass
+    # Value range
+    if value_min is not None:
+        q = q.filter(Tender.estimated_value >= value_min)
+    if value_max is not None:
+        q = q.filter(Tender.estimated_value <= value_max)
+    # Submission date range (filter tenders that have a submission)
+    if submission_date_from or submission_date_to:
+        from sqlalchemy import select as sa_select
+        # Join with Submission table
+        q = q.outerjoin(Submission, Submission.tender_id == Tender.id)
+        if submission_date_from:
+            try:
+                q = q.filter(Submission.submission_date >= date.fromisoformat(submission_date_from))
+            except ValueError:
+                pass
+        if submission_date_to:
+            try:
+                q = q.filter(Submission.submission_date <= date.fromisoformat(submission_date_to))
+            except ValueError:
+                pass
     # Sorting
     sort_col = {
         "updated_at": Tender.updated_at,
@@ -678,8 +721,13 @@ def list_tenders(
         "estimated_value": Tender.estimated_value,
         "reference_number": Tender.reference_number,
         "title": Tender.title,
+        "client_company": Tender.client_company,
+        "location_site": Tender.location_site,
+        "category": Tender.category,
+        "person_responsible": Tender.person_responsible,
     }.get(sort, Tender.updated_at)
     q = q.order_by(asc(sort_col) if order == "asc" else desc(sort_col))
+    q = q.distinct()  # Avoid duplicates from outerjoin
     total = q.count()
     tenders = q.offset(skip).limit(limit).all()
     return {"items": [_serialize_tender(t) for t in tenders], "total": total}

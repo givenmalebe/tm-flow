@@ -15,6 +15,8 @@ import {
   ArrowUpDown,
   Archive,
   Trash2,
+  SlidersHorizontal,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,7 +56,7 @@ import { TenderDetail } from "../tender-detail";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
-type SortField = "updated_at" | "closing_date" | "estimated_value" | "reference_number" | "title";
+type SortField = "updated_at" | "closing_date" | "estimated_value" | "reference_number" | "title" | "client_company" | "location_site" | "category" | "person_responsible";
 
 export function TendersTab() {
   const { selectedTenderId, selectTender, refresh, refreshKey } = useDashboardStore();
@@ -64,6 +66,14 @@ export function TendersTab() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [outcomeFilter, setOutcomeFilter] = useState<string>("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [locationFilter, setLocationFilter] = useState<string>("");
+  const [personResponsibleFilter, setPersonResponsibleFilter] = useState<string>("all");
+  const [closingDateFrom, setClosingDateFrom] = useState<string>("");
+  const [closingDateTo, setClosingDateTo] = useState<string>("");
+  const [valueMin, setValueMin] = useState<string>("");
+  const [valueMax, setValueMax] = useState<string>("");
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [sortBy, setSortBy] = useState<SortField>("updated_at");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [showCreate, setShowCreate] = useState(false);
@@ -77,6 +87,13 @@ export function TendersTab() {
         search: search || undefined,
         status: statusFilter !== "all" ? statusFilter : undefined,
         outcome: outcomeFilter !== "all" ? outcomeFilter : undefined,
+        category: categoryFilter !== "all" ? categoryFilter : undefined,
+        location: locationFilter || undefined,
+        person_responsible: personResponsibleFilter !== "all" ? personResponsibleFilter : undefined,
+        closing_date_from: closingDateFrom || undefined,
+        closing_date_to: closingDateTo || undefined,
+        value_min: valueMin ? parseFloat(valueMin) : undefined,
+        value_max: valueMax ? parseFloat(valueMax) : undefined,
         sort: sortBy,
         order: sortOrder,
       });
@@ -86,7 +103,7 @@ export function TendersTab() {
     } finally {
       setLoading(false);
     }
-  }, [search, statusFilter, outcomeFilter, sortBy, sortOrder, refreshKey]);
+  }, [search, statusFilter, outcomeFilter, categoryFilter, locationFilter, personResponsibleFilter, closingDateFrom, closingDateTo, valueMin, valueMax, sortBy, sortOrder, refreshKey]);
 
   useEffect(() => {
     const t = setTimeout(fetchTenders, search ? 300 : 0);
@@ -156,18 +173,19 @@ export function TendersTab() {
       {/* Filters */}
       <Card>
         <CardContent className="p-3 sm:p-4">
+          {/* Row 1: Search + Status + Outcome + Sort */}
           <div className="flex flex-col md:flex-row gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search by reference, title, client, location…"
+                placeholder="Search by reference, title, client, location, person…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="pl-9"
               />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full md:w-48">
+              <SelectTrigger className="w-full md:w-44">
                 <Filter className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
@@ -179,7 +197,7 @@ export function TendersTab() {
               </SelectContent>
             </Select>
             <Select value={outcomeFilter} onValueChange={setOutcomeFilter}>
-              <SelectTrigger className="w-full md:w-40">
+              <SelectTrigger className="w-full md:w-36">
                 <SelectValue placeholder="Outcome" />
               </SelectTrigger>
               <SelectContent>
@@ -190,7 +208,7 @@ export function TendersTab() {
               </SelectContent>
             </Select>
             <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortField)}>
-              <SelectTrigger className="w-full md:w-44">
+              <SelectTrigger className="w-full md:w-40">
                 <ArrowUpDown className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
                 <SelectValue />
               </SelectTrigger>
@@ -200,6 +218,10 @@ export function TendersTab() {
                 <SelectItem value="estimated_value">Estimated value</SelectItem>
                 <SelectItem value="reference_number">Reference</SelectItem>
                 <SelectItem value="title">Title</SelectItem>
+                <SelectItem value="client_company">Client</SelectItem>
+                <SelectItem value="location_site">Location</SelectItem>
+                <SelectItem value="category">Category</SelectItem>
+                <SelectItem value="person_responsible">Person responsible</SelectItem>
               </SelectContent>
             </Select>
             <Button
@@ -210,7 +232,116 @@ export function TendersTab() {
             >
               <ArrowUpDown className={cn("h-4 w-4", sortOrder === "asc" && "rotate-180")} />
             </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+              className="shrink-0"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              <span className="hidden sm:inline">Advanced</span>
+              {(categoryFilter !== "all" || locationFilter || personResponsibleFilter !== "all" || closingDateFrom || closingDateTo || valueMin || valueMax) && (
+                <Badge variant="secondary" className="ml-1 h-5 w-5 p-0 text-xs flex items-center justify-center">
+                  !
+                </Badge>
+              )}
+            </Button>
           </div>
+
+          {/* Row 2: Advanced filters (collapsible) */}
+          {showAdvancedFilters && (
+            <div className="mt-3 pt-3 border-t space-y-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {/* Category */}
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Category</Label>
+                  <Input
+                    placeholder="e.g. Security Services"
+                    value={categoryFilter === "all" ? "" : categoryFilter}
+                    onChange={(e) => setCategoryFilter(e.target.value || "all")}
+                  />
+                </div>
+                {/* Location */}
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Location</Label>
+                  <Input
+                    placeholder="e.g. Western Cape"
+                    value={locationFilter}
+                    onChange={(e) => setLocationFilter(e.target.value)}
+                  />
+                </div>
+                {/* Person Responsible */}
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Person Responsible</Label>
+                  <Input
+                    placeholder="e.g. John Smith"
+                    value={personResponsibleFilter === "all" ? "" : personResponsibleFilter}
+                    onChange={(e) => setPersonResponsibleFilter(e.target.value || "all")}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                {/* Closing Date From */}
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Closing Date From</Label>
+                  <Input
+                    type="date"
+                    value={closingDateFrom}
+                    onChange={(e) => setClosingDateFrom(e.target.value)}
+                  />
+                </div>
+                {/* Closing Date To */}
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Closing Date To</Label>
+                  <Input
+                    type="date"
+                    value={closingDateTo}
+                    onChange={(e) => setClosingDateTo(e.target.value)}
+                  />
+                </div>
+                {/* Value Min */}
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Min Value (ZAR)</Label>
+                  <Input
+                    type="number"
+                    placeholder="0"
+                    value={valueMin}
+                    onChange={(e) => setValueMin(e.target.value)}
+                  />
+                </div>
+                {/* Value Max */}
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Max Value (ZAR)</Label>
+                  <Input
+                    type="number"
+                    placeholder="10000000"
+                    value={valueMax}
+                    onChange={(e) => setValueMax(e.target.value)}
+                  />
+                </div>
+              </div>
+              {/* Clear filters button */}
+              {(categoryFilter !== "all" || locationFilter || personResponsibleFilter !== "all" || closingDateFrom || closingDateTo || valueMin || valueMax) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setCategoryFilter("all");
+                    setLocationFilter("");
+                    setPersonResponsibleFilter("all");
+                    setClosingDateFrom("");
+                    setClosingDateTo("");
+                    setValueMin("");
+                    setValueMax("");
+                  }}
+                  className="text-muted-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                  Clear advanced filters
+                </Button>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 

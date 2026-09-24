@@ -122,12 +122,19 @@ export const api = {
     category?: string;
     person_responsible?: string;
     outcome?: string;
+    location?: string;
+    closing_date_from?: string;
+    closing_date_to?: string;
+    value_min?: number;
+    value_max?: number;
+    submission_date_from?: string;
+    submission_date_to?: string;
     sort?: string;
     order?: string;
   } = {}) {
     const qs = new URLSearchParams();
     Object.entries(params).forEach(([k, v]) => {
-      if (v) qs.append(k, String(v));
+      if (v !== undefined && v !== null && v !== "") qs.append(k, String(v));
     });
     const q = qs.toString();
     return request<{ items: any[]; total: number }>(`/tenders${q ? "?" + q : ""}`);

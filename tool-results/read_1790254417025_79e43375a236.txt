@@ -1,0 +1,989 @@
+   100→
+   101→interface TenderOption {
+   102→  id: number;
+   103→  reference_number: string;
+   104→  title: string;
+   105→  client_company: string | null;
+   106→  status: string;
+   107→}
+   108→
+   109→// ---- Constants ----
+   110→const LINE_ITEM_CATEGORIES = [
+   111→  "Labour",
+   112→  "Equipment",
+   113→  "Consumables",
+   114→  "Transport",
+   115→  "Other",
+   116→] as const;
+   117→
+   118→const VAT_RATE = 0.15;
+   119→
+   120→// ---- Helpers ----
+   121→function lineTotal(qty: number, rate: number): number {
+   122→  const q = Number.isFinite(qty) ? qty : 0;
+   123→  const r = Number.isFinite(rate) ? rate : 0;
+   124→  return Math.round(q * r * 100) / 100;
+   125→}
+   126→
+   127→function calcTotals(items: PricingLineItem[]) {
+   128→  const subtotal = items.reduce(
+   129→    (sum, it) => sum + lineTotal(it.quantity, it.rate),
+   130→    0
+   131→  );
+   132→  const vat = Math.round(subtotal * VAT_RATE * 100) / 100;
+   133→  const total = Math.round((subtotal + vat) * 100) / 100;
+   134→  return { subtotal, vat, total };
+   135→}
+   136→
+   137→function newLineItem(): PricingLineItem {
+   138→  return {
+   139→    category: "Labour",
+   140→    description: "",
+   141→    quantity: 1,
+   142→    rate: 0,
+   143→    total: 0,
+   144→  };
+   145→}
+   146→
+   147→// ---- Empty state ----
+   148→function EmptyState({
+   149→  icon: Icon,
+   150→  message,
+   151→  hint,
+   152→  iconClass,
+   153→}: {
+   154→  icon: LucideIcon;
+   155→  message: string;
+   156→  hint?: string;
+   157→  iconClass?: string;
+   158→}) {
+   159→  return (
+   160→    <div className="flex flex-col items-center justify-center gap-3 py-14 text-center">
+   161→      <div
+   162→        className={cn(
+   163→          "flex h-14 w-14 items-center justify-center rounded-2xl",
+   164→          iconClass || "bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+   165→        )}
+   166→      >
+   167→        <Icon className="h-7 w-7" />
+   168→      </div>
+   169→      <div className="space-y-1">
+   170→        <p className="text-sm font-medium text-foreground">{message}</p>
+   171→        {hint && (
+   172→          <p className="text-xs text-muted-foreground max-w-sm">{hint}</p>
+   173→        )}
+   174→      </div>
+   175→    </div>
+   176→  );
+   177→}
+   178→
+   179→// ---- Stat card ----
+   180→function StatCard({
+   181→  icon: Icon,
+   182→  iconClass,
+   183→  value,
+   184→  label,
+   185→  sublabel,
+   186→}: {
+   187→  icon: LucideIcon;
+   188→  iconClass: string;
+   189→  value: string | number;
+   190→  label: string;
+   191→  sublabel?: string;
+   192→}) {
+   193→  return (
+   194→    <Card>
+   195→      <CardContent className="flex items-center justify-between gap-3">
+   196→        <div className="min-w-0">
+   197→          <div className="text-2xl font-bold tracking-tight tabular-nums text-foreground">
+   198→            {value}
+   199→          </div>
+   200→          <div className="mt-0.5 text-sm font-medium text-foreground">{label}</div>
+   201→          {sublabel && (
+   202→            <div className="text-xs text-muted-foreground mt-0.5">{sublabel}</div>
+   203→          )}
+   204→        </div>
+   205→        <div
+   206→          className={cn(
+   207→            "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl",
+   208→            iconClass
+   209→          )}
+   210→        >
+   211→          <Icon className="h-5 w-5" />
+   212→        </div>
+   213→      </CardContent>
+   214→    </Card>
+   215→  );
+   216→}
+   217→
+   218→// ---- Version Card ----
+   219→interface VersionCardProps {
+   220→  version: PricingVersion;
+   221→  onDelete: (id: number) => void;
+   222→  defaultOpen?: boolean;
+   223→}
+   224→
+   225→function VersionCard({ version, onDelete, defaultOpen }: VersionCardProps) {
+   226→  const [open, setOpen] = useState(defaultOpen ?? version.version_number > 0);
+   227→  const [confirmOpen, setConfirmOpen] = useState(false);
+   228→
+   229→  return (
+   230→    <Card className="overflow-hidden">
+   231→      <CardHeader className="pb-3">
+   232→        <div className="flex items-start justify-between gap-3">
+   233→          <div className="min-w-0 flex-1 space-y-1">
+   234→            <div className="flex flex-wrap items-center gap-2">
+   235→              <Badge className="bg-emerald-600 text-white hover:bg-emerald-600">
+   236→                v{version.version_number}
+   237→              </Badge>
+   238→              {version.version_label && (
+   239→                <span className="text-sm font-semibold text-foreground">
+   240→                  {version.version_label}
+   241→                </span>
+   242→              )}
+   243→            </div>
+   244→            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+   245→              <Calendar className="h-3.5 w-3.5" />
+   246→              {formatDateTime(version.created_at)}
+   247→            </div>
+   248→          </div>
+   249→          <div className="flex items-center gap-1">
+   250→            <Button
+   251→              variant="ghost"
+   252→              size="icon"
+   253→              className="h-8 w-8"
+   254→              onClick={() => setOpen((v) => !v)}
+   255→              aria-label={open ? "Collapse" : "Expand"}
+   256→            >
+   257→              {open ? (
+   258→                <ChevronUp className="h-4 w-4" />
+   259→              ) : (
+   260→                <ChevronDown className="h-4 w-4" />
+   261→              )}
+   262→            </Button>
+   263→            <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+   264→              <Button
+   265→                variant="ghost"
+   266→                size="icon"
+   267→                className="h-8 w-8 text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950"
+   268→                aria-label="Delete version"
+   269→                onClick={() => setConfirmOpen(true)}
+   270→              >
+   271→                <Trash2 className="h-4 w-4" />
+   272→              </Button>
+   273→              <AlertDialogContent>
+   274→                <AlertDialogHeader>
+   275→                  <AlertDialogTitle>Delete pricing version?</AlertDialogTitle>
+   276→                  <AlertDialogDescription>
+   277→                    This will permanently delete{" "}
+   278→                    <span className="font-semibold text-foreground">
+   279→                      v{version.version_number}
+   280→                      {version.version_label ? ` — ${version.version_label}` : ""}
+   281→                    </span>
+   282→                    . This action cannot be undone.
+   283→                  </AlertDialogDescription>
+   284→                </AlertDialogHeader>
+   285→                <AlertDialogFooter>
+   286→                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+   287→                  <AlertDialogAction
+   288→                    className="bg-rose-600 hover:bg-rose-700 focus-visible:ring-rose-600"
+   289→                    onClick={() => {
+   290→                      onDelete(version.id);
+   291→                      setConfirmOpen(false);
+   292→                    }}
+   293→                  >
+   294→                    <Trash2 className="h-4 w-4" />
+   295→                    Delete
+   296→                  </AlertDialogAction>
+   297→                </AlertDialogFooter>
+   298→              </AlertDialogContent>
+   299→            </AlertDialog>
+   300→          </div>
+   301→        </div>
+   302→      </CardHeader>
+   303→
+   304→      {open && (
+   305→        <CardContent className="space-y-4 pt-0">
+   306→          {/* Line items table */}
+   307→          {version.line_items && version.line_items.length > 0 ? (
+   308→            <div className="rounded-lg border overflow-hidden">
+   309→              <Table>
+   310→                <TableHeader>
+   311→                  <TableRow className="bg-muted/40">
+   312→                    <TableHead className="w-[140px]">Category</TableHead>
+   313→                    <TableHead>Description</TableHead>
+   314→                    <TableHead className="text-right w-[70px]">Qty</TableHead>
+   315→                    <TableHead className="text-right w-[110px]">Rate</TableHead>
+   316→                    <TableHead className="text-right w-[120px]">Total</TableHead>
+   317→                  </TableRow>
+   318→                </TableHeader>
+   319→                <TableBody>
+   320→                  {version.line_items.map((li, idx) => (
+   321→                    <TableRow key={idx}>
+   322→                      <TableCell>
+   323→                        <Badge variant="outline" className="text-[10px] font-medium">
+   324→                          {li.category}
+   325→                        </Badge>
+   326→                      </TableCell>
+   327→                      <TableCell className="font-medium text-foreground">
+   328→                        {li.description || (
+   329→                          <span className="text-muted-foreground italic">
+   330→                            No description
+   331→                          </span>
+   332→                        )}
+   333→                      </TableCell>
+   334→                      <TableCell className="text-right tabular-nums">
+   335→                        {li.quantity}
+   336→                      </TableCell>
+   337→                      <TableCell className="text-right tabular-nums">
+   338→                        {formatCurrency(li.rate)}
+   339→                      </TableCell>
+   340→                      <TableCell className="text-right tabular-nums font-medium">
+   341→                        {formatCurrency(li.total)}
+   342→                      </TableCell>
+   343→                    </TableRow>
+   344→                  ))}
+   345→                </TableBody>
+   346→              </Table>
+   347→            </div>
+   348→          ) : (
+   349→            <div className="rounded-lg border border-dashed py-6 text-center text-sm text-muted-foreground">
+   350→              No line items in this version
+   351→            </div>
+   352→          )}
+   353→
+   354→          {/* Totals row */}
+   355→          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+   356→            <div className="rounded-lg border bg-muted/30 p-3">
+   357→              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+   358→                Subtotal
+   359→              </div>
+   360→              <div className="mt-1 text-lg font-semibold tabular-nums text-foreground">
+   361→                {formatCurrency(version.subtotal)}
+   362→              </div>
+   363→            </div>
+   364→            <div className="rounded-lg border bg-muted/30 p-3">
+   365→              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+   366→                VAT (15%)
+   367→              </div>
+   368→              <div className="mt-1 text-lg font-semibold tabular-nums text-foreground">
+   369→                {formatCurrency(version.vat)}
+   370→              </div>
+   371→            </div>
+   372→            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950/40">
+   373→              <div className="text-[11px] uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
+   374→                Total (incl. VAT)
+   375→              </div>
+   376→              <div className="mt-1 text-2xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+   377→                {formatCurrency(version.total)}
+   378→              </div>
+   379→            </div>
+   380→          </div>
+   381→
+   382→          {/* Notes */}
+   383→          {version.notes && (
+   384→            <div className="rounded-lg bg-muted/30 p-3">
+   385→              <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground mb-1">
+   386→                <FileText className="h-3 w-3" />
+   387→                Notes
+   388→              </div>
+   389→              <p className="text-sm text-foreground whitespace-pre-wrap">
+   390→                {version.notes}
+   391→              </p>
+   392→            </div>
+   393→          )}
+   394→        </CardContent>
+   395→      )}
+   396→    </Card>
+   397→  );
+   398→}
+   399→
+   400→// ---- Line Item Editor Row ----
+   401→interface LineItemRowProps {
+   402→  item: PricingLineItem;
+   403→  index: number;
+   404→  onChange: (idx: number, patch: Partial<PricingLineItem>) => void;
+   405→  onRemove: (idx: number) => void;
+   406→  canRemove: boolean;
+   407→}
+   408→
+   409→function LineItemRow({ item, index, onChange, onRemove, canRemove }: LineItemRowProps) {
+   410→  return (
+   411→    <TableRow>
+   412→      <TableCell className="w-[150px] pr-2">
+   413→        <Select
+   414→          value={item.category}
+   415→          onValueChange={(v) => onChange(index, { category: v })}
+   416→        >
+   417→          <SelectTrigger className="w-full h-9">
+   418→            <SelectValue />
+   419→          </SelectTrigger>
+   420→          <SelectContent>
+   421→            {LINE_ITEM_CATEGORIES.map((c) => (
+   422→              <SelectItem key={c} value={c}>
+   423→                {c}
+   424→              </SelectItem>
+   425→            ))}
+   426→          </SelectContent>
+   427→        </Select>
+   428→      </TableCell>
+   429→      <TableCell className="pr-2">
+   430→        <Input
+   431→          value={item.description}
+   432→          onChange={(e) => onChange(index, { description: e.target.value })}
+   433→          placeholder="Description of work / item"
+   434→          className="h-9"
+   435→        />
+   436→      </TableCell>
+   437→      <TableCell className="w-[80px] pr-2">
+   438→        <Input
+   439→          type="number"
+   440→          min={0}
+   441→          step="any"
+   442→          value={Number.isFinite(item.quantity) ? item.quantity : 0}
+   443→          onChange={(e) =>
+   444→            onChange(index, {
+   445→              quantity: parseFloat(e.target.value) || 0,
+   446→              total: lineTotal(parseFloat(e.target.value) || 0, item.rate),
+   447→            })
+   448→          }
+   449→          className="h-9 text-right tabular-nums"
+   450→        />
+   451→      </TableCell>
+   452→      <TableCell className="w-[130px] pr-2">
+   453→        <Input
+   454→          type="number"
+   455→          min={0}
+   456→          step="any"
+   457→          value={Number.isFinite(item.rate) ? item.rate : 0}
+   458→          onChange={(e) =>
+   459→            onChange(index, {
+   460→              rate: parseFloat(e.target.value) || 0,
+   461→              total: lineTotal(item.quantity, parseFloat(e.target.value) || 0),
+   462→            })
+   463→          }
+   464→          className="h-9 text-right tabular-nums"
+   465→        />
+   466→      </TableCell>
+   467→      <TableCell className="w-[130px]">
+   468→        <div className="flex items-center justify-between gap-1">
+   469→          <span className="text-sm font-medium tabular-nums text-foreground">
+   470→            {formatCurrency(lineTotal(item.quantity, item.rate))}
+   471→          </span>
+   472→          <Button
+   473→            variant="ghost"
+   474→            size="icon"
+   475→            className="h-7 w-7 text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950 shrink-0"
+   476→            disabled={!canRemove}
+   477→            onClick={() => onRemove(index)}
+   478→            aria-label="Remove line item"
+   479→          >
+   480→            <X className="h-3.5 w-3.5" />
+   481→          </Button>
+   482→        </div>
+   483→      </TableCell>
+   484→    </TableRow>
+   485→  );
+   486→}
+   487→
+   488→// ---- New Pricing Version Dialog ----
+   489→interface NewPricingDialogProps {
+   490→  open: boolean;
+   491→  onOpenChange: (open: boolean) => void;
+   492→  tenderId: number;
+   493→  nextVersionNumber: number;
+   494→  onSaved: () => void;
+   495→}
+   496→
+   497→function NewPricingDialog({
+   498→  open,
+   499→  onOpenChange,
+   500→  tenderId,
+   501→  nextVersionNumber,
+   502→  onSaved,
+   503→}: NewPricingDialogProps) {
+   504→  const [versionLabel, setVersionLabel] = useState("");
+   505→  const [lineItems, setLineItems] = useState<PricingLineItem[]>([
+   506→    newLineItem(),
+   507→    newLineItem(),
+   508→  ]);
+   509→  const [notes, setNotes] = useState("");
+   510→  const [saving, setSaving] = useState(false);
+   511→
+   512→  // Reset form when dialog opens
+   513→  useEffect(() => {
+   514→    if (open) {
+   515→      setVersionLabel("");
+   516→      setLineItems([newLineItem(), newLineItem()]);
+   517→      setNotes("");
+   518→    }
+   519→  }, [open]);
+   520→
+   521→  const totals = useMemo(() => calcTotals(lineItems), [lineItems]);
+   522→  const hasAnyItem = lineItems.some(
+   523→    (li) => li.description.trim() || li.quantity > 0 || li.rate > 0
+   524→  );
+   525→
+   526→  const updateItem = (idx: number, patch: Partial<PricingLineItem>) => {
+   527→    setLineItems((items) =>
+   528→      items.map((it, i) => (i === idx ? { ...it, ...patch } : it))
+   529→    );
+   530→  };
+   531→
+   532→  const removeItem = (idx: number) => {
+   533→    setLineItems((items) => items.filter((_, i) => i !== idx));
+   534→  };
+   535→
+   536→  const addItem = () => {
+   537→    setLineItems((items) => [...items, newLineItem()]);
+   538→  };
+   539→
+   540→  const handleSave = async () => {
+   541→    // Filter to only meaningful rows
+   542→    const cleanItems = lineItems
+   543→      .filter(
+   544→        (li) =>
+   545→          li.description.trim() !== "" || li.quantity > 0 || li.rate > 0
+   546→      )
+   547→      .map((li) => ({
+   548→        category: li.category,
+   549→        description: li.description.trim(),
+   550→        quantity: Number(li.quantity) || 0,
+   551→        rate: Number(li.rate) || 0,
+   552→        total: lineTotal(li.quantity, li.rate),
+   553→      }));
+   554→
+   555→    if (cleanItems.length === 0) {
+   556→      toast.error("Add at least one line item with a description");
+   557→      return;
+   558→    }
+   559→
+   560→    setSaving(true);
+   561→    try {
+   562→      await api.createPricing(tenderId, {
+   563→        tender_id: tenderId,
+   564→        version_label: versionLabel.trim() || undefined,
+   565→        line_items: cleanItems,
+   566→        notes: notes.trim() || undefined,
+   567→      });
+   568→      toast.success(`Pricing v${nextVersionNumber} created`);
+   569→      onSaved();
+   570→      onOpenChange(false);
+   571→    } catch (e: any) {
+   572→      toast.error(e?.message || "Failed to create pricing version");
+   573→    } finally {
+   574→      setSaving(false);
+   575→    }
+   576→  };
+   577→
+   578→  return (
+   579→    <Dialog open={open} onOpenChange={onOpenChange}>
+   580→      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin">
+   581→        <DialogHeader>
+   582→          <DialogTitle className="flex items-center gap-2">
+   583→            <Calculator className="h-5 w-5 text-primary" />
+   584→            New Pricing Version
+   585→          </DialogTitle>
+   586→          <DialogDescription>
+   587→            Build a pricing sheet for this tender. The version number (v
+   588→            {nextVersionNumber}) is assigned automatically.
+   589→          </DialogDescription>
+   590→        </DialogHeader>
+   591→
+   592→        <div className="space-y-4 py-2">
+   593→          {/* Version label */}
+   594→          <div className="grid gap-2">
+   595→            <Label htmlFor="version-label">
+   596→              Version label{" "}
+   597→              <span className="text-xs text-muted-foreground font-normal">
+   598→                (optional)
+   599→              </span>
+   600→            </Label>
+   601→            <Input
+   602→              id="version-label"
+   603→              value={versionLabel}
+   604→              onChange={(e) => setVersionLabel(e.target.value)}
+   605→              placeholder="e.g. Draft, Final, Revised after addendum"
+   606→              className="max-w-md"
+   607→            />
+   608→          </div>
+   609→
+   610→          {/* Line items editor */}
+   611→          <div className="space-y-2">
+   612→            <div className="flex items-center justify-between">
+   613→              <Label className="text-sm font-medium">Line items</Label>
+   614→              <Button
+   615→                variant="outline"
+   616→                size="sm"
+   617→                onClick={addItem}
+   618→                type="button"
+   619→              >
+   620→                <Plus className="h-3.5 w-3.5" />
+   621→                Add line item
+   622→              </Button>
+   623→            </div>
+   624→            <div className="rounded-lg border overflow-hidden">
+   625→              <div className="overflow-x-auto scrollbar-thin">
+   626→                <Table>
+   627→                  <TableHeader>
+   628→                    <TableRow className="bg-muted/40">
+   629→                      <TableHead className="w-[150px]">Category</TableHead>
+   630→                      <TableHead>Description</TableHead>
+   631→                      <TableHead className="text-right w-[80px]">Qty</TableHead>
+   632→                      <TableHead className="text-right w-[130px]">
+   633→                        Rate (ZAR)
+   634→                      </TableHead>
+   635→                      <TableHead className="text-right w-[130px]">Total</TableHead>
+   636→                    </TableRow>
+   637→                  </TableHeader>
+   638→                  <TableBody>
+   639→                    {lineItems.length === 0 ? (
+   640→                      <TableRow>
+   641→                        <TableCell
+   642→                          colSpan={5}
+   643→                          className="text-center text-sm text-muted-foreground py-6"
+   644→                        >
+   645→                          No line items yet. Click &quot;Add line item&quot; to start.
+   646→                        </TableCell>
+   647→                      </TableRow>
+   648→                    ) : (
+   649→                      lineItems.map((item, idx) => (
+   650→                        <LineItemRow
+   651→                          key={idx}
+   652→                          item={item}
+   653→                          index={idx}
+   654→                          onChange={updateItem}
+   655→                          onRemove={removeItem}
+   656→                          canRemove={lineItems.length > 1}
+   657→                        />
+   658→                      ))
+   659→                    )}
+   660→                  </TableBody>
+   661→                </Table>
+   662→              </div>
+   663→            </div>
+   664→          </div>
+   665→
+   666→          {/* Live totals preview */}
+   667→          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+   668→            <div className="rounded-lg border bg-muted/30 p-3">
+   669→              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+   670→                Subtotal
+   671→              </div>
+   672→              <div className="mt-1 text-lg font-semibold tabular-nums text-foreground">
+   673→                {formatCurrency(totals.subtotal)}
+   674→              </div>
+   675→            </div>
+   676→            <div className="rounded-lg border bg-muted/30 p-3">
+   677→              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+   678→                VAT (15%)
+   679→              </div>
+   680→              <div className="mt-1 text-lg font-semibold tabular-nums text-foreground">
+   681→                {formatCurrency(totals.vat)}
+   682→              </div>
+   683→            </div>
+   684→            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950/40">
+   685→              <div className="text-[11px] uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
+   686→                Total (incl. VAT)
+   687→              </div>
+   688→              <div className="mt-1 text-2xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+   689→                {formatCurrency(totals.total)}
+   690→              </div>
+   691→            </div>
+   692→          </div>
+   693→
+   694→          {/* Notes */}
+   695→          <div className="grid gap-2">
+   696→            <Label htmlFor="pricing-notes">
+   697→              Notes{" "}
+   698→              <span className="text-xs text-muted-foreground font-normal">
+   699→                (optional)
+   700→              </span>
+   701→            </Label>
+   702→            <Textarea
+   703→              id="pricing-notes"
+   704→              value={notes}
+   705→              onChange={(e) => setNotes(e.target.value)}
+   706→              placeholder="Assumptions, exclusions, terms…"
+   707→              rows={3}
+   708→            />
+   709→          </div>
+   710→        </div>
+   711→
+   712→        <DialogFooter className="gap-2">
+   713→          <Button
+   714→            variant="outline"
+   715→            onClick={() => onOpenChange(false)}
+   716→            disabled={saving}
+   717→          >
+   718→            Cancel
+   719→          </Button>
+   720→          <Button onClick={handleSave} disabled={saving || !hasAnyItem}>
+   721→            {saving ? (
+   722→              <>
+   723→                <Loader2 className="h-4 w-4 animate-spin" />
+   724→                Saving…
+   725→              </>
+   726→            ) : (
+   727→              <>
+   728→                <Save className="h-4 w-4" />
+   729→                Save version
+   730→              </>
+   731→            )}
+   732→          </Button>
+   733→        </DialogFooter>
+   734→      </DialogContent>
+   735→    </Dialog>
+   736→  );
+   737→}
+   738→
+   739→// ---- Main Component ----
+   740→export function PricingTab() {
+   741→  const [tenders, setTenders] = useState<TenderOption[]>([]);
+   742→  const [selectedTenderId, setSelectedTenderId] = useState<number | null>(null);
+   743→  const [versions, setVersions] = useState<PricingVersion[]>([]);
+   744→  const [loadingTenders, setLoadingTenders] = useState(true);
+   745→  const [loadingVersions, setLoadingVersions] = useState(false);
+   746→  const [refreshing, setRefreshing] = useState(false);
+   747→  const [error, setError] = useState<string | null>(null);
+   748→  const [dialogOpen, setDialogOpen] = useState(false);
+   749→
+   750→  const fetchTenders = useCallback(async (isRefresh = false) => {
+   751→    if (isRefresh) setRefreshing(true);
+   752→    else setLoadingTenders(true);
+   753→    setError(null);
+   754→    try {
+   755→      const res = await api.listTenders({ sort: "updated_at", order: "desc" });
+   756→      setTenders(
+   757→        res.items.map((t) => ({
+   758→          id: t.id,
+   759→          reference_number: t.reference_number,
+   760→          title: t.title,
+   761→          client_company: t.client_company,
+   762→          status: t.status,
+   763→        }))
+   764→      );
+   765→    } catch (e: any) {
+   766→      setError(e?.message || "Failed to load tenders");
+   767→    } finally {
+   768→      setLoadingTenders(false);
+   769→      setRefreshing(false);
+   770→    }
+   771→  }, []);
+   772→
+   773→  const fetchVersions = useCallback(async (tenderId: number) => {
+   774→    setLoadingVersions(true);
+   775→    try {
+   776→      const res = await api.listPricing(tenderId);
+   777→      const list = (res.items || []) as PricingVersion[];
+   778→      list.sort((a, b) => b.version_number - a.version_number);
+   779→      setVersions(list);
+   780→    } catch (e: any) {
+   781→      toast.error(e?.message || "Failed to load pricing versions");
+   782→      setVersions([]);
+   783→    } finally {
+   784→      setLoadingVersions(false);
+   785→    }
+   786→  }, []);
+   787→
+   788→  useEffect(() => {
+   789→    fetchTenders();
+   790→  }, [fetchTenders]);
+   791→
+   792→  useEffect(() => {
+   793→    if (selectedTenderId !== null) {
+   794→      fetchVersions(selectedTenderId);
+   795→    } else {
+   796→      setVersions([]);
+   797→    }
+   798→  }, [selectedTenderId, fetchVersions]);
+   799→
+   800→  const selectedTender = useMemo(
+   801→    () => tenders.find((t) => t.id === selectedTenderId) || null,
+   802→    [tenders, selectedTenderId]
+   803→  );
+   804→
+   805→  const nextVersionNumber = useMemo(() => {
+   806→    if (versions.length === 0) return 1;
+   807→    return Math.max(...versions.map((v) => v.version_number)) + 1;
+   808→  }, [versions]);
+   809→
+   810→  const totalValue = useMemo(
+   811→    () =>
+   812→      versions.reduce((sum, v) => sum + (v.total || 0), 0),
+   813→    [versions]
+   814→  );
+   815→  const latestTotal = useMemo(
+   816→    () => (versions.length > 0 ? versions[0].total : 0),
+   817→    [versions]
+   818→  );
+   819→
+   820→  const handleDelete = async (versionId: number) => {
+   821→    if (selectedTenderId === null) return;
+   822→    try {
+   823→      await api.deletePricing(versionId);
+   824→      toast.success("Pricing version deleted");
+   825→      fetchVersions(selectedTenderId);
+   826→    } catch (e: any) {
+   827→      toast.error(e?.message || "Failed to delete pricing version");
+   828→    }
+   829→  };
+   830→
+   831→  const handleRefresh = () => {
+   832→    fetchTenders(true);
+   833→    if (selectedTenderId !== null) {
+   834→      fetchVersions(selectedTenderId);
+   835→    }
+   836→  };
+   837→
+   838→  // ---- Loading state ----
+   839→  if (loadingTenders) {
+   840→    return (
+   841→      <div className="space-y-6">
+   842→        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+   843→          <div className="space-y-2">
+   844→            <Skeleton className="h-8 w-48" />
+   845→            <Skeleton className="h-4 w-64" />
+   846→          </div>
+   847→          <Skeleton className="h-9 w-32" />
+   848→        </div>
+   849→        <Skeleton className="h-10 w-full max-w-md" />
+   850→        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+   851→          {Array.from({ length: 3 }).map((_, i) => (
+   852→            <Card key={i}>
+   853→              <CardContent className="flex items-start justify-between gap-3">
+   854→                <div className="flex-1 space-y-2">
+   855→                  <Skeleton className="h-7 w-20" />
+   856→                  <Skeleton className="h-4 w-24" />
+   857→                </div>
+   858→                <Skeleton className="h-11 w-11 rounded-xl" />
+   859→              </CardContent>
+   860→            </Card>
+   861→          ))}
+   862→        </div>
+   863→        <Card>
+   864→          <CardHeader>
+   865→            <Skeleton className="h-5 w-40" />
+   866→            <Skeleton className="h-4 w-56" />
+   867→          </CardHeader>
+   868→          <CardContent className="space-y-3">
+   869→            {Array.from({ length: 3 }).map((_, i) => (
+   870→              <Skeleton key={i} className="h-24 w-full" />
+   871→            ))}
+   872→          </CardContent>
+   873→        </Card>
+   874→      </div>
+   875→    );
+   876→  }
+   877→
+   878→  // ---- Error state ----
+   879→  if (error) {
+   880→    return (
+   881→      <div className="space-y-6">
+   882→        <div>
+   883→          <h1 className="text-2xl font-bold tracking-tight">Pricing Tracking</h1>
+   884→          <p className="text-sm text-muted-foreground">
+   885→            Build pricing sheets and track revisions
+   886→          </p>
+   887→        </div>
+   888→        <Alert variant="destructive">
+   889→          <AlertTriangle className="h-4 w-4" />
+   890→          <AlertTitle>Couldn&apos;t load pricing data</AlertTitle>
+   891→          <AlertDescription>
+   892→            <p className="mb-3">{error}</p>
+   893→            <Button
+   894→              size="sm"
+   895→              variant="outline"
+   896→              onClick={() => fetchTenders()}
+   897→              className="border-destructive/40 text-destructive hover:bg-destructive/10"
+   898→            >
+   899→              <RefreshCw className="h-3.5 w-3.5" />
+   900→              Try again
+   901→            </Button>
+   902→          </AlertDescription>
+   903→        </Alert>
+   904→      </div>
+   905→    );
+   906→  }
+   907→
+   908→  return (
+   909→    <div className="space-y-6">
+   910→      {/* ---- Page header ---- */}
+   911→      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+   912→        <div>
+   913→          <h1 className="text-2xl font-bold tracking-tight">Pricing Tracking</h1>
+   914→          <p className="text-sm text-muted-foreground">
+   915→            Build pricing sheets and track revisions
+   916→          </p>
+   917→        </div>
+   918→        <Button
+   919→          variant="ghost"
+   920→          onClick={handleRefresh}
+   921→          disabled={refreshing}
+   922→        >
+   923→          <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
+   924→          Refresh
+   925→        </Button>
+   926→      </div>
+   927→
+   928→      {/* ---- Tender selector ---- */}
+   929→      <div className="grid gap-2">
+   930→        <Label className="flex items-center gap-1.5 text-sm font-medium">
+   931→          <Hash className="h-3.5 w-3.5 text-primary" />
+   932→          Select tender
+   933→        </Label>
+   934→        {tenders.length === 0 ? (
+   935→          <Alert>
+   936→            <AlertTriangle className="h-4 w-4" />
+   937→            <AlertTitle>No tenders available</AlertTitle>
+   938→            <AlertDescription>
+   939→              Create a tender first to start building pricing sheets.
+   940→            </AlertDescription>
+   941→          </Alert>
+   942→        ) : (
+   943→          <Select
+   944→            value={selectedTenderId !== null ? String(selectedTenderId) : undefined}
+   945→            onValueChange={(v) => setSelectedTenderId(v ? Number(v) : null)}
+   946→          >
+   947→            <SelectTrigger className="w-full max-w-xl">
+   948→              <SelectValue placeholder="Select a tender…" />
+   949→            </SelectTrigger>
+   950→            <SelectContent>
+   951→              {tenders.map((t) => (
+   952→                <SelectItem key={t.id} value={String(t.id)}>
+   953→                  <span className="font-mono text-xs font-semibold text-primary mr-2">
+   954→                    {t.reference_number}
+   955→                  </span>
+   956→                  <span className="truncate">{t.title}</span>
+   957→                </SelectItem>
+   958→              ))}
+   959→            </SelectContent>
+   960→          </Select>
+   961→        )}
+   962→      </div>
+   963→
+   964→      {/* ---- No tender selected ---- */}
+   965→      {selectedTenderId === null ? (
+   966→        <Card className="border-dashed">
+   967→          <CardContent>
+   968→            <EmptyState
+   969→              icon={Calculator}
+   970→              message="Select a tender to view or create pricing versions"
+   971→              hint="Pick a tender from the dropdown above to start tracking pricing revisions."
+   972→            />
+   973→          </CardContent>
+   974→        </Card>
+   975→      ) : (
+   976→        <>
+   977→          {/* ---- Tender info banner ---- */}
+   978→          {selectedTender && (
+   979→            <Card className="border-emerald-200 bg-emerald-50/50 dark:border-emerald-900 dark:bg-emerald-950/20">
+   980→              <CardContent>
+   981→                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+   982→                  <div className="min-w-0 flex-1 space-y-1">
+   983→                    <div className="flex flex-wrap items-center gap-2">
+   984→                      <span className="font-mono text-xs font-semibold text-primary">
+   985→                        {selectedTender.reference_number}
+   986→                      </span>
+   987→                      <Badge
+   988→                        className={cn(
+   989→                          "text-[10px] font-medium",
+   990→                          statusColor(selectedTender.status)
+   991→                        )}
+   992→                      >
+   993→                        {selectedTender.status}
+   994→                      </Badge>
+   995→                    </div>
+   996→                    <div className="text-base font-semibold text-foreground line-clamp-1">
+   997→                      {selectedTender.title}
+   998→                    </div>
+   999→                    <div className="text-xs text-muted-foreground">
+  1000→                      {selectedTender.client_company || "No client"}
+  1001→                    </div>
+  1002→                  </div>
+  1003→                  <Button onClick={() => setDialogOpen(true)} className="shrink-0">
+  1004→                    <Plus className="h-4 w-4" />
+  1005→                    New Pricing Version
+  1006→                  </Button>
+  1007→                </div>
+  1008→              </CardContent>
+  1009→            </Card>
+  1010→          )}
+  1011→
+  1012→          {/* ---- Stats row ---- */}
+  1013→          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+  1014→            <StatCard
+  1015→              icon={Hash}
+  1016→              iconClass="bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+  1017→              value={versions.length}
+  1018→              label="Pricing Versions"
+  1019→              sublabel="Total revisions"
+  1020→            />
+  1021→            <StatCard
+  1022→              icon={Receipt}
+  1023→              iconClass="bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400"
+  1024→              value={formatCurrency(latestTotal)}
+  1025→              label="Latest Version Total"
+  1026→              sublabel="Incl. VAT"
+  1027→            />
+  1028→            <StatCard
+  1029→              icon={Calculator}
+  1030→              iconClass="bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+  1031→              value={formatCurrency(totalValue)}
+  1032→              label="Sum of All Versions"
+  1033→              sublabel="Incl. VAT"
+  1034→            />
+  1035→          </div>
+  1036→
+  1037→          {/* ---- Versions list ---- */}
+  1038→          {loadingVersions ? (
+  1039→            <Card>
+  1040→              <CardHeader>
+  1041→                <Skeleton className="h-5 w-40" />
+  1042→                <Skeleton className="h-4 w-56" />
+  1043→              </CardHeader>
+  1044→              <CardContent className="space-y-3">
+  1045→                {Array.from({ length: 2 }).map((_, i) => (
+  1046→                  <Skeleton key={i} className="h-32 w-full" />
+  1047→                ))}
+  1048→              </CardContent>
+  1049→            </Card>
+  1050→          ) : versions.length === 0 ? (
+  1051→            <Card className="border-dashed">
+  1052→              <CardContent>
+  1053→                <EmptyState
+  1054→                  icon={Receipt}
+  1055→                  message="No pricing versions yet"
+  1056→                  hint="Click &quot;New Pricing Version&quot; to build your first pricing sheet for this tender."
+  1057→                />
+  1058→              </CardContent>
+  1059→            </Card>
+  1060→          ) : (
+  1061→            <div className="space-y-3">
+  1062→              {versions.map((v, idx) => (
+  1063→                <VersionCard
+  1064→                  key={v.id}
+  1065→                  version={v}
+  1066→                  onDelete={handleDelete}
+  1067→                  defaultOpen={idx === 0}
+  1068→                />
+  1069→              ))}
+  1070→            </div>
+  1071→          )}
+  1072→        </>
+  1073→      )}
+  1074→
+  1075→      {/* ---- New Pricing Version Dialog ---- */}
+  1076→      {selectedTenderId !== null && (
+  1077→        <NewPricingDialog
+  1078→          open={dialogOpen}
+  1079→          onOpenChange={setDialogOpen}
+  1080→          tenderId={selectedTenderId}
+  1081→          nextVersionNumber={nextVersionNumber}
+  1082→          onSaved={() => fetchVersions(selectedTenderId)}
+  1083→        />
+  1084→      )}
+  1085→    </div>
+  1086→  );
+  1087→}
+  1088→

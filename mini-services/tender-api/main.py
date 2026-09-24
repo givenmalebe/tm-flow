@@ -1474,6 +1474,82 @@ def delete_pricing_version(version_id: int, db: Session = Depends(get_db), user:
     return {"deleted": True}
 
 
+@app.post("/api/tenders/{tender_id}/pricing/generate")
+def generate_pricing_sheet(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """AI generates a pricing sheet draft based on the tender's extracted requirements."""
+    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not tender:
+        raise HTTPException(status_code=404, detail="Tender not found")
+    extracted = tender.ai_extracted_info or {}
+    tender_data = {
+        "reference_number": tender.reference_number,
+        "title": tender.title,
+        "client_company": tender.client_company,
+        "contract_period": tender.contract_period,
+        "estimated_value": tender.estimated_value,
+        "location_site": tender.location_site,
+    }
+    result = ai_module.generate_pricing_sheet(tender_data, extracted)
+    # Create a new pricing version from the AI-generated sheet
+    count = db.query(PricingVersion).filter(PricingVersion.tender_id == tender_id).count()
+    line_items = result.get("line_items", [])
+    subtotal = round(sum(li.get("total", 0) for li in line_items), 2)
+    vat_rate = result.get("vat_rate", 0.15)
+    vat = round(subtotal * vat_rate, 2)
+    total = round(subtotal + vat, 2)
+    pv = PricingVersion(
+        tender_id=tender_id,
+        version_number=count + 1,
+        version_label=f"AI Draft v{count + 1}",
+        line_items=line_items,
+        subtotal=subtotal,
+        vat=vat,
+        total=total,
+        notes=result.get("pricing_notes", "AI-generated pricing sheet — review and adjust."),
+    )
+    db.add(pv)
+    db.commit()
+    db.refresh(pv)
+    return {
+        "id": pv.id, "version_number": pv.version_number,
+        "version_label": pv.version_label,
+        "line_items": pv.line_items,
+        "subtotal": pv.subtotal, "vat": pv.vat, "total": pv.total,
+        "notes": pv.notes,
+        "created_at": pv.created_at.isoformat() if pv.created_at else None,
+    }
+
+
+@app.post("/api/pricing/{version_id}/copy")
+def copy_pricing_version(version_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Create a new pricing version by copying an existing one (for revisions)."""
+    source = db.query(PricingVersion).filter(PricingVersion.id == version_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Pricing version not found")
+    count = db.query(PricingVersion).filter(PricingVersion.tender_id == source.tender_id).count()
+    pv = PricingVersion(
+        tender_id=source.tender_id,
+        version_number=count + 1,
+        version_label=f"v{count + 1} (copy of v{source.version_number})",
+        line_items=source.line_items,
+        subtotal=source.subtotal,
+        vat=source.vat,
+        total=source.total,
+        notes=source.notes,
+    )
+    db.add(pv)
+    db.commit()
+    db.refresh(pv)
+    return {
+        "id": pv.id, "version_number": pv.version_number,
+        "version_label": pv.version_label,
+        "line_items": pv.line_items,
+        "subtotal": pv.subtotal, "vat": pv.vat, "total": pv.total,
+        "notes": pv.notes,
+        "created_at": pv.created_at.isoformat() if pv.created_at else None,
+    }
+
+
 # ---------------------- Submission Routes ----------------------
 
 @app.post("/api/tenders/{tender_id}/submission")

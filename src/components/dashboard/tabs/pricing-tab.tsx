@@ -4,16 +4,19 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Calculator,
   Plus,
+  Copy,
   Trash2,
   RefreshCw,
-  AlertTriangle,
   Loader2,
-  Hash,
-  Calendar,
-  Receipt,
+  Sparkles,
+  TrendingUp,
+  DollarSign,
   FileText,
   ChevronDown,
   ChevronUp,
+  AlertTriangle,
+  Hash,
+  Receipt,
   Save,
   X,
   type LucideIcon,
@@ -33,6 +36,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Separator } from "@/components/ui/separator";
 import {
   Select,
   SelectContent,
@@ -69,9 +73,8 @@ import {
 import { api } from "@/lib/api";
 import {
   useDashboardStore,
-  formatDate,
-  formatDateTime,
   formatCurrency,
+  formatDateTime,
   statusColor,
 } from "@/lib/dashboard-store";
 import { cn } from "@/lib/utils";
@@ -104,6 +107,7 @@ interface TenderOption {
   title: string;
   client_company: string | null;
   status: string;
+  estimated_value: number | null;
 }
 
 // ---- Constants ----
@@ -116,6 +120,15 @@ const LINE_ITEM_CATEGORIES = [
 ] as const;
 
 const VAT_RATE = 0.15;
+
+// Per-category badge colour tokens (emerald-themed family)
+const CATEGORY_COLORS: Record<string, string> = {
+  Labour: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
+  Equipment: "bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300",
+  Consumables: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
+  Transport: "bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-300",
+  Other: "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300",
+};
 
 // ---- Helpers ----
 function lineTotal(qty: number, rate: number): number {
@@ -134,6 +147,17 @@ function calcTotals(items: PricingLineItem[]) {
   return { subtotal, vat, total };
 }
 
+function categorySubtotals(items: PricingLineItem[]) {
+  const map = new Map<string, number>();
+  for (const c of LINE_ITEM_CATEGORIES) map.set(c, 0);
+  for (const it of items) {
+    const key = (it.category || "Other") as string;
+    const prev = map.get(key) ?? 0;
+    map.set(key, prev + lineTotal(it.quantity, it.rate));
+  }
+  return map;
+}
+
 function newLineItem(): PricingLineItem {
   return {
     category: "Labour",
@@ -150,18 +174,21 @@ function EmptyState({
   message,
   hint,
   iconClass,
+  children,
 }: {
   icon: LucideIcon;
   message: string;
   hint?: string;
   iconClass?: string;
+  children?: React.ReactNode;
 }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-14 text-center">
       <div
         className={cn(
           "flex h-14 w-14 items-center justify-center rounded-2xl",
-          iconClass || "bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+          iconClass ||
+            "bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
         )}
       >
         <Icon className="h-7 w-7" />
@@ -172,6 +199,7 @@ function EmptyState({
           <p className="text-xs text-muted-foreground max-w-sm">{hint}</p>
         )}
       </div>
+      {children && <div className="mt-2 flex flex-wrap items-center justify-center gap-2">{children}</div>}
     </div>
   );
 }
@@ -215,37 +243,100 @@ function StatCard({
   );
 }
 
+// ---- Category badge ----
+function CategoryBadge({ category }: { category: string }) {
+  const cls =
+    CATEGORY_COLORS[category] ||
+    "bg-muted text-muted-foreground";
+  return (
+    <Badge variant="outline" className={cn("text-[10px] font-medium", cls)}>
+      {category}
+    </Badge>
+  );
+}
+
+// ---- Category subtotal strip ----
+function CategorySubtotals({ items }: { items: PricingLineItem[] }) {
+  const subs = categorySubtotals(items);
+  const activeCategories = LINE_ITEM_CATEGORIES.filter(
+    (c) => (subs.get(c) ?? 0) > 0
+  );
+  if (activeCategories.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-stretch gap-2">
+      {activeCategories.map((c) => (
+        <div
+          key={c}
+          className="flex-1 min-w-[120px] rounded-lg border bg-muted/20 px-3 py-2"
+        >
+          <div className="flex items-center gap-1.5">
+            <CategoryBadge category={c} />
+          </div>
+          <div className="mt-1 text-sm font-semibold tabular-nums text-foreground">
+            {formatCurrency(subs.get(c) ?? 0)}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ---- Version Card ----
 interface VersionCardProps {
   version: PricingVersion;
   onDelete: (id: number) => void;
+  onCopy: (version: PricingVersion) => void;
   defaultOpen?: boolean;
+  copyingId?: number | null;
 }
 
-function VersionCard({ version, onDelete, defaultOpen }: VersionCardProps) {
-  const [open, setOpen] = useState(defaultOpen ?? version.version_number > 0);
+function VersionCard({
+  version,
+  onDelete,
+  onCopy,
+  defaultOpen,
+  copyingId,
+}: VersionCardProps) {
+  const [open, setOpen] = useState(defaultOpen ?? true);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const isCopying = copyingId === version.id;
+  const items = version.line_items || [];
 
   return (
     <Card className="overflow-hidden">
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1 space-y-1">
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="min-w-0 flex-1 space-y-1 text-left"
+          >
             <div className="flex flex-wrap items-center gap-2">
               <Badge className="bg-emerald-600 text-white hover:bg-emerald-600">
                 v{version.version_number}
               </Badge>
               {version.version_label && (
                 <span className="text-sm font-semibold text-foreground">
-                  {version.version_label}
+                  — {version.version_label}
+                </span>
+              )}
+              {!version.version_label && (
+                <span className="text-sm font-medium text-muted-foreground italic">
+                  Untitled
                 </span>
               )}
             </div>
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Calendar className="h-3.5 w-3.5" />
+              <FileText className="h-3.5 w-3.5" />
               {formatDateTime(version.created_at)}
+              <span className="text-muted-foreground/50">·</span>
+              <span>{items.length} line item{items.length === 1 ? "" : "s"}</span>
+              <span className="text-muted-foreground/50">·</span>
+              <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                {formatCurrency(version.total)}
+              </span>
             </div>
-          </div>
+          </button>
           <div className="flex items-center gap-1">
             <Button
               variant="ghost"
@@ -260,43 +351,6 @@ function VersionCard({ version, onDelete, defaultOpen }: VersionCardProps) {
                 <ChevronDown className="h-4 w-4" />
               )}
             </Button>
-            <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950"
-                aria-label="Delete version"
-                onClick={() => setConfirmOpen(true)}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Delete pricing version?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This will permanently delete{" "}
-                    <span className="font-semibold text-foreground">
-                      v{version.version_number}
-                      {version.version_label ? ` — ${version.version_label}` : ""}
-                    </span>
-                    . This action cannot be undone.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    className="bg-rose-600 hover:bg-rose-700 focus-visible:ring-rose-600"
-                    onClick={() => {
-                      onDelete(version.id);
-                      setConfirmOpen(false);
-                    }}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Delete
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
           </div>
         </div>
       </CardHeader>
@@ -304,52 +358,55 @@ function VersionCard({ version, onDelete, defaultOpen }: VersionCardProps) {
       {open && (
         <CardContent className="space-y-4 pt-0">
           {/* Line items table */}
-          {version.line_items && version.line_items.length > 0 ? (
+          {items.length > 0 ? (
             <div className="rounded-lg border overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/40">
-                    <TableHead className="w-[140px]">Category</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead className="text-right w-[70px]">Qty</TableHead>
-                    <TableHead className="text-right w-[110px]">Rate</TableHead>
-                    <TableHead className="text-right w-[120px]">Total</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {version.line_items.map((li, idx) => (
-                    <TableRow key={idx}>
-                      <TableCell>
-                        <Badge variant="outline" className="text-[10px] font-medium">
-                          {li.category}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="font-medium text-foreground">
-                        {li.description || (
-                          <span className="text-muted-foreground italic">
-                            No description
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {li.quantity}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {formatCurrency(li.rate)}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums font-medium">
-                        {formatCurrency(li.total)}
-                      </TableCell>
+              <div className="overflow-x-auto scrollbar-thin">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/40">
+                      <TableHead className="w-[140px]">Category</TableHead>
+                      <TableHead>Description</TableHead>
+                      <TableHead className="text-right w-[70px]">Qty</TableHead>
+                      <TableHead className="text-right w-[110px]">Rate</TableHead>
+                      <TableHead className="text-right w-[120px]">Total</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {items.map((li, idx) => (
+                      <TableRow key={idx}>
+                        <TableCell>
+                          <CategoryBadge category={li.category} />
+                        </TableCell>
+                        <TableCell className="font-medium text-foreground">
+                          {li.description || (
+                            <span className="text-muted-foreground italic">
+                              No description
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {li.quantity}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatCurrency(li.rate)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums font-medium">
+                          {formatCurrency(li.total)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           ) : (
             <div className="rounded-lg border border-dashed py-6 text-center text-sm text-muted-foreground">
               No line items in this version
             </div>
           )}
+
+          {/* Category subtotals */}
+          {items.length > 0 && <CategorySubtotals items={items} />}
 
           {/* Totals row */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -391,6 +448,63 @@ function VersionCard({ version, onDelete, defaultOpen }: VersionCardProps) {
               </p>
             </div>
           )}
+
+          <Separator />
+
+          {/* Action buttons */}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onCopy(version)}
+              disabled={isCopying}
+            >
+              {isCopying ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
+              )}
+              {isCopying ? "Copying…" : "Copy to New Version"}
+            </Button>
+            <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950"
+                aria-label="Delete version"
+                onClick={() => setConfirmOpen(true)}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete
+              </Button>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete pricing version?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will permanently delete{" "}
+                    <span className="font-semibold text-foreground">
+                      v{version.version_number}
+                      {version.version_label ? ` — ${version.version_label}` : ""}
+                    </span>
+                    . This action cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    className="bg-rose-600 hover:bg-rose-700 focus-visible:ring-rose-600"
+                    onClick={() => {
+                      onDelete(version.id);
+                      setConfirmOpen(false);
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
         </CardContent>
       )}
     </Card>
@@ -538,7 +652,6 @@ function NewPricingDialog({
   };
 
   const handleSave = async () => {
-    // Filter to only meaningful rows
     const cleanItems = lineItems
       .filter(
         (li) =>
@@ -703,7 +816,7 @@ function NewPricingDialog({
               id="pricing-notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Assumptions, exclusions, terms…"
+              placeholder="Pricing notes — assumptions, exclusions, terms…"
               rows={3}
             />
           </div>
@@ -736,8 +849,42 @@ function NewPricingDialog({
   );
 }
 
+// ---- AI Generating Card ----
+function AIGeneratingCard() {
+  return (
+    <Card className="border-emerald-300 bg-gradient-to-br from-emerald-50 via-white to-teal-50 dark:border-emerald-800 dark:from-emerald-950/40 dark:via-card dark:to-teal-950/30">
+      <CardContent className="py-10">
+        <div className="flex flex-col items-center text-center gap-4">
+          <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400">
+            <span className="absolute inset-0 rounded-2xl bg-emerald-400/40 animate-ping" />
+            <Sparkles className="h-7 w-7 animate-pulse" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-base font-semibold flex items-center justify-center gap-2">
+              <Calculator className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              AI is generating a pricing sheet…
+            </h3>
+            <p className="text-sm text-muted-foreground max-w-md">
+              Analyzing tender requirements, personnel, PSIRA grades, and equipment
+              to create realistic pricing.
+            </p>
+            <p className="text-xs text-muted-foreground/80 italic">
+              This usually takes 15-30 seconds
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Working…
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ---- Main Component ----
 export function PricingTab() {
+  const { setTab, selectTender } = useDashboardStore();
   const [tenders, setTenders] = useState<TenderOption[]>([]);
   const [selectedTenderId, setSelectedTenderId] = useState<number | null>(null);
   const [versions, setVersions] = useState<PricingVersion[]>([]);
@@ -746,6 +893,8 @@ export function PricingTab() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [copyingId, setCopyingId] = useState<number | null>(null);
 
   const fetchTenders = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -760,6 +909,7 @@ export function PricingTab() {
           title: t.title,
           client_company: t.client_company,
           status: t.status,
+          estimated_value: t.estimated_value ?? null,
         }))
       );
     } catch (e: any) {
@@ -808,8 +958,7 @@ export function PricingTab() {
   }, [versions]);
 
   const totalValue = useMemo(
-    () =>
-      versions.reduce((sum, v) => sum + (v.total || 0), 0),
+    () => versions.reduce((sum, v) => sum + (v.total || 0), 0),
     [versions]
   );
   const latestTotal = useMemo(
@@ -828,11 +977,48 @@ export function PricingTab() {
     }
   };
 
+  const handleCopy = async (version: PricingVersion) => {
+    setCopyingId(version.id);
+    try {
+      const newVersion = await api.copyPricingVersion(version.id);
+      toast.success(
+        `Copied v${version.version_number} → v${newVersion?.version_number ?? "new"}`
+      );
+      if (selectedTenderId !== null) fetchVersions(selectedTenderId);
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to copy pricing version");
+    } finally {
+      setCopyingId(null);
+    }
+  };
+
+  const handleGenerate = async () => {
+    if (selectedTenderId === null) return;
+    setGenerating(true);
+    try {
+      const newVersion = await api.generatePricingSheet(selectedTenderId);
+      toast.success(
+        `AI generated pricing v${newVersion?.version_number ?? "new"}`
+      );
+      fetchVersions(selectedTenderId);
+    } catch (e: any) {
+      toast.error(e?.message || "AI pricing generation failed");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   const handleRefresh = () => {
     fetchTenders(true);
     if (selectedTenderId !== null) {
       fetchVersions(selectedTenderId);
     }
+  };
+
+  const openTenderInTendersTab = () => {
+    if (selectedTenderId === null) return;
+    setTab("tenders");
+    setTimeout(() => selectTender(selectedTenderId), 50);
   };
 
   // ---- Loading state ----
@@ -842,7 +1028,7 @@ export function PricingTab() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-2">
             <Skeleton className="h-8 w-48" />
-            <Skeleton className="h-4 w-64" />
+            <Skeleton className="h-4 w-72" />
           </div>
           <Skeleton className="h-9 w-32" />
         </div>
@@ -882,7 +1068,7 @@ export function PricingTab() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Pricing Tracking</h1>
           <p className="text-sm text-muted-foreground">
-            Build pricing sheets and track revisions
+            Build pricing sheets, track revisions, and compare versions
           </p>
         </div>
         <Alert variant="destructive">
@@ -910,13 +1096,17 @@ export function PricingTab() {
       {/* ---- Page header ---- */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Pricing Tracking</h1>
-          <p className="text-sm text-muted-foreground">
-            Build pricing sheets and track revisions
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+            <Calculator className="h-6 w-6 text-primary" />
+            Pricing Tracking
+          </h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Build pricing sheets, track revisions, and compare versions
           </p>
         </div>
         <Button
           variant="ghost"
+          size="sm"
           onClick={handleRefresh}
           disabled={refreshing}
         >
@@ -929,7 +1119,7 @@ export function PricingTab() {
       <div className="grid gap-2">
         <Label className="flex items-center gap-1.5 text-sm font-medium">
           <Hash className="h-3.5 w-3.5 text-primary" />
-          Select tender
+          Select a tender to view pricing
         </Label>
         {tenders.length === 0 ? (
           <Alert>
@@ -967,8 +1157,8 @@ export function PricingTab() {
           <CardContent>
             <EmptyState
               icon={Calculator}
-              message="Select a tender to view or create pricing versions"
-              hint="Pick a tender from the dropdown above to start tracking pricing revisions."
+              message="Select a tender to view pricing"
+              hint="Pick a tender from the dropdown above to start tracking pricing revisions, generate AI pricing sheets, and compare version history."
             />
           </CardContent>
         </Card>
@@ -978,8 +1168,8 @@ export function PricingTab() {
           {selectedTender && (
             <Card className="border-emerald-200 bg-emerald-50/50 dark:border-emerald-900 dark:bg-emerald-950/20">
               <CardContent>
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 flex-1 space-y-1.5">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-mono text-xs font-semibold text-primary">
                         {selectedTender.reference_number}
@@ -992,18 +1182,34 @@ export function PricingTab() {
                       >
                         {selectedTender.status}
                       </Badge>
+                      <button
+                        type="button"
+                        onClick={openTenderInTendersTab}
+                        className="text-[11px] text-muted-foreground underline-offset-2 hover:underline hover:text-foreground"
+                      >
+                        Open tender →
+                      </button>
                     </div>
                     <div className="text-base font-semibold text-foreground line-clamp-1">
                       {selectedTender.title}
                     </div>
-                    <div className="text-xs text-muted-foreground">
-                      {selectedTender.client_company || "No client"}
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      <span>
+                        Client:{" "}
+                        <span className="text-foreground font-medium">
+                          {selectedTender.client_company || "—"}
+                        </span>
+                      </span>
+                      {selectedTender.estimated_value != null && (
+                        <span>
+                          Est. value:{" "}
+                          <span className="text-foreground font-medium">
+                            {formatCurrency(selectedTender.estimated_value)}
+                          </span>
+                        </span>
+                      )}
                     </div>
                   </div>
-                  <Button onClick={() => setDialogOpen(true)} className="shrink-0">
-                    <Plus className="h-4 w-4" />
-                    New Pricing Version
-                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -1012,27 +1218,59 @@ export function PricingTab() {
           {/* ---- Stats row ---- */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <StatCard
-              icon={Hash}
+              icon={Receipt}
               iconClass="bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
               value={versions.length}
               label="Pricing Versions"
-              sublabel="Total revisions"
+              sublabel="Total revisions tracked"
             />
             <StatCard
-              icon={Receipt}
+              icon={TrendingUp}
               iconClass="bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400"
               value={formatCurrency(latestTotal)}
-              label="Latest Version Total"
-              sublabel="Incl. VAT"
+              label="Latest Total"
+              sublabel="Most recent version (incl. VAT)"
             />
             <StatCard
-              icon={Calculator}
+              icon={DollarSign}
               iconClass="bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
               value={formatCurrency(totalValue)}
-              label="Sum of All Versions"
-              sublabel="Incl. VAT"
+              label="All Versions Total"
+              sublabel="Sum of all versions (incl. VAT)"
             />
           </div>
+
+          {/* ---- Action buttons ---- */}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              onClick={handleGenerate}
+              disabled={generating}
+              className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white"
+            >
+              {generating ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Generating…
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  AI Generate Pricing
+                </>
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setDialogOpen(true)}
+              disabled={generating}
+            >
+              <Plus className="h-4 w-4" />
+              New Pricing Version
+            </Button>
+          </div>
+
+          {/* ---- AI generating state ---- */}
+          {generating && <AIGeneratingCard />}
 
           {/* ---- Versions list ---- */}
           {loadingVersions ? (
@@ -1051,19 +1289,46 @@ export function PricingTab() {
             <Card className="border-dashed">
               <CardContent>
                 <EmptyState
-                  icon={Receipt}
+                  icon={Calculator}
                   message="No pricing versions yet"
-                  hint="Click &quot;New Pricing Version&quot; to build your first pricing sheet for this tender."
-                />
+                  hint="Generate an AI pricing draft based on the tender's requirements, or manually create your first pricing sheet."
+                >
+                  <Button
+                    onClick={handleGenerate}
+                    disabled={generating}
+                    className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    AI Generate Pricing
+                  </Button>
+                  <Button variant="outline" onClick={() => setDialogOpen(true)}>
+                    <Plus className="h-4 w-4" />
+                    New Pricing Version
+                  </Button>
+                </EmptyState>
               </CardContent>
             </Card>
           ) : (
             <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  <FileText className="h-5 w-5 text-primary" />
+                  Version History
+                  <Badge variant="outline" className="text-xs">
+                    {versions.length}
+                  </Badge>
+                </h2>
+                <span className="text-xs text-muted-foreground">
+                  Sorted by version (latest first)
+                </span>
+              </div>
               {versions.map((v, idx) => (
                 <VersionCard
                   key={v.id}
                   version={v}
                   onDelete={handleDelete}
+                  onCopy={handleCopy}
+                  copyingId={copyingId}
                   defaultOpen={idx === 0}
                 />
               ))}

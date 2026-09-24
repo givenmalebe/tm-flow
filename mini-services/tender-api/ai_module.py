@@ -898,3 +898,94 @@ DOCUMENT_TYPE_INFO = {
 }
 
 
+
+
+# ---- AI Pricing Sheet Generation ----
+
+PRICING_SYSTEM = """You are a South African tender pricing analyst.
+You generate tender pricing sheets based on the tender requirements and standard industry rates.
+You MUST respond with ONLY a valid JSON object (no markdown, no code fences).
+
+Schema:
+{
+  "line_items": [
+    {
+      "category": one of ["Labour", "Equipment", "Consumables", "Transport", "Other"],
+      "description": string (e.g. "Security Guard Grade C - Day shift"),
+      "quantity": number,
+      "rate": number (ZAR, monthly or hourly rate),
+      "total": number (quantity * rate)
+    }
+  ],
+  "pricing_notes": string (notes about the pricing approach, assumptions, exclusions),
+  "vat_rate": number (0.15 for 15%)
+}
+
+Rules:
+- For security tenders: include labour items for each PSIRA grade required (Grade A, B, C, D, E) with appropriate quantities based on the number of guards/personnel required and the contract period.
+- Use realistic South African security industry rates (2024/2025):
+  * Grade C guard: R6,000-R8,000/month
+  * Grade B guard: R7,000-R9,000/month
+  * Grade A guard: R8,000-R12,000/month
+  * Site supervisor: R10,000-R15,000/month
+  * Project manager: R20,000-R35,000/month
+- Include equipment items if the tender requires equipment (radios, uniforms, torches, etc.)
+- Include transport costs if site locations are mentioned.
+- Calculate totals correctly: total = quantity * rate for each line.
+- Set vat_rate to 0.15 (15% standard VAT in South Africa).
+- In pricing_notes, explain your assumptions (e.g. "Rates based on 12-month contract, PSIRA-compliant guards, includes basic uniform but excludes firearms").
+- If the tender mentions a specific pricing format or schedule, follow it."""
+
+
+def generate_pricing_sheet(tender: Dict[str, Any], extracted: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Generate a pricing sheet draft using AI based on the tender's extracted requirements.
+    Returns { line_items, pricing_notes, vat_rate }.
+    """
+    prompt = f"""Generate a pricing sheet for the following tender.
+
+TENDER DETAILS:
+- Reference: {tender.get('reference_number', 'N/A')}
+- Title: {tender.get('title', 'N/A')}
+- Client: {tender.get('client_company', 'N/A')}
+- Contract Period: {tender.get('contract_period', 'N/A')}
+- Estimated Value: {tender.get('estimated_value', 'N/A')}
+- Location: {tender.get('location_site', 'N/A')}
+
+AI-EXTRACTED TENDER INFO:
+- Scope: {extracted.get('scope_of_work', 'N/A')}
+- Personnel required: {extracted.get('number_of_personnel_guards', 'N/A')}
+- PSIRA grades: {extracted.get('required_psira_grades', [])}
+- Required equipment: {extracted.get('required_equipment', [])}
+- Pricing requirements: {extracted.get('pricing_requirements', [])}
+- Site locations: {extracted.get('site_locations', [])}
+
+Generate a complete pricing sheet with realistic line items. Return ONLY the JSON object."""
+    try:
+        result = _run_zai_chat(prompt, system=PRICING_SYSTEM)
+        result = result.strip()
+        if result.startswith("```"):
+            result = result.split("\n", 1)[1] if "\n" in result else result[3:]
+            if result.endswith("```"):
+                result = result[:-3]
+            result = result.strip()
+        if result.startswith("json"):
+            result = result[4:].strip()
+        first = result.find("{")
+        last = result.rfind("}")
+        if first >= 0 and last > first:
+            result = result[first:last + 1]
+        data = json.loads(result)
+        # Ensure totals are calculated
+        for li in data.get("line_items", []):
+            if "total" not in li or li["total"] == 0:
+                li["total"] = round(float(li.get("quantity", 0)) * float(li.get("rate", 0)), 2)
+        if "vat_rate" not in data:
+            data["vat_rate"] = 0.15
+        return data
+    except (json.JSONDecodeError, RuntimeError, Exception):
+        return {
+            "line_items": [],
+            "pricing_notes": "AI pricing generation failed. Please add line items manually.",
+            "vat_rate": 0.15,
+        }

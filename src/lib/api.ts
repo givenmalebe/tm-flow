@@ -273,6 +273,14 @@ export const api = {
     return request<any>(`/tenders/${tenderId}/pricing`, { method: "POST", body: payload });
   },
 
+  async generatePricingSheet(tenderId: number) {
+    return request<any>(`/tenders/${tenderId}/pricing/generate`, { method: "POST" });
+  },
+
+  async copyPricingVersion(versionId: number) {
+    return request<any>(`/pricing/${versionId}/copy`, { method: "POST" });
+  },
+
   async deletePricing(versionId: number) {
     return request<{ deleted: boolean }>(`/pricing/${versionId}`, { method: "DELETE" });
   },

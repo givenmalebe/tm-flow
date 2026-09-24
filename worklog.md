@@ -812,3 +812,87 @@ Stage Summary:
 - Color coding: emerald (100% ready), amber (≥50% in progress), rose (<50% needs work)
 - One-click toggle: click any item to mark it Complete ✓ or Outstanding
 - Matches the user's example format: items with ✓/❌ status and a clear percentage
+
+---
+Task ID: 29
+Agent: frontend-styling-expert
+Task: Rebuild pricing-tab with AI generation, copy-version, version history
+
+Work Log:
+- Read worklog.md (Tasks 0-5), api.ts (pricing methods: listPricing, createPricing, generatePricingSheet, copyPricingVersion, deletePricing), dashboard-store.ts (useDashboardStore + formatCurrency/formatDate/formatDateTime/statusColor helpers), deadlines-tab.tsx (visual reference for stat cards + emerald theme), and the existing pricing-tab.tsx (1088 lines, no AI generate, no copy-version)
+- Audited available shadcn primitives: confirmed Separator (used for action button divider) and all other required components present in src/components/ui/
+- Rewrote /home/z/my-project/src/components/dashboard/tabs/pricing-tab.tsx entirely (now ~1352 lines) with the following enhancements:
+  - Added AI Generate Pricing action (Sparkles icon, gradient emerald→teal primary button) calling api.generatePricingSheet(tenderId) with dedicated AIGeneratingCard component showing pulsing Sparkles + ping animation, "AI is generating a pricing sheet…", "Analyzing tender requirements, personnel, PSIRA grades, and equipment…", and "This usually takes 15-30 seconds" hint
+  - Added "Copy to New Version" button per version card (Copy icon, outline) calling api.copyPricingVersion(versionId) with per-row loading state and toast showing old→new version number
+  - Added category subtotals: new CategorySubtotals component groups line items by category (Labour/Equipment/Consumables/Transport/Other) and renders a per-category subtotal chip strip below each version's line items table; only categories with non-zero totals are shown
+  - Added CategoryBadge component with distinct colour per category (Labour=emerald, Equipment=teal, Consumables=amber, Transport=cyan, Other=violet) used both in version tables and subtotal strip
+  - Version History section header now shows count badge + "Sorted by version (latest first)" hint; versions remain sorted by version_number DESC (latest first)
+  - Version card header made clickable (collapsible) and now shows line-item count + total in the collapsed summary for at-a-glance scanning
+  - Tender info banner updated: now shows reference, status badge, "Open tender →" link (uses setTab("tenders") + selectTender), client, and estimated_value (formatCurrency); New Pricing Version button moved out into a dedicated Action buttons row alongside AI Generate
+  - Stat cards relabelled: "Pricing Versions" (Receipt icon, emerald), "Latest Total" (TrendingUp, amber), "All Versions Total" (DollarSign, emerald) — matching spec wording exactly
+  - Empty states: no-tender selected shows Calculator + "Select a tender to view pricing"; no-versions shows Calculator + "No pricing versions yet" with both AI Generate and New Pricing Version buttons inline (EmptyState now accepts children)
+  - Header subtitle updated to "Build pricing sheets, track revisions, and compare versions"
+  - Retained all existing features: line-item editor dialog with live totals (Subtotal, VAT 15%, Total in emerald), AlertDialog confirm for delete, skeletons for loading, error state with retry
+- Verified with `bun run lint` — clean, zero errors
+
+Stage Summary:
+- Artifact: /home/z/my-project/src/components/dashboard/tabs/pricing-tab.tsx (~1352 lines, single "use client" file)
+- New API integrations wired: api.generatePricingSheet (AI draft), api.copyPricingVersion (revision cloning)
+- Emerald theme preserved throughout (gradient buttons, emerald total card, emerald status accents); no blue/indigo introduced
+- Sub-components added: CategoryBadge, CategorySubtotals, AIGeneratingCard; EmptyState extended with children prop for action buttons
+- Fully responsive (sm/lg breakpoints on stats grid, dialog overflow-y-auto, table scrollbar-thin)
+- Ready to be exercised end-to-end once backend pricing endpoints are populated with AI generation logic
+
+---
+Task ID: 30
+Agent: Main Orchestrator
+Task: Build Pricing Tracking — AI pricing sheet generator, version history, all required fields
+
+Work Log:
+- Added generate_pricing_sheet() to ai_module.py — AI generates a pricing sheet based on tender requirements:
+  * Uses PRICING_SYSTEM prompt with realistic SA security industry rates (Grade C: R6-8K, Grade B: R7-9K, Grade A: R8-12K, etc.)
+  * Generates line items across Labour, Equipment, Consumables, Transport, Other categories
+  * Includes pricing notes explaining assumptions
+  * Sets VAT rate to 0.15 (15%)
+- Added 2 new backend endpoints:
+  * POST /api/tenders/{id}/pricing/generate — AI generates a pricing draft, saves as new version
+  * POST /api/pricing/{id}/copy — copies an existing version to a new version (for revisions)
+- Added frontend API methods: generatePricingSheet, copyPricingVersion
+- Delegated rebuild of pricing-tab.tsx to subagent (Task 29) — 1352 lines with:
+  * Tender selector
+  * 3 stat cards: Pricing Versions count, Latest Total, All Versions Total
+  * "AI Generate Pricing" button (creates draft from tender requirements)
+  * "New Pricing Version" button (manual editor dialog)
+  * Version history sorted by version_number DESC (latest first)
+  * Each version card: line items table with Category/Description/Qty/Rate/Total, category subtotals, Subtotal/VAT 15%/Total, notes, Copy to New Version + Delete buttons
+  * New Pricing Version dialog with live line items editor and real-time totals
+  * AI generating loading state
+  * Empty states
+- Verified with API test:
+  * AI generated pricing sheet for E137: 11 line items, R672,000 subtotal, R100,800 VAT, R772,800 total
+  * Line items included: Grade C/B/A guards (day/night shifts), supervisors, PM, uniforms, equipment, training
+  * Pricing notes explained the assumptions (45 guards, 36-month contract, 15 facilities)
+  * Copy version created v2 from v1 successfully
+- Verified with Agent Browser:
+  * Pricing tab shows tender selector, stat cards, action buttons
+  * Selected E137 → saw 2 versions (AI Draft v1 + v2 copy)
+  * Version cards show line items table, category subtotals, SUBTOTAL/VAT/TOTAL
+  * No errors, lint clean
+
+Stage Summary:
+- Pricing Tracking fully operational with all required fields:
+  1. Pricing schedule (line items with category, description, qty, rate, total)
+  2. Labour requirements (Labour category with guard grades and rates)
+  3. Number of personnel (quantities based on tender requirements)
+  4. Rates (ZAR per month for each role)
+  5. Equipment (Equipment category)
+  6. Consumables (Consumables category)
+  7. Transport (Transport category)
+  8. Other costs (Other category)
+  9. VAT (15% automatically calculated)
+  10. Total tender price (subtotal + VAT)
+  11. Pricing notes (notes field per version)
+  12. Different pricing versions (version history with labels)
+- Multiple pricing revisions saved as version history (sorted latest first)
+- AI pricing sheet generator creates realistic drafts based on tender requirements
+- Copy version feature for creating revisions from existing versions

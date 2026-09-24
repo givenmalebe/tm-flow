@@ -884,22 +884,420 @@ Format as a clean, professional table of contents."""
         return f"Document generation failed: {e}"
 
 
+# ---- Additional document generators ----
+
+def generate_cover_letter(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+    header = _build_company_header(company)
+    prompt = f"""Generate a formal COVER LETTER for the following tender submission.
+
+COMPANY PROFILE:
+{header}
+Director: {company.get('director_name', '[Director Name]')}, {company.get('director_title', 'Director')}
+
+TENDER DETAILS:
+- Reference: {tender.get('reference_number', 'N/A')}
+- Title: {tender.get('title', 'N/A')}
+- Client: {tender.get('client_company', 'N/A')}
+- Closing Date: {tender.get('closing_date', 'N/A')}
+
+The Cover Letter must include:
+1. INTRODUCTION AND PURPOSE OF SUBMISSION
+   - Formal introduction of the company
+   - Statement of intent to submit a bid for this tender
+   - Reference to the tender number and title
+2. CONFIRMATION OF UNDERSTANDING OF TENDER REQUIREMENTS
+   - Demonstrate understanding of the scope of work
+   - Acknowledge all mandatory requirements and conditions
+   - Confirm ability to meet all submission deadlines
+3. SUMMARY OF KEY STRENGTHS AND QUALIFICATIONS
+   - Relevant experience in similar contracts
+   - Key personnel qualifications (PSIRA grades if applicable)
+   - Track record of successful service delivery
+   - B-BBEE status and compliance credentials
+4. EXPRESSION OF COMMITMENT TO QUALITY SERVICE DELIVERY
+   - Commitment to meeting and exceeding service standards
+   - Dedication to client satisfaction
+   - Willingness to adapt to client requirements
+5. CONTACT INFORMATION FOR FOLLOW-UP QUERIES
+   - Primary contact person and details
+   - Availability for clarifications or presentations
+
+Generate at least 800 words. Be formal, professional, and persuasive."""
+    try:
+        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=4000)
+    except RuntimeError as e:
+        return f"Document generation failed: {e}"
+
+
+def generate_company_profile(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+    header = _build_company_header(company)
+    prompt = f"""Generate a comprehensive COMPANY PROFILE document for the following tender submission.
+
+COMPANY PROFILE:
+{header}
+
+TENDER DETAILS:
+- Reference: {tender.get('reference_number', 'N/A')}
+- Title: {tender.get('title', 'N/A')}
+- Client: {tender.get('client_company', 'N/A')}
+- Scope: {extracted.get('scope_of_work', 'N/A')}
+
+The Company Profile must include:
+1. COMPANY OVERVIEW AND HISTORY
+   - Founding date and background
+   - Growth trajectory and milestones
+   - Current operational scale
+2. MISSION, VISION, AND VALUES
+   - Mission statement
+   - Vision for the future
+   - Core values (integrity, excellence, etc.)
+3. CORE BUSINESS ACTIVITIES
+   - Primary services offered
+   - Specialized capabilities
+   - Industry sectors served
+4. KEY DIFFERENTIATORS AND COMPETITIVE ADVANTAGES
+   - What sets the company apart
+   - Unique service offerings
+   - Technology and innovation
+5. GEOGRAPHIC COVERAGE AND SERVICE AREAS
+   - Regions of operation
+   - Service delivery capabilities
+   - Response times
+6. COMPANY ACHIEVEMENTS AND CERTIFICATIONS
+   - PSIRA registration (if security company)
+   - B-BBEE status
+   - ISO certifications
+   - Industry awards and recognition
+
+Generate at least 1500 words. Be professional and detailed."""
+    try:
+        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=5000)
+    except RuntimeError as e:
+        return f"Document generation failed: {e}"
+
+
+def generate_compliance_docs(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+    header = _build_company_header(company)
+    prompt = f"""Generate a COMPLIANCE DOCUMENTS summary/cover sheet for the following tender submission.
+
+COMPANY PROFILE:
+{header}
+
+TENDER DETAILS:
+- Reference: {tender.get('reference_number', 'N/A')}
+- Client: {tender.get('client_company', 'N/A')}
+
+AI-EXTRACTED COMPULSORY DOCUMENTS:
+{json.dumps(extracted.get('compulsory_documents', []), default=str)}
+
+The Compliance Documents section must include a formal cover sheet listing:
+1. CIPC REGISTRATION CERTIFICATE
+   - Company registration number
+   - Confirmation of current registration status
+2. SARS TAX COMPLIANCE CERTIFICATE
+   - Tax reference number
+   - Confirmation of tax compliance status
+3. B-BBEE CERTIFICATE AND AFFIDAVIT
+   - B-BBEE level
+   - Certificate validity period
+4. PSIRA REGISTRATION CERTIFICATES FOR ALL SECURITY PERSONNEL
+   - PSIRA registration number
+   - Confirmation of grades (if applicable: {extracted.get('required_psira_grades', [])})
+5. COIDA REGISTRATION CERTIFICATE
+   - Registration number
+   - Confirmation of good standing
+6. VALID PUBLIC LIABILITY INSURANCE CERTIFICATE
+   - Insurance provider
+   - Coverage amount and validity
+7. WORKER'S COMPENSATION REGISTRATION
+   - Registration details
+8. PROOF OF VAT REGISTRATION
+   - VAT number
+9. SIGNED DECLARATION OF COMPLIANCE WITH ALL REGULATORY REQUIREMENTS
+   - Formal declaration text
+   - Director's signature block
+
+For each item, provide a formal declaration that the document is attached and valid.
+Generate at least 1000 words."""
+    try:
+        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=4000)
+    except RuntimeError as e:
+        return f"Document generation failed: {e}"
+
+
+def generate_organogram(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+    header = _build_company_header(company)
+    prompt = f"""Generate an ORGANOGRAM document for the following tender.
+
+COMPANY PROFILE:
+{header}
+
+TENDER DETAILS:
+- Reference: {tender.get('reference_number', 'N/A')}
+- Client: {tender.get('client_company', 'N/A')}
+- Personnel required: {extracted.get('number_of_personnel_guards', 'N/A')}
+- PSIRA grades: {extracted.get('required_psira_grades', [])}
+
+The Organogram must include:
+1. ORGANIZATIONAL STRUCTURE
+   - Visual description of the hierarchy (describe in text since this is a text document)
+   - Top-level management
+   - Middle management / supervisors
+   - Operational staff
+2. KEY PERSONNEL ROLES AND RESPONSIBILITIES
+   2.1 Management Team
+   - Project Manager / Director
+   - Operations Manager
+   - Compliance Officer
+   2.2 Supervisory Staff
+   - Site Supervisors (per location if applicable)
+   - Shift Leaders
+   2.3 Security Personnel / Operational Staff
+   - Guards / Officers (by grade if applicable)
+   - Control Room Operators
+   - Response Team
+3. REPORTING LINES AND COMMUNICATION CHANNELS
+   - Chain of command
+   - Escalation procedures
+   - Communication flow between levels
+4. STAFFING DEPLOYMENT MODEL
+   - Shift patterns
+   - Staff allocation per site
+   - Relief and backup arrangements
+
+Generate at least 1200 words. Be specific to this tender's personnel requirements."""
+    try:
+        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=4000)
+    except RuntimeError as e:
+        return f"Document generation failed: {e}"
+
+
+def generate_pricing_schedule(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+    header = _build_company_header(company)
+    prompt = f"""Generate a PRICING SCHEDULE document for the following tender.
+
+COMPANY PROFILE:
+{header}
+
+TENDER DETAILS:
+- Reference: {tender.get('reference_number', 'N/A')}
+- Client: {tender.get('client_company', 'N/A')}
+- Contract Period: {tender.get('contract_period', 'N/A')}
+- Estimated Value: {tender.get('estimated_value', 'N/A')}
+
+AI-EXTRACTED PRICING REQUIREMENTS:
+{json.dumps(extracted.get('pricing_requirements', []), default=str)}
+Personnel: {extracted.get('number_of_personnel_guards', 'N/A')}
+PSIRA grades: {extracted.get('required_psira_grades', [])}
+Equipment: {extracted.get('required_equipment', [])}
+
+The Pricing Schedule must include:
+1. DETAILED COST BREAKDOWN
+   - Labour costs (by role/grade with monthly rates)
+   - Equipment costs
+   - Consumables
+   - Transport
+   - Overheads
+   - Profit margin
+2. PRICING STRUCTURE PER FACILITY/SHIFT
+   - Day shift rates
+   - Night shift rates
+   - Weekend rates (if applicable)
+   - Holiday rates
+3. ADDITIONAL SERVICE COSTS
+   - Optional services
+   - Ad-hoc services
+4. PAYMENT TERMS AND CONDITIONS
+   - Payment cycle (monthly in arrears, etc.)
+   - Invoice requirements
+   - Late payment terms
+5. PRICE ADJUSTMENT MECHANISMS
+   - Annual escalation clauses
+   - CPI-linked adjustments
+   - Fuel price adjustments (if transport involved)
+6. VALUE-ADDED SERVICES
+   - Included at no extra cost
+   - Optional premium services
+
+Present the pricing in clear table format (using text-based tables).
+Generate at least 1500 words."""
+    try:
+        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=5000)
+    except RuntimeError as e:
+        return f"Document generation failed: {e}"
+
+
+def generate_references(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+    header = _build_company_header(company)
+    prompt = f"""Generate a REFERENCES document for the following tender.
+
+COMPANY PROFILE:
+{header}
+
+TENDER DETAILS:
+- Reference: {tender.get('reference_number', 'N/A')}
+- Client: {tender.get('client_company', 'N/A')}
+- Scope: {extracted.get('scope_of_work', 'N/A')}
+
+The References document must include:
+1. CLIENT REFERENCE 1: [Client Name], [Project Details]
+   - Client name and contact information
+   - Contract value and duration
+   - Scope of services provided
+   - Key achievements and performance metrics
+   - Client testimonial
+2. CLIENT REFERENCE 2: [Client Name], [Project Details]
+   - Same structure as above
+3. CLIENT REFERENCE 3: [Client Name], [Project Details]
+   - Same structure as above
+4. CASE STUDIES OF SIMILAR PROJECTS
+   - Project overview
+   - Challenges and solutions
+   - Results and outcomes
+   - Lessons learned
+5. TESTIMONIALS FROM EXISTING CLIENTS
+   - Direct quotes from clients
+   - Specific praise for service quality
+   - Recommendations
+
+Use placeholder names where real client details are not available, but make them realistic for the South African security/services industry.
+Generate at least 1200 words."""
+    try:
+        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=4000)
+    except RuntimeError as e:
+        return f"Document generation failed: {e}"
+
+
+def generate_signed_declarations(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+    header = _build_company_header(company)
+    director = company.get('director_name', '[Director Name]')
+    director_title = company.get('director_title', 'Director')
+    prompt = f"""Generate a SIGNED DECLARATIONS document for the following tender.
+
+COMPANY PROFILE:
+{header}
+Director: {director}, {director_title}
+
+TENDER DETAILS:
+- Reference: {tender.get('reference_number', 'N/A')}
+- Title: {tender.get('title', 'N/A')}
+- Client: {tender.get('client_company', 'N/A')}
+
+The Signed Declarations must include:
+1. DECLARATION OF ACCURACY OF INFORMATION PROVIDED
+   - Formal statement that all information in the submission is true and accurate
+   - Acknowledgment of consequences of false information
+   - Signature block
+2. DECLARATION OF COMPLIANCE WITH TENDER REQUIREMENTS
+   - Confirmation that all mandatory requirements are met
+   - Acknowledgment of all terms and conditions
+   - Signature block
+3. DECLARATION OF NO CONFLICT OF INTEREST
+   - Statement of no existing conflict of interest
+   - Disclosure of any potential conflicts
+   - Signature block
+4. DECLARATION OF UNDERSTANDING OF CONTRACTUAL TERMS
+   - Confirmation of understanding of contract period, payment terms, etc.
+   - Acknowledgment of penalties for non-performance
+   - Signature block
+5. DIRECTOR'S AUTHORIZATION OF SUBMISSION
+   - Formal authorization by the director
+   - Confirmation of authority to submit
+   - Director's signature block with date
+
+Each declaration should be a formal, legally-worded statement with a signature block.
+Generate at least 1000 words."""
+    try:
+        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=4000)
+    except RuntimeError as e:
+        return f"Document generation failed: {e}"
+
+
+def generate_appendices(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+    header = _build_company_header(company)
+    prompt = f"""Generate an APPENDICES document for the following tender submission.
+
+COMPANY PROFILE:
+{header}
+
+TENDER DETAILS:
+- Reference: {tender.get('reference_number', 'N/A')}
+- Client: {tender.get('client_company', 'N/A')}
+- Scope: {extracted.get('scope_of_work', 'N/A')}
+- Personnel: {extracted.get('number_of_personnel_guards', 'N/A')}
+- PSIRA grades: {extracted.get('required_psira_grades', [])}
+- Equipment: {extracted.get('required_equipment', [])}
+
+The Appendices must include:
+1. ADDITIONAL COMPANY DOCUMENTATION
+   - List of additional supporting documents attached
+   - Description of each document's relevance
+2. DETAILED TRAINING PROGRAMS
+   - Induction training curriculum
+   - On-the-job training schedule
+   - Refresher training program
+   - PSIRA-required training modules
+   - Specialized training (fire safety, first aid, etc.)
+3. SAMPLE REPORTS AND FORMS
+   - Daily occurrence report template
+   - Incident report template
+   - Site inspection checklist
+   - Shift handover form
+   - Visitor register template
+4. EQUIPMENT SPECIFICATIONS
+   - Communication equipment (radios, phones)
+   - Security equipment (if applicable)
+   - Uniform specifications
+   - Patrol equipment
+5. TECHNICAL SPECIFICATIONS
+   - Control room specifications
+   - Monitoring systems
+   - Reporting software
+6. SUPPORTING CERTIFICATES AND DOCUMENTATION
+   - List of all certificates attached
+   - Training certificates
+   - Compliance certificates
+   - Insurance certificates
+
+Generate at least 1500 words. Be specific to this tender's requirements."""
+    try:
+        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=5000)
+    except RuntimeError as e:
+        return f"Document generation failed: {e}"
+
+
 # Map doc types to their generator functions
 DOCUMENT_GENERATORS = {
+    "cover_letter": generate_cover_letter,
+    "company_profile": generate_company_profile,
+    "compliance_docs": generate_compliance_docs,
+    "technical_proposal": generate_technical_proposal,
     "method_statement": generate_method_statement,
     "implementation_plan": generate_implementation_plan,
-    "technical_proposal": generate_technical_proposal,
     "risk_assessment": generate_risk_assessment,
     "sops": generate_sops,
+    "organogram": generate_organogram,
+    "pricing_schedule": generate_pricing_schedule,
+    "references": generate_references,
+    "signed_declarations": generate_signed_declarations,
+    "appendices": generate_appendices,
     "table_of_contents": generate_table_of_contents,
 }
 
 DOCUMENT_TYPE_INFO = {
+    "cover_letter": {"title": "Cover Letter", "description": "Formal introduction and purpose of submission"},
+    "company_profile": {"title": "Company Profile", "description": "Company overview, history, mission and capabilities"},
+    "compliance_docs": {"title": "Compliance Documents", "description": "Cover sheet for CIPC, SARS, B-BBEE, PSIRA, COIDA and declarations"},
+    "technical_proposal": {"title": "Technical Proposal", "description": "Addresses functionality requirements to maximize technical score"},
     "method_statement": {"title": "Method Statement", "description": "How the company will deliver the services"},
     "implementation_plan": {"title": "Implementation Plan", "description": "Step-by-step plan for implementing the contract"},
-    "technical_proposal": {"title": "Technical Proposal", "description": "Addresses functionality requirements to maximize technical score"},
     "risk_assessment": {"title": "Risk Assessment", "description": "Risk identification, analysis and mitigation"},
     "sops": {"title": "Standard Operating Procedures", "description": "Daily operational procedures for staff"},
+    "organogram": {"title": "Organogram", "description": "Organizational structure, roles and reporting lines"},
+    "pricing_schedule": {"title": "Pricing Schedule", "description": "Detailed cost breakdown and pricing structure"},
+    "references": {"title": "References", "description": "Client references, case studies and testimonials"},
+    "signed_declarations": {"title": "Signed Declarations", "description": "Formal declarations of compliance and accuracy"},
+    "appendices": {"title": "Appendices", "description": "Training programs, sample forms, equipment specs"},
     "table_of_contents": {"title": "Table of Contents", "description": "Full submission package table of contents"},
 }
 

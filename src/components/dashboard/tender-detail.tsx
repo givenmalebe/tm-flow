@@ -2633,12 +2633,20 @@ function Field2({ label, children }: { label: string; children: React.ReactNode 
 
 // ============== Generated Documents Section ==============
 const DOC_TYPES = [
-  { key: "table_of_contents", title: "Table of Contents", description: "Full submission package TOC", icon: FileSignature },
+  { key: "cover_letter", title: "Cover Letter", description: "Introduction and purpose of submission", icon: FileSignature },
+  { key: "company_profile", title: "Company Profile", description: "Company overview, history and capabilities", icon: Building2 },
+  { key: "compliance_docs", title: "Compliance Documents", description: "CIPC, SARS, B-BBEE, PSIRA, COIDA cover sheet", icon: Shield },
   { key: "technical_proposal", title: "Technical Proposal", description: "Addresses functionality requirements", icon: FileCheck },
   { key: "method_statement", title: "Method Statement", description: "How services will be delivered", icon: FileText },
   { key: "implementation_plan", title: "Implementation Plan", description: "Step-by-step rollout plan", icon: FileText },
   { key: "risk_assessment", title: "Risk Assessment", description: "Risk identification & mitigation", icon: FileText },
-  { key: "sops", title: "Standard Operating Procedures", description: "Daily operational procedures", icon: FileText },
+  { key: "sops", title: "Standard Operating Procedures", description: "Daily operational procedures", icon: ListChecks },
+  { key: "organogram", title: "Organogram", description: "Organizational structure and reporting lines", icon: Users },
+  { key: "pricing_schedule", title: "Pricing Schedule", description: "Detailed cost breakdown and pricing", icon: Calculator },
+  { key: "references", title: "References", description: "Client references and case studies", icon: User },
+  { key: "signed_declarations", title: "Signed Declarations", description: "Formal declarations of compliance", icon: FileCheck },
+  { key: "appendices", title: "Appendices", description: "Training programs, forms, equipment specs", icon: FileStack },
+  { key: "table_of_contents", title: "Table of Contents", description: "Full submission package TOC", icon: FileSignature },
 ];
 
 function GeneratedDocumentsSection({ tender, onChanged }: { tender: any; onChanged: () => void }) {

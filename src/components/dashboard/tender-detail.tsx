@@ -2632,32 +2632,59 @@ function Field2({ label, children }: { label: string; children: React.ReactNode 
 }
 
 // ============== Generated Documents Section ==============
-const DOC_TYPES = [
-  { key: "cover_letter", title: "Cover Letter", description: "Introduction and purpose of submission", icon: FileSignature },
-  { key: "company_profile", title: "Company Profile", description: "Company overview, history and capabilities", icon: Building2 },
-  { key: "compliance_docs", title: "Compliance Documents", description: "CIPC, SARS, B-BBEE, PSIRA, COIDA cover sheet", icon: Shield },
-  { key: "technical_proposal", title: "Technical Proposal", description: "Addresses functionality requirements", icon: FileCheck },
-  { key: "method_statement", title: "Method Statement", description: "How services will be delivered", icon: FileText },
-  { key: "implementation_plan", title: "Implementation Plan", description: "Step-by-step rollout plan", icon: FileText },
-  { key: "risk_assessment", title: "Risk Assessment", description: "Risk identification & mitigation", icon: FileText },
-  { key: "sops", title: "Standard Operating Procedures", description: "Daily operational procedures", icon: ListChecks },
-  { key: "organogram", title: "Organogram", description: "Organizational structure and reporting lines", icon: Users },
-  { key: "pricing_schedule", title: "Pricing Schedule", description: "Detailed cost breakdown and pricing", icon: Calculator },
-  { key: "references", title: "References", description: "Client references and case studies", icon: User },
-  { key: "signed_declarations", title: "Signed Declarations", description: "Formal declarations of compliance", icon: FileCheck },
-  { key: "appendices", title: "Appendices", description: "Training programs, forms, equipment specs", icon: FileStack },
-  { key: "table_of_contents", title: "Table of Contents", description: "Full submission package TOC", icon: FileSignature },
-];
+const DOC_ICON_MAP: Record<string, React.ElementType> = {
+  cover_letter: FileSignature,
+  company_profile: Building2,
+  compliance_docs: Shield,
+  technical_proposal: FileCheck,
+  method_statement: FileText,
+  implementation_plan: FileText,
+  risk_assessment: AlertTriangle,
+  sops: ListChecks,
+  organogram: Users,
+  pricing_schedule: Calculator,
+  references: User,
+  signed_declarations: FileCheck,
+  appendices: FileStack,
+  table_of_contents: FileSignature,
+};
+
+const PRIORITY_CONFIG: Record<string, { label: string; color: string; order: number }> = {
+  essential: { label: "Essential", color: "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950 dark:text-rose-300", order: 0 },
+  recommended: { label: "Recommended", color: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300", order: 1 },
+  optional: { label: "Optional", color: "bg-muted text-muted-foreground border-border", order: 2 },
+};
 
 function GeneratedDocumentsSection({ tender, onChanged }: { tender: any; onChanged: () => void }) {
   const [generated, setGenerated] = useState<any[]>(tender.generated_documents || []);
   const [generating, setGenerating] = useState<string | null>(null);
   const [viewing, setViewing] = useState<any | null>(null);
   const [copied, setCopied] = useState(false);
+  const [smartDocs, setSmartDocs] = useState<any[]>([]);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzed, setAnalyzed] = useState(false);
 
   useEffect(() => {
     setGenerated(tender.generated_documents || []);
   }, [tender.generated_documents]);
+
+  // Run smart analysis on mount
+  useEffect(() => {
+    setAnalyzing(true);
+    api.smartAnalyzeDocuments(tender.id).then((data) => {
+      setSmartDocs(data.required || []);
+      setAnalyzed(data.analyzed);
+    }).catch(() => {
+      // Fallback: use all doc types
+      setSmartDocs(Object.entries(DOC_ICON_MAP).map(([key, _]) => ({
+        doc_type: key,
+        title: key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+        description: "",
+        reason: "Available for generation",
+        priority: "recommended",
+      })));
+    }).finally(() => setAnalyzing(false));
+  }, [tender.id]);
 
   const handleGenerate = async (docType: string) => {
     setGenerating(docType);
@@ -2714,7 +2741,114 @@ function GeneratedDocumentsSection({ tender, onChanged }: { tender: any; onChang
     }
   };
 
+  const handleReanalyze = async () => {
+    setAnalyzing(true);
+    try {
+      const data = await api.smartAnalyzeDocuments(tender.id);
+      setSmartDocs(data.required || []);
+      setAnalyzed(data.analyzed);
+      toast.success("AI re-analyzed required documents");
+    } catch (e: any) {
+      toast.error(e.message || "Analysis failed");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
   const getGenerated = (docType: string) => generated.find((d) => d.doc_type === docType);
+
+  // Sort smart docs by priority
+  const sortedDocs = [...smartDocs].sort((a, b) => {
+    const pa = PRIORITY_CONFIG[a.priority]?.order ?? 2;
+    const pb = PRIORITY_CONFIG[b.priority]?.order ?? 2;
+    return pa - pb;
+  });
+
+  // Group by priority
+  const essential = sortedDocs.filter((d) => d.priority === "essential");
+  const recommended = sortedDocs.filter((d) => d.priority === "recommended");
+  const optional = sortedDocs.filter((d) => d.priority === "optional");
+
+  const renderDocCard = (doc: any) => {
+    const Icon = DOC_ICON_MAP[doc.doc_type] || FileText;
+    const existing = getGenerated(doc.doc_type);
+    const isGenerating = generating === doc.doc_type;
+    return (
+      <Card key={doc.doc_type} className={cn("transition-all", existing && "border-emerald-300 dark:border-emerald-800")}>
+        <CardContent className="p-4">
+          <div className="flex items-start gap-2 mb-2">
+            <div className={cn(
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
+              existing ? "bg-emerald-100 dark:bg-emerald-950" : "bg-primary/10"
+            )}>
+              {existing ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <Icon className="h-4 w-4 text-primary" />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="font-medium text-sm">{doc.title}</div>
+              <div className="text-xs text-muted-foreground">{doc.description}</div>
+            </div>
+          </div>
+          {/* AI reason */}
+          {doc.reason && (
+            <div className="text-xs text-muted-foreground bg-muted/30 rounded-lg p-2 mb-2 italic">
+              <Sparkles className="h-3 w-3 inline mr-1 text-primary" />
+              {doc.reason}
+            </div>
+          )}
+          {existing && (
+            <div className="text-xs text-emerald-600 dark:text-emerald-400 mb-2 flex items-center gap-1">
+              <CheckCircle2 className="h-3 w-3" />
+              Generated · {Math.round((existing.content?.length || 0) / 1000)}K chars
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            {existing ? (
+              <>
+                <Button size="sm" variant="outline" className="flex-1" onClick={() => setViewing(existing)}>
+                  <FileText className="h-3.5 w-3.5" />
+                  View
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => handleGenerate(doc.doc_type)} disabled={isGenerating} title="Regenerate">
+                  {isGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                </Button>
+                <Button size="sm" variant="ghost" className="text-rose-600" onClick={() => handleDelete(existing.id)} title="Delete">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" className="w-full" onClick={() => handleGenerate(doc.doc_type)} disabled={isGenerating}>
+                {isGenerating ? (
+                  <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating…</>
+                ) : (
+                  <><Sparkles className="h-3.5 w-3.5" /> Generate with AI</>
+                )}
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
+
+  const renderPriorityGroup = (docs: any[], label: string, color: string) => {
+    if (docs.length === 0) return null;
+    const generatedCount = docs.filter((d) => getGenerated(d.doc_type)).length;
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className={cn("text-xs font-medium", color)}>
+            {label}
+          </Badge>
+          <span className="text-xs text-muted-foreground">
+            {generatedCount}/{docs.length} generated
+          </span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {docs.map(renderDocCard)}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -2726,94 +2860,41 @@ function GeneratedDocumentsSection({ tender, onChanged }: { tender: any; onChang
               <FileSignature className="h-5 w-5 text-primary" />
             </div>
             <div className="flex-1">
-              <h3 className="font-semibold text-sm">AI-Generated Tender Documents</h3>
+              <h3 className="font-semibold text-sm">Smart AI-Generated Tender Documents</h3>
               <p className="text-xs text-muted-foreground mt-0.5">
-                The AI generates tender-specific documents on your company letterhead — Method Statements, Implementation Plans,
-                Technical Proposals, Risk Assessments, SOPs, and Table of Contents. Set up your company profile first for branded letterhead.
+                {analyzed
+                  ? "The AI analyzed your tender and identified the documents required for submission. Each document is generated specifically for this tender on your company letterhead."
+                  : analyzing
+                  ? "AI is analyzing your tender to determine which documents are required…"
+                  : "Upload and run AI extraction on the tender document for a smart list of required documents."}
               </p>
             </div>
+            <Button size="sm" variant="outline" onClick={handleReanalyze} disabled={analyzing}>
+              {analyzing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              Re-analyze
+            </Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* Document type grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {DOC_TYPES.map((dt) => {
-          const existing = getGenerated(dt.key);
-          const isGenerating = generating === dt.key;
-          return (
-            <Card key={dt.key} className={cn("transition-all", existing && "border-emerald-300 dark:border-emerald-800")}>
-              <CardContent className="p-4">
-                <div className="flex items-start gap-2 mb-2">
-                  <div className={cn(
-                    "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
-                    existing ? "bg-emerald-100 dark:bg-emerald-950" : "bg-primary/10"
-                  )}>
-                    {existing ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <dt.icon className="h-4 w-4 text-primary" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm">{dt.title}</div>
-                    <div className="text-xs text-muted-foreground">{dt.description}</div>
-                  </div>
-                </div>
-                {existing && (
-                  <div className="text-xs text-emerald-600 dark:text-emerald-400 mb-2 flex items-center gap-1">
-                    <CheckCircle2 className="h-3 w-3" />
-                    Generated · {Math.round((existing.content?.length || 0) / 1000)}K chars
-                  </div>
-                )}
-                <div className="flex items-center gap-2">
-                  {existing ? (
-                    <>
-                      <Button size="sm" variant="outline" className="flex-1" onClick={() => setViewing(existing)}>
-                        <FileText className="h-3.5 w-3.5" />
-                        View
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleGenerate(dt.key)}
-                        disabled={isGenerating}
-                        title="Regenerate"
-                      >
-                        {isGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-rose-600"
-                        onClick={() => handleDelete(existing.id)}
-                        title="Delete"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </>
-                  ) : (
-                    <Button
-                      size="sm"
-                      className="w-full"
-                      onClick={() => handleGenerate(dt.key)}
-                      disabled={isGenerating}
-                    >
-                      {isGenerating ? (
-                        <>
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          Generating…
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="h-3.5 w-3.5" />
-                          Generate with AI
-                        </>
-                      )}
-                    </Button>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
+      {/* Analyzing state */}
+      {analyzing && (
+        <Card>
+          <CardContent className="py-12 flex flex-col items-center text-center">
+            <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
+            <p className="text-sm text-muted-foreground">AI is reading your tender and determining which documents are required…</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Smart document groups */}
+      {!analyzing && sortedDocs.length > 0 && (
+        <div className="space-y-6">
+          {renderPriorityGroup(essential, "Essential", PRIORITY_CONFIG.essential.color)}
+          {renderPriorityGroup(recommended, "Recommended", PRIORITY_CONFIG.recommended.color)}
+          {renderPriorityGroup(optional, "Optional", PRIORITY_CONFIG.optional.color)}
+        </div>
+      )}
 
       {/* Document viewer dialog */}
       <Dialog open={!!viewing} onOpenChange={(o) => !o && setViewing(null)}>

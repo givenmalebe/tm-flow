@@ -2487,6 +2487,60 @@ def list_document_types():
     ]}
 
 
+@app.post("/api/tenders/{tender_id}/documents/smart-analyze")
+def smart_analyze_documents(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """AI reads the tender's extracted info and determines which documents are required.
+    Returns a smart list of documents with reasons and priority levels."""
+    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not tender:
+        raise HTTPException(status_code=404, detail="Tender not found")
+
+    tender_data = {
+        "reference_number": tender.reference_number,
+        "title": tender.title,
+        "client_company": tender.client_company,
+        "scope_of_work": tender.scope_of_work,
+        "estimated_value": tender.estimated_value,
+        "contract_period": tender.contract_period,
+    }
+    extracted = tender.ai_extracted_info or {}
+
+    # If no AI extraction, return all types as recommended
+    if not extracted or extracted.get("_error"):
+        all_types = list(ai_module.DOCUMENT_TYPE_INFO.keys())
+        return {
+            "required": [
+                {
+                    "doc_type": dt,
+                    "title": ai_module.DOCUMENT_TYPE_INFO[dt]["title"],
+                    "description": ai_module.DOCUMENT_TYPE_INFO[dt]["description"],
+                    "reason": "Recommended — run AI extraction on the tender document for a tailored list",
+                    "priority": "recommended",
+                }
+                for dt in all_types
+            ],
+            "analyzed": False,
+        }
+
+    # Use AI to analyze
+    smart_list = ai_module.analyze_required_documents(extracted, tender_data)
+
+    # Enrich with title/description
+    result = []
+    for item in smart_list:
+        dt = item["doc_type"]
+        info = ai_module.DOCUMENT_TYPE_INFO.get(dt, {})
+        result.append({
+            "doc_type": dt,
+            "title": info.get("title", dt),
+            "description": info.get("description", ""),
+            "reason": item.get("reason", ""),
+            "priority": item.get("priority", "recommended"),
+        })
+
+    return {"required": result, "analyzed": True}
+
+
 # ---------------------- AI Tender Discovery ----------------------
 
 class DiscoverRequest(BaseModel):

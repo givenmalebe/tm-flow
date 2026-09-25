@@ -492,6 +492,12 @@ export const api = {
     return request<{ types: any[] }>(`/document-types`);
   },
 
+  async smartAnalyzeDocuments(tenderId: number) {
+    return request<{ required: any[]; analyzed: boolean }>(`/tenders/${tenderId}/documents/smart-analyze`, {
+      method: "POST",
+    });
+  },
+
   // ---- AI Assistant ----
   async askAssistant(question: string, tenderId?: number) {
     return request<{

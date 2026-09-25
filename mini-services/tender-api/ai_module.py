@@ -1452,3 +1452,105 @@ Generate the full READINESS REPORT with all 7 sections as specified."""
         return _run_zai_chat(prompt, system=READINESS_SYSTEM, max_tokens=6000)
     except RuntimeError as e:
         return f"Readiness report generation failed: {e}"
+
+
+# ---- Smart document analysis ----
+
+SMART_DOCS_SYSTEM = """You are a South African tender submission analyst.
+Analyze the tender's AI-extracted information and determine which documents are required for the submission.
+Respond with ONLY a valid JSON array (no markdown, no code fences).
+
+Each element must follow this schema:
+{
+  "doc_type": string (must be one of: "cover_letter", "company_profile", "compliance_docs", "technical_proposal", "method_statement", "implementation_plan", "risk_assessment", "sops", "organogram", "pricing_schedule", "references", "signed_declarations", "appendices", "table_of_contents"),
+  "reason": string (1-2 sentences explaining WHY this document is needed for THIS specific tender),
+  "priority": "essential" | "recommended" | "optional"
+}
+
+Rules:
+- Include "cover_letter" and "table_of_contents" as essential for every tender.
+- Include "pricing_schedule" as essential for every tender (all tenders require pricing).
+- Include "signed_declarations" as essential for government tenders.
+- Include "compliance_docs" as essential if any compulsory documents are mentioned.
+- Include "technical_proposal" as essential if functionality requirements or evaluation criteria mention functionality.
+- Include "method_statement" as essential if the scope of work is detailed.
+- Include "implementation_plan" as essential for service contracts.
+- Include "risk_assessment" as recommended for security/service tenders.
+- Include "sops" as recommended for service tenders with operational requirements.
+- Include "organogram" as essential if personnel/guards are required.
+- Include "references" as essential if references are listed as compulsory documents.
+- Include "company_profile" as essential if company profile is listed as a compulsory document.
+- Include "appendices" as recommended if equipment, training, or technical specifications are mentioned.
+- Be specific to THIS tender — don't include documents that aren't relevant."""
+
+
+def analyze_required_documents(extracted: Dict[str, Any], tender: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Use AI to analyze the tender and determine which documents are required."""
+    if not extracted or extracted.get("_error"):
+        # Fallback: return all document types as recommended
+        return [
+            {"doc_type": dt, "reason": "Recommended for a complete tender submission", "priority": "recommended"}
+            for dt in ["cover_letter", "company_profile", "compliance_docs", "technical_proposal",
+                       "method_statement", "implementation_plan", "risk_assessment", "sops",
+                       "organogram", "pricing_schedule", "references", "signed_declarations",
+                       "appendices", "table_of_contents"]
+        ]
+
+    prompt = f"""Analyze this tender and determine which documents are required for the submission.
+
+TENDER DETAILS:
+- Reference: {tender.get('reference_number', 'N/A')}
+- Title: {tender.get('title', 'N/A')}
+- Client: {tender.get('client_company', 'N/A')}
+- Scope: {extracted.get('scope_of_work', 'N/A')}
+- Personnel: {extracted.get('number_of_personnel_guards', 'N/A')}
+- PSIRA grades: {extracted.get('required_psira_grades', [])}
+
+AI-EXTRACTED INFO:
+- Compulsory documents: {json.dumps(extracted.get('compulsory_documents', []), default=str)}
+- Mandatory requirements: {json.dumps(extracted.get('mandatory_requirements', []), default=str)}
+- Functionality requirements: {json.dumps(extracted.get('functionality_requirements', []), default=str)}
+- Evaluation criteria: {json.dumps(extracted.get('evaluation_criteria', []), default=str)}
+- Pricing requirements: {json.dumps(extracted.get('pricing_requirements', []), default=str)}
+- Submission requirements: {json.dumps(extracted.get('submission_requirements', []), default=str)}
+- Required equipment: {json.dumps(extracted.get('required_equipment', []), default=str)}
+- Disqualification risks: {json.dumps(extracted.get('disqualification_requirements', []), default=str)}
+
+Return ONLY the JSON array of required documents."""
+    try:
+        result = _run_zai_chat(prompt, system=SMART_DOCS_SYSTEM)
+        result = result.strip()
+        if result.startswith("```"):
+            result = result.split("\n", 1)[1] if "\n" in result else result[3:]
+            if result.endswith("```"):
+                result = result[:-3]
+            result = result.strip()
+        if result.startswith("json"):
+            result = result[4:].strip()
+        first = result.find("[")
+        last = result.rfind("]")
+        if first >= 0 and last > first:
+            result = result[first:last + 1]
+        items = json.loads(result)
+        if not isinstance(items, list):
+            return []
+        # Validate doc_types
+        valid_types = set(DOCUMENT_TYPE_INFO.keys())
+        valid_items = []
+        for item in items:
+            if isinstance(item, dict) and item.get("doc_type") in valid_types:
+                valid_items.append({
+                    "doc_type": item["doc_type"],
+                    "reason": str(item.get("reason", ""))[:500],
+                    "priority": item.get("priority", "recommended"),
+                })
+        return valid_items
+    except (json.JSONDecodeError, RuntimeError, Exception):
+        # Fallback: return all as recommended
+        return [
+            {"doc_type": dt, "reason": "Recommended for a complete tender submission", "priority": "recommended"}
+            for dt in ["cover_letter", "company_profile", "compliance_docs", "technical_proposal",
+                       "method_statement", "implementation_plan", "risk_assessment", "sops",
+                       "organogram", "pricing_schedule", "references", "signed_declarations",
+                       "appendices", "table_of_contents"]
+        ]

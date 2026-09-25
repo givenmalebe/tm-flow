@@ -17,6 +17,9 @@ import {
   Palette,
   FileText,
   Shield,
+  Network,
+  Download,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +37,8 @@ export function CompanyTab() {
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingOrganogram, setUploadingOrganogram] = useState(false);
+  const organogramInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api.getCompanyProfile().then((p) => {
@@ -67,6 +72,37 @@ export function CompanyTab() {
     } finally {
       setUploadingLogo(false);
       if (logoInputRef.current) logoInputRef.current.value = "";
+    }
+  };
+
+  const handleOrganogramUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingOrganogram(true);
+    try {
+      const res = await api.uploadCompanyOrganogram(file);
+      setProfile({
+        ...profile,
+        organogram_path: res.organogram_path,
+        organogram_url: res.organogram_url,
+        organogram_text: res.organogram_text,
+      });
+      toast.success(res.text_extracted ? "Organogram uploaded — AI extracted the structure" : "Organogram uploaded");
+    } catch (e: any) {
+      toast.error(e.message || "Organogram upload failed");
+    } finally {
+      setUploadingOrganogram(false);
+      if (organogramInputRef.current) organogramInputRef.current.value = "";
+    }
+  };
+
+  const handleOrganogramDelete = async () => {
+    try {
+      await api.deleteCompanyOrganogram();
+      setProfile({ ...profile, organogram_path: null, organogram_url: null, organogram_text: null });
+      toast.success("Organogram removed");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to remove organogram");
     }
   };
 
@@ -245,6 +281,99 @@ export function CompanyTab() {
                   </span>
                   <span className="text-xs text-muted-foreground mt-1">PNG, JPG, SVG — max 2 MB</span>
                 </button>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Organogram upload */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Network className="h-4 w-4 text-primary" />
+                Company Organogram
+              </CardTitle>
+              <CardDescription>
+                Upload your company's organogram so the AI can generate accurate organogram documents
+                that match your real organizational structure
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <input
+                ref={organogramInputRef}
+                type="file"
+                accept=".pdf,.doc,.docx,.txt,.csv,.jpg,.png"
+                onChange={handleOrganogramUpload}
+                className="hidden"
+              />
+              {profile?.organogram_url ? (
+                <div className="flex items-center gap-2 rounded-lg border p-3 bg-emerald-50/50 dark:bg-emerald-950/20">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium">Organogram uploaded</div>
+                    {profile.organogram_text && (
+                      <div className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5">
+                        AI extracted the structure — generated organograms will match your real org chart
+                      </div>
+                    )}
+                    <a
+                      href={profile.organogram_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-primary hover:underline flex items-center gap-1 mt-1"
+                    >
+                      <Download className="h-3 w-3" />
+                      View / Download
+                    </a>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => organogramInputRef.current?.click()}
+                    disabled={uploadingOrganogram}
+                  >
+                    {uploadingOrganogram ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Upload className="h-3.5 w-3.5" />
+                    )}
+                    Replace
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-rose-600"
+                    onClick={handleOrganogramDelete}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => organogramInputRef.current?.click()}
+                  disabled={uploadingOrganogram}
+                  className="w-full rounded-lg border-2 border-dashed p-8 flex flex-col items-center text-center hover:border-primary hover:bg-primary/5 transition-colors"
+                >
+                  {uploadingOrganogram ? (
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  ) : (
+                    <Network className="h-8 w-8 text-primary" />
+                  )}
+                  <span className="text-sm font-medium mt-2">
+                    {uploadingOrganogram ? "Uploading & extracting…" : "Upload Company Organogram"}
+                  </span>
+                  <span className="text-xs text-muted-foreground mt-1">
+                    PDF, DOCX, TXT, JPG, PNG — the AI will read it and use the real structure when generating organogram documents
+                  </span>
+                </button>
+              )}
+              {profile?.organogram_text && (
+                <div className="rounded-lg bg-muted/30 p-3">
+                  <div className="text-xs font-medium text-muted-foreground mb-1">Extracted structure preview:</div>
+                  <pre className="text-xs whitespace-pre-wrap font-mono text-muted-foreground max-h-32 overflow-y-auto scrollbar-thin">
+                    {profile.organogram_text?.slice(0, 500)}
+                    {profile.organogram_text?.length > 500 ? "..." : ""}
+                  </pre>
+                </div>
               )}
             </CardContent>
           </Card>

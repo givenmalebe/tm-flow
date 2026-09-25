@@ -466,6 +466,27 @@ export const api = {
     });
   },
 
+  async uploadCompanyOrganogram(file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    return request<{
+      organogram_path: string;
+      organogram_url: string;
+      organogram_text: string;
+      text_extracted: boolean;
+    }>(`/company-profile/organogram`, {
+      method: "POST",
+      body: form,
+      isForm: true,
+    });
+  },
+
+  async deleteCompanyOrganogram() {
+    return request<{ deleted: boolean }>(`/company-profile/organogram`, {
+      method: "DELETE",
+    });
+  },
+
   // ---- AI Document Generation ----
   async generateDocument(tenderId: number, docType: string) {
     return request<any>(`/tenders/${tenderId}/documents/generate`, {

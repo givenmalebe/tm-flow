@@ -2274,6 +2274,9 @@ def get_company_profile(db: Session = Depends(get_db), user: User = Depends(get_
             "letterhead_tagline": None,
             "director_name": user.full_name,
             "director_title": "Director",
+            "organogram_path": None,
+            "organogram_url": None,
+            "organogram_text": None,
         }
     return {
         "id": profile.id,
@@ -2292,6 +2295,9 @@ def get_company_profile(db: Session = Depends(get_db), user: User = Depends(get_
         "letterhead_tagline": profile.letterhead_tagline,
         "director_name": profile.director_name,
         "director_title": profile.director_title,
+        "organogram_path": profile.organogram_path,
+        "organogram_url": f"/uploads/{profile.organogram_path}?XTransformPort=8000" if profile.organogram_path else None,
+        "organogram_text": profile.organogram_text,
     }
 
 
@@ -2343,6 +2349,64 @@ async def upload_company_logo(
     return {"logo_path": rel_path, "url": f"/uploads/{rel_path}?XTransformPort=8000"}
 
 
+@app.post("/api/company-profile/organogram")
+async def upload_company_organogram(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Upload the company organogram. AI extracts the text so generated organograms match the real structure."""
+    rel_path = _save_upload(file, subdir="company")
+    profile = db.query(CompanyProfile).filter(CompanyProfile.user_id == user.id).first()
+    if not profile:
+        profile = CompanyProfile(
+            user_id=user.id,
+            company_name=user.company_name or user.full_name,
+            organogram_path=rel_path,
+        )
+        db.add(profile)
+    else:
+        profile.organogram_path = rel_path
+    # Extract text from the organogram file so the AI can use it when generating organogram documents
+    full_path = os.path.join(UPLOAD_DIR, rel_path)
+    organogram_text = ""
+    if os.path.exists(full_path):
+        try:
+            organogram_text = ai_module.extract_text_from_file(full_path, file.filename)
+            if len(organogram_text) > 10000:
+                organogram_text = organogram_text[:10000]
+        except Exception:
+            organogram_text = ""
+    profile.organogram_text = organogram_text or None
+    db.commit()
+    db.refresh(profile)
+    return {
+        "organogram_path": rel_path,
+        "organogram_url": f"/uploads/{rel_path}?XTransformPort=8000",
+        "organogram_text": organogram_text[:500] + "..." if len(organogram_text) > 500 else organogram_text,
+        "text_extracted": bool(organogram_text),
+    }
+
+
+@app.delete("/api/company-profile/organogram")
+def delete_company_organogram(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Remove the company organogram."""
+    profile = db.query(CompanyProfile).filter(CompanyProfile.user_id == user.id).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Company profile not found")
+    if profile.organogram_path:
+        full_path = os.path.join(UPLOAD_DIR, profile.organogram_path)
+        if os.path.exists(full_path):
+            try:
+                os.unlink(full_path)
+            except OSError:
+                pass
+        profile.organogram_path = None
+        profile.organogram_text = None
+    db.commit()
+    return {"deleted": True}
+
+
 # ---------------------- AI Document Generation ----------------------
 
 @app.get("/api/tenders/{tender_id}/documents/generated")
@@ -2391,6 +2455,7 @@ def generate_document(
         "website": profile.website if profile else None,
         "director_name": profile.director_name if profile else user.full_name,
         "director_title": profile.director_title if profile else "Director",
+        "organogram_text": profile.organogram_text if profile else None,
     }
 
     tender_data = {

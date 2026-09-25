@@ -1027,6 +1027,20 @@ Generate at least 1000 words."""
 
 def generate_organogram(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
     header = _build_company_header(company)
+    organogram_text = company.get("organogram_text", "")
+    organogram_section = ""
+    if organogram_text:
+        organogram_section = f"""
+
+IMPORTANT — THE COMPANY'S ACTUAL ORGANOGRAM (extracted from uploaded file):
+Use this real organizational structure as the basis for the generated organogram.
+Match the actual roles, names, titles, and reporting lines from this document.
+Adapt the structure to include any additional roles required by the tender (e.g. extra guards, supervisors),
+but keep the real company structure as the foundation.
+
+ORGANOGRAM CONTENT:
+{organogram_text[:8000]}
+"""
     prompt = f"""Generate an ORGANOGRAM document for the following tender.
 
 COMPANY PROFILE:
@@ -1037,6 +1051,7 @@ TENDER DETAILS:
 - Client: {tender.get('client_company', 'N/A')}
 - Personnel required: {extracted.get('number_of_personnel_guards', 'N/A')}
 - PSIRA grades: {extracted.get('required_psira_grades', [])}
+{organogram_section}
 
 The Organogram must include:
 1. ORGANIZATIONAL STRUCTURE

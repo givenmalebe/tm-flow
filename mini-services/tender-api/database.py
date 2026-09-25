@@ -253,6 +253,9 @@ class CompanyProfile(Base):
     letterhead_tagline = Column(String(500), nullable=True)
     director_name = Column(String(255), nullable=True)  # for signatures
     director_title = Column(String(255), nullable=True)
+    # Organogram
+    organogram_path = Column(String(1000), nullable=True)  # uploaded organogram file
+    organogram_text = Column(Text, nullable=True)  # AI-extracted text from the organogram
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 

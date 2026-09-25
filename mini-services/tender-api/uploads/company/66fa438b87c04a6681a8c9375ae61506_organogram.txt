@@ -1,0 +1,33 @@
+COMPANY ORGANOGRAM - TEST CO
+
+MANAGING DIRECTOR: John Smith
+  |
+  +-- OPERATIONS MANAGER: Sarah Johnson
+  |     |
+  |     +-- SITE SUPERVISOR (Cape Town): Michael Brown
+  |     +-- SITE SUPERVISOR (Johannesburg): David Wilson
+  |     +-- SHIFT LEADERS (x4): Various
+  |     +-- SECURITY GUARDS (x45): Grade C, B, A
+  |
+  +-- COMPLIANCE OFFICER: Thandi Mthembu
+  |     |
+  |     +-- PSIRA Administrator
+  |     +-- Training Coordinator
+  |
+  +-- FINANCE MANAGER: Robert Chen
+        |
+        +-- Accountant
+        +-- Payroll Administrator
+
+REPORTING LINES:
+- All site supervisors report to Operations Manager
+- Operations Manager reports to Managing Director
+- Compliance Officer reports directly to Managing Director
+- Finance Manager reports to Managing Director
+- Shift leaders report to their respective site supervisors
+- Guards report to their shift leaders
+
+STAFFING MODEL:
+- 3 shifts per site (Day, Night, Weekend)
+- 1 supervisor per site per shift
+- Relief pool of 5 guards for leave/absence coverage

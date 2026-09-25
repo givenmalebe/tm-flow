@@ -20,6 +20,7 @@ import {
   Network,
   Download,
   Trash2,
+  PenTool,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +40,11 @@ export function CompanyTab() {
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [uploadingOrganogram, setUploadingOrganogram] = useState(false);
   const organogramInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingSignature, setUploadingSignature] = useState(false);
+  const signatureInputRef = useRef<HTMLInputElement>(null);
+  const [showDrawPad, setShowDrawPad] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [drawing, setDrawing] = useState(false);
 
   useEffect(() => {
     api.getCompanyProfile().then((p) => {
@@ -104,6 +110,94 @@ export function CompanyTab() {
     } catch (e: any) {
       toast.error(e.message || "Failed to remove organogram");
     }
+  };
+
+  const handleSignatureUpload = async (file: File) => {
+    setUploadingSignature(true);
+    try {
+      const res = await api.uploadCompanySignature(file);
+      setProfile({ ...profile, signature_path: res.signature_path, signature_url: res.signature_url });
+      toast.success("Signature uploaded");
+    } catch (e: any) {
+      toast.error(e.message || "Signature upload failed");
+    } finally {
+      setUploadingSignature(false);
+      if (signatureInputRef.current) signatureInputRef.current.value = "";
+    }
+  };
+
+  const handleSignatureDelete = async () => {
+    try {
+      await api.deleteCompanySignature();
+      setProfile({ ...profile, signature_path: null, signature_url: null });
+      toast.success("Signature removed");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to remove signature");
+    }
+  };
+
+  // Canvas drawing handlers
+  const startDraw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    setDrawing(true);
+    const rect = canvas.getBoundingClientRect();
+    const x = ("touches" in e ? e.touches[0].clientX : e.clientX) - rect.left;
+    const y = ("touches" in e ? e.touches[0].clientY : e.clientY) - rect.top;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  };
+
+  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    if (!drawing) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = ("touches" in e ? e.touches[0].clientX : e.clientX) - rect.left;
+    const y = ("touches" in e ? e.touches[0].clientY : e.clientY) - rect.top;
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  };
+
+  const stopDraw = () => {
+    setDrawing(false);
+  };
+
+  const clearCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  };
+
+  const saveCanvasSignature = async () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    // Check if canvas has content
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const hasContent = imageData.data.some((v, i) => i % 4 === 3 && v > 0);
+    if (!hasContent) {
+      toast.error("Please draw your signature first");
+      return;
+    }
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      const file = new File([blob], "signature.png", { type: "image/png" });
+      await handleSignatureUpload(file);
+      setShowDrawPad(false);
+      clearCanvas();
+    }, "image/png");
   };
 
   const set = (k: string, v: any) => setProfile((p: any) => ({ ...p, [k]: v }));
@@ -373,6 +467,112 @@ export function CompanyTab() {
                     {profile.organogram_text?.slice(0, 500)}
                     {profile.organogram_text?.length > 500 ? "..." : ""}
                   </pre>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Signature */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <PenTool className="h-4 w-4 text-primary" />
+                Authorized Signatory Signature
+              </CardTitle>
+              <CardDescription>
+                Draw or upload your signature — the AI will include it in the signature blocks of generated documents
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <input
+                ref={signatureInputRef}
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleSignatureUpload(file);
+                }}
+                className="hidden"
+              />
+
+              {profile?.signature_url ? (
+                <div className="flex items-center gap-2 rounded-lg border p-3 bg-emerald-50/50 dark:bg-emerald-950/20">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium">Signature saved</div>
+                    <div className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5">
+                      AI will include this signature in document signature blocks
+                    </div>
+                    <img
+                      src={profile.signature_url}
+                      alt="Signature"
+                      className="mt-2 max-h-20 max-w-xs object-contain border rounded bg-white p-1"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Button size="sm" variant="outline" onClick={() => signatureInputRef.current?.click()} disabled={uploadingSignature}>
+                      {uploadingSignature ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                      Replace
+                    </Button>
+                    <Button size="sm" variant="ghost" className="text-rose-600" onClick={handleSignatureDelete}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              ) : showDrawPad ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Draw your signature:</span>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="ghost" onClick={clearCanvas}>
+                        Clear
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => { setShowDrawPad(false); clearCanvas(); }}>
+                        Cancel
+                      </Button>
+                      <Button size="sm" onClick={saveCanvasSignature} disabled={uploadingSignature}>
+                        {uploadingSignature ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                        Save
+                      </Button>
+                    </div>
+                  </div>
+                  <canvas
+                    ref={canvasRef}
+                    width={500}
+                    height={160}
+                    className="w-full border-2 border-dashed rounded-lg bg-white cursor-crosshair touch-none"
+                    style={{ maxWidth: "500px", margin: "0 auto", display: "block" }}
+                    onMouseDown={startDraw}
+                    onMouseMove={draw}
+                    onMouseUp={stopDraw}
+                    onMouseLeave={stopDraw}
+                    onTouchStart={startDraw}
+                    onTouchMove={draw}
+                    onTouchEnd={stopDraw}
+                  />
+                  <p className="text-xs text-muted-foreground text-center">
+                    Draw inside the box above using your mouse or finger (touch screen)
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setShowDrawPad(true)}
+                    className="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-6 hover:border-primary hover:bg-primary/5 transition-colors"
+                  >
+                    <PenTool className="h-8 w-8 text-primary" />
+                    <span className="text-sm font-medium">Draw Signature</span>
+                    <span className="text-xs text-muted-foreground text-center">Use mouse or touch screen to draw</span>
+                  </button>
+                  <button
+                    onClick={() => signatureInputRef.current?.click()}
+                    disabled={uploadingSignature}
+                    className="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-6 hover:border-primary hover:bg-primary/5 transition-colors"
+                  >
+                    {uploadingSignature ? <Loader2 className="h-8 w-8 animate-spin text-primary" /> : <Upload className="h-8 w-8 text-primary" />}
+                    <span className="text-sm font-medium">Upload Signature</span>
+                    <span className="text-xs text-muted-foreground text-center">PNG, JPG — scanned or image</span>
+                  </button>
                 </div>
               )}
             </CardContent>

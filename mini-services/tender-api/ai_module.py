@@ -613,7 +613,17 @@ Registration No: [Reg Number] | VAT: [VAT] | PSIRA: [PSIRA No]
 Then the document title, reference, and date.
 Then the table of contents (if applicable).
 Then the body content.
-End with a signature block for the director/authorized signatory."""
+End with a signature block for the director/authorized signatory.
+
+If a signature image URL is provided, include a reference to it in the signature block:
+[SIGNATURE: <signature_url>]
+
+The signature block should include:
+- The signature image reference (if provided)
+- Director/Authorized Signatory name
+- Title (e.g. Managing Director)
+- Date
+- Company stamp/seal placeholder"""
 
 
 def _build_company_header(company: Dict[str, Any]) -> str:

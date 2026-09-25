@@ -2277,6 +2277,8 @@ def get_company_profile(db: Session = Depends(get_db), user: User = Depends(get_
             "organogram_path": None,
             "organogram_url": None,
             "organogram_text": None,
+            "signature_path": None,
+            "signature_url": None,
         }
     return {
         "id": profile.id,
@@ -2298,6 +2300,8 @@ def get_company_profile(db: Session = Depends(get_db), user: User = Depends(get_
         "organogram_path": profile.organogram_path,
         "organogram_url": f"/uploads/{profile.organogram_path}?XTransformPort=8000" if profile.organogram_path else None,
         "organogram_text": profile.organogram_text,
+        "signature_path": profile.signature_path,
+        "signature_url": f"/uploads/{profile.signature_path}?XTransformPort=8000" if profile.signature_path else None,
     }
 
 
@@ -2407,6 +2411,50 @@ def delete_company_organogram(db: Session = Depends(get_db), user: User = Depend
     return {"deleted": True}
 
 
+@app.post("/api/company-profile/signature")
+async def upload_company_signature(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Upload a signature image (drawn or scanned). Used by AI in document signature blocks."""
+    rel_path = _save_upload(file, subdir="company")
+    profile = db.query(CompanyProfile).filter(CompanyProfile.user_id == user.id).first()
+    if not profile:
+        profile = CompanyProfile(
+            user_id=user.id,
+            company_name=user.company_name or user.full_name,
+            signature_path=rel_path,
+        )
+        db.add(profile)
+    else:
+        profile.signature_path = rel_path
+    db.commit()
+    db.refresh(profile)
+    return {
+        "signature_path": rel_path,
+        "signature_url": f"/uploads/{rel_path}?XTransformPort=8000",
+    }
+
+
+@app.delete("/api/company-profile/signature")
+def delete_company_signature(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Remove the signature image."""
+    profile = db.query(CompanyProfile).filter(CompanyProfile.user_id == user.id).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Company profile not found")
+    if profile.signature_path:
+        full_path = os.path.join(UPLOAD_DIR, profile.signature_path)
+        if os.path.exists(full_path):
+            try:
+                os.unlink(full_path)
+            except OSError:
+                pass
+        profile.signature_path = None
+    db.commit()
+    return {"deleted": True}
+
+
 # ---------------------- AI Document Generation ----------------------
 
 @app.get("/api/tenders/{tender_id}/documents/generated")
@@ -2456,6 +2504,7 @@ def generate_document(
         "director_name": profile.director_name if profile else user.full_name,
         "director_title": profile.director_title if profile else "Director",
         "organogram_text": profile.organogram_text if profile else None,
+        "signature_url": f"/uploads/{profile.signature_path}?XTransformPort=8000" if profile and profile.signature_path else None,
     }
 
     tender_data = {

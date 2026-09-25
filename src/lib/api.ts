@@ -487,6 +487,22 @@ export const api = {
     });
   },
 
+  async uploadCompanySignature(file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    return request<{ signature_path: string; signature_url: string }>(`/company-profile/signature`, {
+      method: "POST",
+      body: form,
+      isForm: true,
+    });
+  },
+
+  async deleteCompanySignature() {
+    return request<{ deleted: boolean }>(`/company-profile/signature`, {
+      method: "DELETE",
+    });
+  },
+
   // ---- AI Document Generation ----
   async generateDocument(tenderId: number, docType: string) {
     return request<any>(`/tenders/${tenderId}/documents/generate`, {

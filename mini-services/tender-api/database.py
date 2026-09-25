@@ -47,6 +47,7 @@ class User(Base):
     company_name = Column(String(255), nullable=True)
     hashed_password = Column(String(255), nullable=False)
     role = Column(String(50), default="admin")  # admin / user
+    onboarding_completed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -260,6 +261,8 @@ class CompanyProfile(Base):
     signature_path = Column(String(1000), nullable=True)  # uploaded or drawn signature image
     # Letterhead
     letterhead_path = Column(String(1000), nullable=True)  # uploaded letterhead image/template
+    # Company profile document
+    company_profile_doc_path = Column(String(1000), nullable=True)  # uploaded company profile document
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 

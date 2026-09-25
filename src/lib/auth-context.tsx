@@ -16,6 +16,7 @@ interface AuthUser {
   full_name: string;
   company_name?: string;
   role: string;
+  onboarding_completed?: boolean;
 }
 
 interface AuthContextValue {

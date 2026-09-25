@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth-context";
 import { LandingPage } from "@/components/landing-page";
 import { AuthPage } from "@/components/auth-page";
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
+import { Onboarding } from "@/components/onboarding";
 import { Loader2 } from "lucide-react";
 
 type View = "landing" | "auth";
@@ -25,7 +26,12 @@ export default function Home() {
     );
   }
 
-  // Authenticated → Dashboard
+  // Authenticated but onboarding not completed → Onboarding
+  if (user && !user.onboarding_completed) {
+    return <Onboarding />;
+  }
+
+  // Authenticated and onboarded → Dashboard
   if (user) {
     return <DashboardShell />;
   }
@@ -37,8 +43,6 @@ export default function Home() {
         initialMode={authMode}
         onBack={() => setView("landing")}
         onSuccess={() => {
-          // AuthProvider will refresh user; on success it will switch to dashboard automatically
-          // Force a refresh just in case
           window.location.reload();
         }}
       />

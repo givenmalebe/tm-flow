@@ -96,6 +96,7 @@ class UserOut(BaseModel):
     full_name: str
     company_name: Optional[str]
     role: str
+    onboarding_completed: bool = False
     class Config:
         from_attributes = True
 
@@ -634,6 +635,66 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
 @app.get("/api/auth/me", response_model=UserOut)
 def me(user: User = Depends(get_current_user)):
     return user
+
+
+@app.post("/api/auth/complete-onboarding")
+def complete_onboarding(
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Complete the onboarding process — saves company profile and marks onboarding as done."""
+    # Update user's company name
+    if payload.get("company_name"):
+        user.company_name = payload["company_name"]
+    user.onboarding_completed = True
+    db.commit()
+    db.refresh(user)
+    return {"onboarding_completed": True, "user": UserOut.model_validate(user).model_dump()}
+
+
+@app.post("/api/company-profile/company-profile-doc")
+async def upload_company_profile_doc(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Upload the company profile document (PDF/DOCX). The AI uses it when generating company profile documents."""
+    rel_path = _save_upload(file, subdir="company")
+    profile = db.query(CompanyProfile).filter(CompanyProfile.user_id == user.id).first()
+    if not profile:
+        profile = CompanyProfile(
+            user_id=user.id,
+            company_name=user.company_name or user.full_name,
+            company_profile_doc_path=rel_path,
+        )
+        db.add(profile)
+    else:
+        profile.company_profile_doc_path = rel_path
+    db.commit()
+    db.refresh(profile)
+    return {
+        "company_profile_doc_path": rel_path,
+        "company_profile_doc_url": f"/uploads/{rel_path}?XTransformPort=8000",
+    }
+
+
+@app.delete("/api/company-profile/company-profile-doc")
+def delete_company_profile_doc(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Remove the company profile document."""
+    profile = db.query(CompanyProfile).filter(CompanyProfile.user_id == user.id).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Company profile not found")
+    if profile.company_profile_doc_path:
+        full_path = os.path.join(UPLOAD_DIR, profile.company_profile_doc_path)
+        if os.path.exists(full_path):
+            try:
+                os.unlink(full_path)
+            except OSError:
+                pass
+        profile.company_profile_doc_path = None
+    db.commit()
+    return {"deleted": True}
 
 
 # ---------------------- Tender Routes ----------------------
@@ -2281,6 +2342,8 @@ def get_company_profile(db: Session = Depends(get_db), user: User = Depends(get_
             "signature_url": None,
             "letterhead_path": None,
             "letterhead_url": None,
+            "company_profile_doc_path": None,
+            "company_profile_doc_url": None,
         }
     return {
         "id": profile.id,
@@ -2306,6 +2369,8 @@ def get_company_profile(db: Session = Depends(get_db), user: User = Depends(get_
         "signature_url": f"/uploads/{profile.signature_path}?XTransformPort=8000" if profile.signature_path else None,
         "letterhead_path": profile.letterhead_path,
         "letterhead_url": f"/uploads/{profile.letterhead_path}?XTransformPort=8000" if profile.letterhead_path else None,
+        "company_profile_doc_path": profile.company_profile_doc_path,
+        "company_profile_doc_url": f"/uploads/{profile.company_profile_doc_path}?XTransformPort=8000" if profile.company_profile_doc_path else None,
     }
 
 

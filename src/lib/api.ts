@@ -519,6 +519,29 @@ export const api = {
     });
   },
 
+  async completeOnboarding(payload: any) {
+    return request<{ onboarding_completed: boolean; user: any }>(`/auth/complete-onboarding`, {
+      method: "POST",
+      body: payload,
+    });
+  },
+
+  async uploadCompanyProfileDoc(file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    return request<{ company_profile_doc_path: string; company_profile_doc_url: string }>(`/company-profile/company-profile-doc`, {
+      method: "POST",
+      body: form,
+      isForm: true,
+    });
+  },
+
+  async deleteCompanyProfileDoc() {
+    return request<{ deleted: boolean }>(`/company-profile/company-profile-doc`, {
+      method: "DELETE",
+    });
+  },
+
   // ---- AI Document Generation ----
   async generateDocument(tenderId: number, docType: string) {
     return request<any>(`/tenders/${tenderId}/documents/generate`, {

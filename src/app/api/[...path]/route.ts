@@ -15,9 +15,9 @@ let lastHealthCheck = 0;
 let lastHealthStatus = false;
 
 async function isBackendAlive(): Promise<boolean> {
-  // Cache health status for 5 seconds
+  // Cache health status for 2 seconds only
   const now = Date.now();
-  if (now - lastHealthCheck < 5000) return lastHealthStatus;
+  if (now - lastHealthCheck < 2000) return lastHealthStatus;
 
   lastHealthCheck = now;
   try {
@@ -166,13 +166,51 @@ async function handler(
       headers: responseHeaders,
     });
   } catch (error: any) {
-    // If the fetch failed, the backend may have died mid-request. Try once more.
+    // Backend died mid-request. Force restart and retry once.
     lastHealthStatus = false;
     lastHealthCheck = 0;
-    return NextResponse.json(
-      { detail: `Backend request failed: ${error.message}. The backend may have restarted — please retry.` },
-      { status: 502 }
-    );
+    backendStarting = null;
+
+    // Try to restart the backend
+    const restarted = await startBackend();
+    if (!restarted) {
+      return NextResponse.json(
+        { detail: "Backend service is starting up. Please retry in a moment." },
+        { status: 503 }
+      );
+    }
+
+    // Retry the request
+    try {
+      const controller2 = new AbortController();
+      const timeout2 = setTimeout(() => controller2.abort(), 120000);
+      const response2 = await fetch(targetUrl, {
+        method: req.method,
+        headers,
+        body,
+        // @ts-ignore
+        duplex: "half",
+        signal: controller2.signal,
+      });
+      clearTimeout(timeout2);
+
+      const responseHeaders2 = new Headers();
+      response2.headers.forEach((value, key) => {
+        responseHeaders2.set(key, value);
+      });
+
+      const responseBody2 = await response2.arrayBuffer();
+      return new NextResponse(responseBody2, {
+        status: response2.status,
+        statusText: response2.statusText,
+        headers: responseHeaders2,
+      });
+    } catch (error2: any) {
+      return NextResponse.json(
+        { detail: `Backend request failed after retry: ${error2.message}. Please retry.` },
+        { status: 502 }
+      );
+    }
   }
 }
 

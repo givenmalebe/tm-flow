@@ -503,6 +503,22 @@ export const api = {
     });
   },
 
+  async uploadCompanyLetterhead(file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    return request<{ letterhead_path: string; letterhead_url: string }>(`/company-profile/letterhead`, {
+      method: "POST",
+      body: form,
+      isForm: true,
+    });
+  },
+
+  async deleteCompanyLetterhead() {
+    return request<{ deleted: boolean }>(`/company-profile/letterhead`, {
+      method: "DELETE",
+    });
+  },
+
   // ---- AI Document Generation ----
   async generateDocument(tenderId: number, docType: string) {
     return request<any>(`/tenders/${tenderId}/documents/generate`, {

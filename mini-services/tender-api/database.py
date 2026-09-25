@@ -258,6 +258,8 @@ class CompanyProfile(Base):
     organogram_text = Column(Text, nullable=True)  # AI-extracted text from the organogram
     # Signature
     signature_path = Column(String(1000), nullable=True)  # uploaded or drawn signature image
+    # Letterhead
+    letterhead_path = Column(String(1000), nullable=True)  # uploaded letterhead image/template
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 

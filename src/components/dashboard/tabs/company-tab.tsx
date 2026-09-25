@@ -21,6 +21,7 @@ import {
   Download,
   Trash2,
   PenTool,
+  FileImage,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,6 +46,8 @@ export function CompanyTab() {
   const [showDrawPad, setShowDrawPad] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [drawing, setDrawing] = useState(false);
+  const [uploadingLetterhead, setUploadingLetterhead] = useState(false);
+  const letterheadInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api.getCompanyProfile().then((p) => {
@@ -133,6 +136,30 @@ export function CompanyTab() {
       toast.success("Signature removed");
     } catch (e: any) {
       toast.error(e.message || "Failed to remove signature");
+    }
+  };
+
+  const handleLetterheadUpload = async (file: File) => {
+    setUploadingLetterhead(true);
+    try {
+      const res = await api.uploadCompanyLetterhead(file);
+      setProfile({ ...profile, letterhead_path: res.letterhead_path, letterhead_url: res.letterhead_url });
+      toast.success("Letterhead uploaded");
+    } catch (e: any) {
+      toast.error(e.message || "Letterhead upload failed");
+    } finally {
+      setUploadingLetterhead(false);
+      if (letterheadInputRef.current) letterheadInputRef.current.value = "";
+    }
+  };
+
+  const handleLetterheadDelete = async () => {
+    try {
+      await api.deleteCompanyLetterhead();
+      setProfile({ ...profile, letterhead_path: null, letterhead_url: null });
+      toast.success("Letterhead removed");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to remove letterhead");
     }
   };
 
@@ -574,6 +601,83 @@ export function CompanyTab() {
                     <span className="text-xs text-muted-foreground text-center">PNG, JPG — scanned or image</span>
                   </button>
                 </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Letterhead upload */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <FileImage className="h-4 w-4 text-primary" />
+                Company Letterhead
+              </CardTitle>
+              <CardDescription>
+                Upload your company letterhead template — the AI will use it as the header for all generated documents
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <input
+                ref={letterheadInputRef}
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleLetterheadUpload(file);
+                }}
+                className="hidden"
+              />
+              {profile?.letterhead_url ? (
+                <div className="rounded-lg border p-3 bg-emerald-50/50 dark:bg-emerald-950/20">
+                  <div className="flex items-center gap-2 mb-2">
+                    <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
+                    <div className="flex-1">
+                      <div className="text-sm font-medium">Letterhead uploaded</div>
+                      <div className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5">
+                        AI will use this letterhead as the header for all generated documents
+                      </div>
+                    </div>
+                    <Button size="sm" variant="outline" onClick={() => letterheadInputRef.current?.click()} disabled={uploadingLetterhead}>
+                      {uploadingLetterhead ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                      Replace
+                    </Button>
+                    <Button size="sm" variant="ghost" className="text-rose-600" onClick={handleLetterheadDelete}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                  <img
+                    src={profile.letterhead_url}
+                    alt="Company Letterhead"
+                    className="w-full max-h-40 object-contain border rounded bg-white p-2"
+                  />
+                  <a
+                    href={profile.letterhead_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-primary hover:underline flex items-center gap-1 mt-1"
+                  >
+                    <Download className="h-3 w-3" />
+                    View full size
+                  </a>
+                </div>
+              ) : (
+                <button
+                  onClick={() => letterheadInputRef.current?.click()}
+                  disabled={uploadingLetterhead}
+                  className="w-full rounded-lg border-2 border-dashed p-8 flex flex-col items-center text-center hover:border-primary hover:bg-primary/5 transition-colors"
+                >
+                  {uploadingLetterhead ? (
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  ) : (
+                    <FileImage className="h-8 w-8 text-primary" />
+                  )}
+                  <span className="text-sm font-medium mt-2">
+                    {uploadingLetterhead ? "Uploading…" : "Upload Company Letterhead"}
+                  </span>
+                  <span className="text-xs text-muted-foreground mt-1">
+                    PNG, JPG — your company letterhead image with logo, address and branding. The AI will reference this at the top of every generated document.
+                  </span>
+                </button>
               )}
             </CardContent>
           </Card>

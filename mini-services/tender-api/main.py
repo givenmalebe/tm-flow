@@ -2279,6 +2279,8 @@ def get_company_profile(db: Session = Depends(get_db), user: User = Depends(get_
             "organogram_text": None,
             "signature_path": None,
             "signature_url": None,
+            "letterhead_path": None,
+            "letterhead_url": None,
         }
     return {
         "id": profile.id,
@@ -2302,6 +2304,8 @@ def get_company_profile(db: Session = Depends(get_db), user: User = Depends(get_
         "organogram_text": profile.organogram_text,
         "signature_path": profile.signature_path,
         "signature_url": f"/uploads/{profile.signature_path}?XTransformPort=8000" if profile.signature_path else None,
+        "letterhead_path": profile.letterhead_path,
+        "letterhead_url": f"/uploads/{profile.letterhead_path}?XTransformPort=8000" if profile.letterhead_path else None,
     }
 
 
@@ -2455,6 +2459,50 @@ def delete_company_signature(db: Session = Depends(get_db), user: User = Depends
     return {"deleted": True}
 
 
+@app.post("/api/company-profile/letterhead")
+async def upload_company_letterhead(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Upload a letterhead image/template. The AI will use it when generating documents."""
+    rel_path = _save_upload(file, subdir="company")
+    profile = db.query(CompanyProfile).filter(CompanyProfile.user_id == user.id).first()
+    if not profile:
+        profile = CompanyProfile(
+            user_id=user.id,
+            company_name=user.company_name or user.full_name,
+            letterhead_path=rel_path,
+        )
+        db.add(profile)
+    else:
+        profile.letterhead_path = rel_path
+    db.commit()
+    db.refresh(profile)
+    return {
+        "letterhead_path": rel_path,
+        "letterhead_url": f"/uploads/{rel_path}?XTransformPort=8000",
+    }
+
+
+@app.delete("/api/company-profile/letterhead")
+def delete_company_letterhead(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Remove the letterhead image."""
+    profile = db.query(CompanyProfile).filter(CompanyProfile.user_id == user.id).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Company profile not found")
+    if profile.letterhead_path:
+        full_path = os.path.join(UPLOAD_DIR, profile.letterhead_path)
+        if os.path.exists(full_path):
+            try:
+                os.unlink(full_path)
+            except OSError:
+                pass
+        profile.letterhead_path = None
+    db.commit()
+    return {"deleted": True}
+
+
 # ---------------------- AI Document Generation ----------------------
 
 @app.get("/api/tenders/{tender_id}/documents/generated")
@@ -2505,6 +2553,7 @@ def generate_document(
         "director_title": profile.director_title if profile else "Director",
         "organogram_text": profile.organogram_text if profile else None,
         "signature_url": f"/uploads/{profile.signature_path}?XTransformPort=8000" if profile and profile.signature_path else None,
+        "letterhead_url": f"/uploads/{profile.letterhead_path}?XTransformPort=8000" if profile and profile.letterhead_path else None,
     }
 
     tender_data = {

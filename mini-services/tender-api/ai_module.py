@@ -603,7 +603,12 @@ Your documents must be:
 
 Output format: Use plain text with clear section headings in UPPERCASE, numbered sections, and bullet points where appropriate.
 Do NOT use markdown formatting (no **, no ##, no `). Use plain text only.
-Start each document with a formal header block:
+
+If a letterhead image URL is provided, start the document with:
+[LETTERHEAD: <letterhead_url>]
+
+Then the document content.
+If no letterhead URL is provided, start each document with a formal header block:
 
 [COMPANY NAME]
 [Company Address]

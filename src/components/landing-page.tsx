@@ -200,7 +200,7 @@ const FAQS = [
   },
   {
     q: "Can I track multiple tender teams?",
-    a: "Yes. The Pro plan manages up to 5 tenders with 5 users, Business manages 10+ tenders with unlimited users, and Custom supports 10+ tenders with dedicated support. You can organise tenders by team, region or client.",
+    a: "Yes. The Solo plan manages 1 tender, Pro manages up to 25 tenders with 10 AI document generations per month, Business gives unlimited tenders with 30 AI generations per month, and Custom supports multi-user accounts with custom AI credits. You can organise tenders by team, region or client.",
   },
   {
     q: "Does it work for PSIRA / security tenders specifically?",
@@ -1069,11 +1069,11 @@ function Pricing({ onGetStarted }: LandingPageProps) {
         "AI document reading",
         "AI tender assistant",
         "AI readiness reports",
+        "3 AI document generations / mo",
         "Compliance document library",
         "Deadline reminders",
         "Submission tracking",
         "Tender discovery & scraper",
-        "Excel export",
       ],
       cta: "Start free",
       highlighted: false,
@@ -1082,12 +1082,13 @@ function Pricing({ onGetStarted }: LandingPageProps) {
       name: "Pro",
       price: "R 1,499",
       period: "/month",
-      tagline: "For tender teams running up to 5 bids.",
+      tagline: "For tender teams running 15–25 bids a month.",
       features: [
-        "Manage up to 5 tenders",
+        "Manage up to 25 tenders",
         "AI document reading",
         "AI tender assistant",
         "AI readiness reports",
+        "10 AI document generations / mo",
         "Compliance document library",
         "Deadline reminders",
         "Submission tracking",
@@ -1101,12 +1102,13 @@ function Pricing({ onGetStarted }: LandingPageProps) {
       name: "Business",
       price: "R 3,999",
       period: "/month",
-      tagline: "For teams managing more than 10 tenders.",
+      tagline: "Unlimited tenders — manage your whole active pipeline.",
       features: [
-        "Manage more than 10 tenders",
+        "Unlimited tenders",
         "AI document reading",
         "AI tender assistant",
         "AI readiness reports",
+        "30 AI document generations / mo",
         "Compliance document library",
         "Deadline reminders",
         "Submission tracking",
@@ -1120,17 +1122,16 @@ function Pricing({ onGetStarted }: LandingPageProps) {
       name: "Custom",
       price: "Custom",
       period: "",
-      tagline: "For organisations managing 10+ tenders with custom needs.",
+      tagline: "For organisations with custom AI and multi-user needs.",
       features: [
-        "Manage 10+ tenders",
+        "Unlimited tenders",
+        "Custom AI document generations",
+        "Multi-user accounts",
+        "API access",
         "AI document reading",
         "AI tender assistant",
         "AI readiness reports",
-        "Compliance document library",
-        "Deadline reminders",
-        "Submission tracking",
-        "Tender discovery & scraper",
-        "Excel export",
+        "Dedicated support & SSO",
       ],
       cta: "Contact us",
       highlighted: false,
@@ -1220,6 +1221,17 @@ function Pricing({ onGetStarted }: LandingPageProps) {
             </Reveal>
           ))}
         </div>
+
+        <Reveal className="mx-auto mt-10 max-w-3xl" delay={0.1}>
+          <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-5 text-center">
+            <p className="text-sm text-muted-foreground">
+              <span className="font-semibold text-emerald-700">Why we cap AI generations, not tenders.</span>{" "}
+              A company needs to apply for multiple tenders just to win one — so we never cap your active pipeline.
+              Instead, the metered resource is AI document generation, which carries real infrastructure cost.
+              Need more? Upgrade anytime or top up credits.
+            </p>
+          </div>
+        </Reveal>
       </div>
     </section>
   );

@@ -1,0 +1,1353 @@
+     1→"use client";
+     2→
+     3→import { useCallback, useEffect, useMemo, useState } from "react";
+     4→import {
+     5→  Calculator,
+     6→  Plus,
+     7→  Copy,
+     8→  Trash2,
+     9→  RefreshCw,
+    10→  Loader2,
+    11→  Sparkles,
+    12→  TrendingUp,
+    13→  DollarSign,
+    14→  FileText,
+    15→  ChevronDown,
+    16→  ChevronUp,
+    17→  AlertTriangle,
+    18→  Hash,
+    19→  Receipt,
+    20→  Save,
+    21→  X,
+    22→  type LucideIcon,
+    23→} from "lucide-react";
+    24→import { toast } from "sonner";
+    25→import {
+    26→  Card,
+    27→  CardContent,
+    28→  CardDescription,
+    29→  CardHeader,
+    30→  CardTitle,
+    31→} from "@/components/ui/card";
+    32→import { Button } from "@/components/ui/button";
+    33→import { Input } from "@/components/ui/input";
+    34→import { Label } from "@/components/ui/label";
+    35→import { Textarea } from "@/components/ui/textarea";
+    36→import { Badge } from "@/components/ui/badge";
+    37→import { Skeleton } from "@/components/ui/skeleton";
+    38→import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+    39→import { Separator } from "@/components/ui/separator";
+    40→import {
+    41→  Select,
+    42→  SelectContent,
+    43→  SelectItem,
+    44→  SelectTrigger,
+    45→  SelectValue,
+    46→} from "@/components/ui/select";
+    47→import {
+    48→  Dialog,
+    49→  DialogContent,
+    50→  DialogDescription,
+    51→  DialogFooter,
+    52→  DialogHeader,
+    53→  DialogTitle,
+    54→} from "@/components/ui/dialog";
+    55→import {
+    56→  AlertDialog,
+    57→  AlertDialogAction,
+    58→  AlertDialogCancel,
+    59→  AlertDialogContent,
+    60→  AlertDialogDescription,
+    61→  AlertDialogFooter,
+    62→  AlertDialogHeader,
+    63→  AlertDialogTitle,
+    64→} from "@/components/ui/alert-dialog";
+    65→import {
+    66→  Table,
+    67→  TableBody,
+    68→  TableCell,
+    69→  TableHead,
+    70→  TableHeader,
+    71→  TableRow,
+    72→} from "@/components/ui/table";
+    73→import { api } from "@/lib/api";
+    74→import {
+    75→  useDashboardStore,
+    76→  formatCurrency,
+    77→  formatDateTime,
+    78→  statusColor,
+    79→} from "@/lib/dashboard-store";
+    80→import { cn } from "@/lib/utils";
+    81→
+    82→// ---- Types ----
+    83→interface PricingLineItem {
+    84→  category: string;
+    85→  description: string;
+    86→  quantity: number;
+    87→  rate: number;
+    88→  total: number;
+    89→}
+    90→
+    91→interface PricingVersion {
+    92→  id: number;
+    93→  tender_id: number;
+    94→  version_number: number;
+    95→  version_label: string | null;
+    96→  line_items: PricingLineItem[];
+    97→  subtotal: number;
+    98→  vat: number;
+    99→  total: number;
+   100→  notes: string | null;
+   101→  created_at: string | null;
+   102→}
+   103→
+   104→interface TenderOption {
+   105→  id: number;
+   106→  reference_number: string;
+   107→  title: string;
+   108→  client_company: string | null;
+   109→  status: string;
+   110→  estimated_value: number | null;
+   111→}
+   112→
+   113→// ---- Constants ----
+   114→const LINE_ITEM_CATEGORIES = [
+   115→  "Labour",
+   116→  "Equipment",
+   117→  "Consumables",
+   118→  "Transport",
+   119→  "Other",
+   120→] as const;
+   121→
+   122→const VAT_RATE = 0.15;
+   123→
+   124→// Per-category badge colour tokens (emerald-themed family)
+   125→const CATEGORY_COLORS: Record<string, string> = {
+   126→  Labour: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
+   127→  Equipment: "bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300",
+   128→  Consumables: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
+   129→  Transport: "bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-300",
+   130→  Other: "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300",
+   131→};
+   132→
+   133→// ---- Helpers ----
+   134→function lineTotal(qty: number, rate: number): number {
+   135→  const q = Number.isFinite(qty) ? qty : 0;
+   136→  const r = Number.isFinite(rate) ? rate : 0;
+   137→  return Math.round(q * r * 100) / 100;
+   138→}
+   139→
+   140→function calcTotals(items: PricingLineItem[]) {
+   141→  const subtotal = items.reduce(
+   142→    (sum, it) => sum + lineTotal(it.quantity, it.rate),
+   143→    0
+   144→  );
+   145→  const vat = Math.round(subtotal * VAT_RATE * 100) / 100;
+   146→  const total = Math.round((subtotal + vat) * 100) / 100;
+   147→  return { subtotal, vat, total };
+   148→}
+   149→
+   150→function categorySubtotals(items: PricingLineItem[]) {
+   151→  const map = new Map<string, number>();
+   152→  for (const c of LINE_ITEM_CATEGORIES) map.set(c, 0);
+   153→  for (const it of items) {
+   154→    const key = (it.category || "Other") as string;
+   155→    const prev = map.get(key) ?? 0;
+   156→    map.set(key, prev + lineTotal(it.quantity, it.rate));
+   157→  }
+   158→  return map;
+   159→}
+   160→
+   161→function newLineItem(): PricingLineItem {
+   162→  return {
+   163→    category: "Labour",
+   164→    description: "",
+   165→    quantity: 1,
+   166→    rate: 0,
+   167→    total: 0,
+   168→  };
+   169→}
+   170→
+   171→// ---- Empty state ----
+   172→function EmptyState({
+   173→  icon: Icon,
+   174→  message,
+   175→  hint,
+   176→  iconClass,
+   177→  children,
+   178→}: {
+   179→  icon: LucideIcon;
+   180→  message: string;
+   181→  hint?: string;
+   182→  iconClass?: string;
+   183→  children?: React.ReactNode;
+   184→}) {
+   185→  return (
+   186→    <div className="flex flex-col items-center justify-center gap-3 py-14 text-center">
+   187→      <div
+   188→        className={cn(
+   189→          "flex h-14 w-14 items-center justify-center rounded-2xl",
+   190→          iconClass ||
+   191→            "bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+   192→        )}
+   193→      >
+   194→        <Icon className="h-7 w-7" />
+   195→      </div>
+   196→      <div className="space-y-1">
+   197→        <p className="text-sm font-medium text-foreground">{message}</p>
+   198→        {hint && (
+   199→          <p className="text-xs text-muted-foreground max-w-sm">{hint}</p>
+   200→        )}
+   201→      </div>
+   202→      {children && <div className="mt-2 flex flex-wrap items-center justify-center gap-2">{children}</div>}
+   203→    </div>
+   204→  );
+   205→}
+   206→
+   207→// ---- Stat card ----
+   208→function StatCard({
+   209→  icon: Icon,
+   210→  iconClass,
+   211→  value,
+   212→  label,
+   213→  sublabel,
+   214→}: {
+   215→  icon: LucideIcon;
+   216→  iconClass: string;
+   217→  value: string | number;
+   218→  label: string;
+   219→  sublabel?: string;
+   220→}) {
+   221→  return (
+   222→    <Card>
+   223→      <CardContent className="flex items-center justify-between gap-3">
+   224→        <div className="min-w-0">
+   225→          <div className="text-2xl font-bold tracking-tight tabular-nums text-foreground">
+   226→            {value}
+   227→          </div>
+   228→          <div className="mt-0.5 text-sm font-medium text-foreground">{label}</div>
+   229→          {sublabel && (
+   230→            <div className="text-xs text-muted-foreground mt-0.5">{sublabel}</div>
+   231→          )}
+   232→        </div>
+   233→        <div
+   234→          className={cn(
+   235→            "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl",
+   236→            iconClass
+   237→          )}
+   238→        >
+   239→          <Icon className="h-5 w-5" />
+   240→        </div>
+   241→      </CardContent>
+   242→    </Card>
+   243→  );
+   244→}
+   245→
+   246→// ---- Category badge ----
+   247→function CategoryBadge({ category }: { category: string }) {
+   248→  const cls =
+   249→    CATEGORY_COLORS[category] ||
+   250→    "bg-muted text-muted-foreground";
+   251→  return (
+   252→    <Badge variant="outline" className={cn("text-[10px] font-medium", cls)}>
+   253→      {category}
+   254→    </Badge>
+   255→  );
+   256→}
+   257→
+   258→// ---- Category subtotal strip ----
+   259→function CategorySubtotals({ items }: { items: PricingLineItem[] }) {
+   260→  const subs = categorySubtotals(items);
+   261→  const activeCategories = LINE_ITEM_CATEGORIES.filter(
+   262→    (c) => (subs.get(c) ?? 0) > 0
+   263→  );
+   264→  if (activeCategories.length === 0) return null;
+   265→  return (
+   266→    <div className="flex flex-wrap items-stretch gap-2">
+   267→      {activeCategories.map((c) => (
+   268→        <div
+   269→          key={c}
+   270→          className="flex-1 min-w-[120px] rounded-lg border bg-muted/20 px-3 py-2"
+   271→        >
+   272→          <div className="flex items-center gap-1.5">
+   273→            <CategoryBadge category={c} />
+   274→          </div>
+   275→          <div className="mt-1 text-sm font-semibold tabular-nums text-foreground">
+   276→            {formatCurrency(subs.get(c) ?? 0)}
+   277→          </div>
+   278→        </div>
+   279→      ))}
+   280→    </div>
+   281→  );
+   282→}
+   283→
+   284→// ---- Version Card ----
+   285→interface VersionCardProps {
+   286→  version: PricingVersion;
+   287→  onDelete: (id: number) => void;
+   288→  onCopy: (version: PricingVersion) => void;
+   289→  defaultOpen?: boolean;
+   290→  copyingId?: number | null;
+   291→}
+   292→
+   293→function VersionCard({
+   294→  version,
+   295→  onDelete,
+   296→  onCopy,
+   297→  defaultOpen,
+   298→  copyingId,
+   299→}: VersionCardProps) {
+   300→  const [open, setOpen] = useState(defaultOpen ?? true);
+   301→  const [confirmOpen, setConfirmOpen] = useState(false);
+   302→  const isCopying = copyingId === version.id;
+   303→  const items = version.line_items || [];
+   304→
+   305→  return (
+   306→    <Card className="overflow-hidden">
+   307→      <CardHeader className="pb-3">
+   308→        <div className="flex items-start justify-between gap-3">
+   309→          <button
+   310→            type="button"
+   311→            onClick={() => setOpen((v) => !v)}
+   312→            className="min-w-0 flex-1 space-y-1 text-left"
+   313→          >
+   314→            <div className="flex flex-wrap items-center gap-2">
+   315→              <Badge className="bg-emerald-600 text-white hover:bg-emerald-600">
+   316→                v{version.version_number}
+   317→              </Badge>
+   318→              {version.version_label && (
+   319→                <span className="text-sm font-semibold text-foreground">
+   320→                  — {version.version_label}
+   321→                </span>
+   322→              )}
+   323→              {!version.version_label && (
+   324→                <span className="text-sm font-medium text-muted-foreground italic">
+   325→                  Untitled
+   326→                </span>
+   327→              )}
+   328→            </div>
+   329→            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+   330→              <FileText className="h-3.5 w-3.5" />
+   331→              {formatDateTime(version.created_at)}
+   332→              <span className="text-muted-foreground/50">·</span>
+   333→              <span>{items.length} line item{items.length === 1 ? "" : "s"}</span>
+   334→              <span className="text-muted-foreground/50">·</span>
+   335→              <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+   336→                {formatCurrency(version.total)}
+   337→              </span>
+   338→            </div>
+   339→          </button>
+   340→          <div className="flex items-center gap-1">
+   341→            <Button
+   342→              variant="ghost"
+   343→              size="icon"
+   344→              className="h-8 w-8"
+   345→              onClick={() => setOpen((v) => !v)}
+   346→              aria-label={open ? "Collapse" : "Expand"}
+   347→            >
+   348→              {open ? (
+   349→                <ChevronUp className="h-4 w-4" />
+   350→              ) : (
+   351→                <ChevronDown className="h-4 w-4" />
+   352→              )}
+   353→            </Button>
+   354→          </div>
+   355→        </div>
+   356→      </CardHeader>
+   357→
+   358→      {open && (
+   359→        <CardContent className="space-y-4 pt-0">
+   360→          {/* Line items table */}
+   361→          {items.length > 0 ? (
+   362→            <div className="rounded-lg border overflow-hidden">
+   363→              <div className="overflow-x-auto scrollbar-thin">
+   364→                <Table>
+   365→                  <TableHeader>
+   366→                    <TableRow className="bg-muted/40">
+   367→                      <TableHead className="w-[140px]">Category</TableHead>
+   368→                      <TableHead>Description</TableHead>
+   369→                      <TableHead className="text-right w-[70px]">Qty</TableHead>
+   370→                      <TableHead className="text-right w-[110px]">Rate</TableHead>
+   371→                      <TableHead className="text-right w-[120px]">Total</TableHead>
+   372→                    </TableRow>
+   373→                  </TableHeader>
+   374→                  <TableBody>
+   375→                    {items.map((li, idx) => (
+   376→                      <TableRow key={idx}>
+   377→                        <TableCell>
+   378→                          <CategoryBadge category={li.category} />
+   379→                        </TableCell>
+   380→                        <TableCell className="font-medium text-foreground">
+   381→                          {li.description || (
+   382→                            <span className="text-muted-foreground italic">
+   383→                              No description
+   384→                            </span>
+   385→                          )}
+   386→                        </TableCell>
+   387→                        <TableCell className="text-right tabular-nums">
+   388→                          {li.quantity}
+   389→                        </TableCell>
+   390→                        <TableCell className="text-right tabular-nums">
+   391→                          {formatCurrency(li.rate)}
+   392→                        </TableCell>
+   393→                        <TableCell className="text-right tabular-nums font-medium">
+   394→                          {formatCurrency(li.total)}
+   395→                        </TableCell>
+   396→                      </TableRow>
+   397→                    ))}
+   398→                  </TableBody>
+   399→                </Table>
+   400→              </div>
+   401→            </div>
+   402→          ) : (
+   403→            <div className="rounded-lg border border-dashed py-6 text-center text-sm text-muted-foreground">
+   404→              No line items in this version
+   405→            </div>
+   406→          )}
+   407→
+   408→          {/* Category subtotals */}
+   409→          {items.length > 0 && <CategorySubtotals items={items} />}
+   410→
+   411→          {/* Totals row */}
+   412→          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+   413→            <div className="rounded-lg border bg-muted/30 p-3">
+   414→              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+   415→                Subtotal
+   416→              </div>
+   417→              <div className="mt-1 text-lg font-semibold tabular-nums text-foreground">
+   418→                {formatCurrency(version.subtotal)}
+   419→              </div>
+   420→            </div>
+   421→            <div className="rounded-lg border bg-muted/30 p-3">
+   422→              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+   423→                VAT (15%)
+   424→              </div>
+   425→              <div className="mt-1 text-lg font-semibold tabular-nums text-foreground">
+   426→                {formatCurrency(version.vat)}
+   427→              </div>
+   428→            </div>
+   429→            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950/40">
+   430→              <div className="text-[11px] uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
+   431→                Total (incl. VAT)
+   432→              </div>
+   433→              <div className="mt-1 text-2xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+   434→                {formatCurrency(version.total)}
+   435→              </div>
+   436→            </div>
+   437→          </div>
+   438→
+   439→          {/* Notes */}
+   440→          {version.notes && (
+   441→            <div className="rounded-lg bg-muted/30 p-3">
+   442→              <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground mb-1">
+   443→                <FileText className="h-3 w-3" />
+   444→                Notes
+   445→              </div>
+   446→              <p className="text-sm text-foreground whitespace-pre-wrap">
+   447→                {version.notes}
+   448→              </p>
+   449→            </div>
+   450→          )}
+   451→
+   452→          <Separator />
+   453→
+   454→          {/* Action buttons */}
+   455→          <div className="flex flex-wrap items-center justify-end gap-2">
+   456→            <Button
+   457→              variant="outline"
+   458→              size="sm"
+   459→              onClick={() => onCopy(version)}
+   460→              disabled={isCopying}
+   461→            >
+   462→              {isCopying ? (
+   463→                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+   464→              ) : (
+   465→                <Copy className="h-3.5 w-3.5" />
+   466→              )}
+   467→              {isCopying ? "Copying…" : "Copy to New Version"}
+   468→            </Button>
+   469→            <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+   470→              <Button
+   471→                variant="ghost"
+   472→                size="sm"
+   473→                className="text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950"
+   474→                aria-label="Delete version"
+   475→                onClick={() => setConfirmOpen(true)}
+   476→              >
+   477→                <Trash2 className="h-3.5 w-3.5" />
+   478→                Delete
+   479→              </Button>
+   480→              <AlertDialogContent>
+   481→                <AlertDialogHeader>
+   482→                  <AlertDialogTitle>Delete pricing version?</AlertDialogTitle>
+   483→                  <AlertDialogDescription>
+   484→                    This will permanently delete{" "}
+   485→                    <span className="font-semibold text-foreground">
+   486→                      v{version.version_number}
+   487→                      {version.version_label ? ` — ${version.version_label}` : ""}
+   488→                    </span>
+   489→                    . This action cannot be undone.
+   490→                  </AlertDialogDescription>
+   491→                </AlertDialogHeader>
+   492→                <AlertDialogFooter>
+   493→                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+   494→                  <AlertDialogAction
+   495→                    className="bg-rose-600 hover:bg-rose-700 focus-visible:ring-rose-600"
+   496→                    onClick={() => {
+   497→                      onDelete(version.id);
+   498→                      setConfirmOpen(false);
+   499→                    }}
+   500→                  >
+   501→                    <Trash2 className="h-4 w-4" />
+   502→                    Delete
+   503→                  </AlertDialogAction>
+   504→                </AlertDialogFooter>
+   505→              </AlertDialogContent>
+   506→            </AlertDialog>
+   507→          </div>
+   508→        </CardContent>
+   509→      )}
+   510→    </Card>
+   511→  );
+   512→}
+   513→
+   514→// ---- Line Item Editor Row ----
+   515→interface LineItemRowProps {
+   516→  item: PricingLineItem;
+   517→  index: number;
+   518→  onChange: (idx: number, patch: Partial<PricingLineItem>) => void;
+   519→  onRemove: (idx: number) => void;
+   520→  canRemove: boolean;
+   521→}
+   522→
+   523→function LineItemRow({ item, index, onChange, onRemove, canRemove }: LineItemRowProps) {
+   524→  return (
+   525→    <TableRow>
+   526→      <TableCell className="w-[150px] pr-2">
+   527→        <Select
+   528→          value={item.category}
+   529→          onValueChange={(v) => onChange(index, { category: v })}
+   530→        >
+   531→          <SelectTrigger className="w-full h-9">
+   532→            <SelectValue />
+   533→          </SelectTrigger>
+   534→          <SelectContent>
+   535→            {LINE_ITEM_CATEGORIES.map((c) => (
+   536→              <SelectItem key={c} value={c}>
+   537→                {c}
+   538→              </SelectItem>
+   539→            ))}
+   540→          </SelectContent>
+   541→        </Select>
+   542→      </TableCell>
+   543→      <TableCell className="pr-2">
+   544→        <Input
+   545→          value={item.description}
+   546→          onChange={(e) => onChange(index, { description: e.target.value })}
+   547→          placeholder="Description of work / item"
+   548→          className="h-9"
+   549→        />
+   550→      </TableCell>
+   551→      <TableCell className="w-[80px] pr-2">
+   552→        <Input
+   553→          type="number"
+   554→          min={0}
+   555→          step="any"
+   556→          value={Number.isFinite(item.quantity) ? item.quantity : 0}
+   557→          onChange={(e) =>
+   558→            onChange(index, {
+   559→              quantity: parseFloat(e.target.value) || 0,
+   560→              total: lineTotal(parseFloat(e.target.value) || 0, item.rate),
+   561→            })
+   562→          }
+   563→          className="h-9 text-right tabular-nums"
+   564→        />
+   565→      </TableCell>
+   566→      <TableCell className="w-[130px] pr-2">
+   567→        <Input
+   568→          type="number"
+   569→          min={0}
+   570→          step="any"
+   571→          value={Number.isFinite(item.rate) ? item.rate : 0}
+   572→          onChange={(e) =>
+   573→            onChange(index, {
+   574→              rate: parseFloat(e.target.value) || 0,
+   575→              total: lineTotal(item.quantity, parseFloat(e.target.value) || 0),
+   576→            })
+   577→          }
+   578→          className="h-9 text-right tabular-nums"
+   579→        />
+   580→      </TableCell>
+   581→      <TableCell className="w-[130px]">
+   582→        <div className="flex items-center justify-between gap-1">
+   583→          <span className="text-sm font-medium tabular-nums text-foreground">
+   584→            {formatCurrency(lineTotal(item.quantity, item.rate))}
+   585→          </span>
+   586→          <Button
+   587→            variant="ghost"
+   588→            size="icon"
+   589→            className="h-7 w-7 text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950 shrink-0"
+   590→            disabled={!canRemove}
+   591→            onClick={() => onRemove(index)}
+   592→            aria-label="Remove line item"
+   593→          >
+   594→            <X className="h-3.5 w-3.5" />
+   595→          </Button>
+   596→        </div>
+   597→      </TableCell>
+   598→    </TableRow>
+   599→  );
+   600→}
+   601→
+   602→// ---- New Pricing Version Dialog ----
+   603→interface NewPricingDialogProps {
+   604→  open: boolean;
+   605→  onOpenChange: (open: boolean) => void;
+   606→  tenderId: number;
+   607→  nextVersionNumber: number;
+   608→  onSaved: () => void;
+   609→}
+   610→
+   611→function NewPricingDialog({
+   612→  open,
+   613→  onOpenChange,
+   614→  tenderId,
+   615→  nextVersionNumber,
+   616→  onSaved,
+   617→}: NewPricingDialogProps) {
+   618→  const [versionLabel, setVersionLabel] = useState("");
+   619→  const [lineItems, setLineItems] = useState<PricingLineItem[]>([
+   620→    newLineItem(),
+   621→    newLineItem(),
+   622→  ]);
+   623→  const [notes, setNotes] = useState("");
+   624→  const [saving, setSaving] = useState(false);
+   625→
+   626→  // Reset form when dialog opens
+   627→  useEffect(() => {
+   628→    if (open) {
+   629→      setVersionLabel("");
+   630→      setLineItems([newLineItem(), newLineItem()]);
+   631→      setNotes("");
+   632→    }
+   633→  }, [open]);
+   634→
+   635→  const totals = useMemo(() => calcTotals(lineItems), [lineItems]);
+   636→  const hasAnyItem = lineItems.some(
+   637→    (li) => li.description.trim() || li.quantity > 0 || li.rate > 0
+   638→  );
+   639→
+   640→  const updateItem = (idx: number, patch: Partial<PricingLineItem>) => {
+   641→    setLineItems((items) =>
+   642→      items.map((it, i) => (i === idx ? { ...it, ...patch } : it))
+   643→    );
+   644→  };
+   645→
+   646→  const removeItem = (idx: number) => {
+   647→    setLineItems((items) => items.filter((_, i) => i !== idx));
+   648→  };
+   649→
+   650→  const addItem = () => {
+   651→    setLineItems((items) => [...items, newLineItem()]);
+   652→  };
+   653→
+   654→  const handleSave = async () => {
+   655→    const cleanItems = lineItems
+   656→      .filter(
+   657→        (li) =>
+   658→          li.description.trim() !== "" || li.quantity > 0 || li.rate > 0
+   659→      )
+   660→      .map((li) => ({
+   661→        category: li.category,
+   662→        description: li.description.trim(),
+   663→        quantity: Number(li.quantity) || 0,
+   664→        rate: Number(li.rate) || 0,
+   665→        total: lineTotal(li.quantity, li.rate),
+   666→      }));
+   667→
+   668→    if (cleanItems.length === 0) {
+   669→      toast.error("Add at least one line item with a description");
+   670→      return;
+   671→    }
+   672→
+   673→    setSaving(true);
+   674→    try {
+   675→      await api.createPricing(tenderId, {
+   676→        tender_id: tenderId,
+   677→        version_label: versionLabel.trim() || undefined,
+   678→        line_items: cleanItems,
+   679→        notes: notes.trim() || undefined,
+   680→      });
+   681→      toast.success(`Pricing v${nextVersionNumber} created`);
+   682→      onSaved();
+   683→      onOpenChange(false);
+   684→    } catch (e: any) {
+   685→      toast.error(e?.message || "Failed to create pricing version");
+   686→    } finally {
+   687→      setSaving(false);
+   688→    }
+   689→  };
+   690→
+   691→  return (
+   692→    <Dialog open={open} onOpenChange={onOpenChange}>
+   693→      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin">
+   694→        <DialogHeader>
+   695→          <DialogTitle className="flex items-center gap-2">
+   696→            <Calculator className="h-5 w-5 text-primary" />
+   697→            New Pricing Version
+   698→          </DialogTitle>
+   699→          <DialogDescription>
+   700→            Build a pricing sheet for this tender. The version number (v
+   701→            {nextVersionNumber}) is assigned automatically.
+   702→          </DialogDescription>
+   703→        </DialogHeader>
+   704→
+   705→        <div className="space-y-4 py-2">
+   706→          {/* Version label */}
+   707→          <div className="grid gap-2">
+   708→            <Label htmlFor="version-label">
+   709→              Version label{" "}
+   710→              <span className="text-xs text-muted-foreground font-normal">
+   711→                (optional)
+   712→              </span>
+   713→            </Label>
+   714→            <Input
+   715→              id="version-label"
+   716→              value={versionLabel}
+   717→              onChange={(e) => setVersionLabel(e.target.value)}
+   718→              placeholder="e.g. Draft, Final, Revised after addendum"
+   719→              className="max-w-md"
+   720→            />
+   721→          </div>
+   722→
+   723→          {/* Line items editor */}
+   724→          <div className="space-y-2">
+   725→            <div className="flex items-center justify-between">
+   726→              <Label className="text-sm font-medium">Line items</Label>
+   727→              <Button
+   728→                variant="outline"
+   729→                size="sm"
+   730→                onClick={addItem}
+   731→                type="button"
+   732→              >
+   733→                <Plus className="h-3.5 w-3.5" />
+   734→                Add line item
+   735→              </Button>
+   736→            </div>
+   737→            <div className="rounded-lg border overflow-hidden">
+   738→              <div className="overflow-x-auto scrollbar-thin">
+   739→                <Table>
+   740→                  <TableHeader>
+   741→                    <TableRow className="bg-muted/40">
+   742→                      <TableHead className="w-[150px]">Category</TableHead>
+   743→                      <TableHead>Description</TableHead>
+   744→                      <TableHead className="text-right w-[80px]">Qty</TableHead>
+   745→                      <TableHead className="text-right w-[130px]">
+   746→                        Rate (ZAR)
+   747→                      </TableHead>
+   748→                      <TableHead className="text-right w-[130px]">Total</TableHead>
+   749→                    </TableRow>
+   750→                  </TableHeader>
+   751→                  <TableBody>
+   752→                    {lineItems.length === 0 ? (
+   753→                      <TableRow>
+   754→                        <TableCell
+   755→                          colSpan={5}
+   756→                          className="text-center text-sm text-muted-foreground py-6"
+   757→                        >
+   758→                          No line items yet. Click &quot;Add line item&quot; to start.
+   759→                        </TableCell>
+   760→                      </TableRow>
+   761→                    ) : (
+   762→                      lineItems.map((item, idx) => (
+   763→                        <LineItemRow
+   764→                          key={idx}
+   765→                          item={item}
+   766→                          index={idx}
+   767→                          onChange={updateItem}
+   768→                          onRemove={removeItem}
+   769→                          canRemove={lineItems.length > 1}
+   770→                        />
+   771→                      ))
+   772→                    )}
+   773→                  </TableBody>
+   774→                </Table>
+   775→              </div>
+   776→            </div>
+   777→          </div>
+   778→
+   779→          {/* Live totals preview */}
+   780→          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+   781→            <div className="rounded-lg border bg-muted/30 p-3">
+   782→              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+   783→                Subtotal
+   784→              </div>
+   785→              <div className="mt-1 text-lg font-semibold tabular-nums text-foreground">
+   786→                {formatCurrency(totals.subtotal)}
+   787→              </div>
+   788→            </div>
+   789→            <div className="rounded-lg border bg-muted/30 p-3">
+   790→              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+   791→                VAT (15%)
+   792→              </div>
+   793→              <div className="mt-1 text-lg font-semibold tabular-nums text-foreground">
+   794→                {formatCurrency(totals.vat)}
+   795→              </div>
+   796→            </div>
+   797→            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950/40">
+   798→              <div className="text-[11px] uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
+   799→                Total (incl. VAT)
+   800→              </div>
+   801→              <div className="mt-1 text-2xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+   802→                {formatCurrency(totals.total)}
+   803→              </div>
+   804→            </div>
+   805→          </div>
+   806→
+   807→          {/* Notes */}
+   808→          <div className="grid gap-2">
+   809→            <Label htmlFor="pricing-notes">
+   810→              Notes{" "}
+   811→              <span className="text-xs text-muted-foreground font-normal">
+   812→                (optional)
+   813→              </span>
+   814→            </Label>
+   815→            <Textarea
+   816→              id="pricing-notes"
+   817→              value={notes}
+   818→              onChange={(e) => setNotes(e.target.value)}
+   819→              placeholder="Pricing notes — assumptions, exclusions, terms…"
+   820→              rows={3}
+   821→            />
+   822→          </div>
+   823→        </div>
+   824→
+   825→        <DialogFooter className="gap-2">
+   826→          <Button
+   827→            variant="outline"
+   828→            onClick={() => onOpenChange(false)}
+   829→            disabled={saving}
+   830→          >
+   831→            Cancel
+   832→          </Button>
+   833→          <Button onClick={handleSave} disabled={saving || !hasAnyItem}>
+   834→            {saving ? (
+   835→              <>
+   836→                <Loader2 className="h-4 w-4 animate-spin" />
+   837→                Saving…
+   838→              </>
+   839→            ) : (
+   840→              <>
+   841→                <Save className="h-4 w-4" />
+   842→                Save version
+   843→              </>
+   844→            )}
+   845→          </Button>
+   846→        </DialogFooter>
+   847→      </DialogContent>
+   848→    </Dialog>
+   849→  );
+   850→}
+   851→
+   852→// ---- AI Generating Card ----
+   853→function AIGeneratingCard() {
+   854→  return (
+   855→    <Card className="border-emerald-300 bg-gradient-to-br from-emerald-50 via-white to-teal-50 dark:border-emerald-800 dark:from-emerald-950/40 dark:via-card dark:to-teal-950/30">
+   856→      <CardContent className="py-10">
+   857→        <div className="flex flex-col items-center text-center gap-4">
+   858→          <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400">
+   859→            <span className="absolute inset-0 rounded-2xl bg-emerald-400/40 animate-ping" />
+   860→            <Sparkles className="h-7 w-7 animate-pulse" />
+   861→          </div>
+   862→          <div className="space-y-1">
+   863→            <h3 className="text-base font-semibold flex items-center justify-center gap-2">
+   864→              <Calculator className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+   865→              AI is generating a pricing sheet…
+   866→            </h3>
+   867→            <p className="text-sm text-muted-foreground max-w-md">
+   868→              Analyzing tender requirements, personnel, PSIRA grades, and equipment
+   869→              to create realistic pricing.
+   870→            </p>
+   871→            <p className="text-xs text-muted-foreground/80 italic">
+   872→              This usually takes 15-30 seconds
+   873→            </p>
+   874→          </div>
+   875→          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+   876→            <Loader2 className="h-3 w-3 animate-spin" />
+   877→            Working…
+   878→          </div>
+   879→        </div>
+   880→      </CardContent>
+   881→    </Card>
+   882→  );
+   883→}
+   884→
+   885→// ---- Main Component ----
+   886→export function PricingTab() {
+   887→  const { setTab, selectTender } = useDashboardStore();
+   888→  const [tenders, setTenders] = useState<TenderOption[]>([]);
+   889→  const [selectedTenderId, setSelectedTenderId] = useState<number | null>(null);
+   890→  const [versions, setVersions] = useState<PricingVersion[]>([]);
+   891→  const [loadingTenders, setLoadingTenders] = useState(true);
+   892→  const [loadingVersions, setLoadingVersions] = useState(false);
+   893→  const [refreshing, setRefreshing] = useState(false);
+   894→  const [error, setError] = useState<string | null>(null);
+   895→  const [dialogOpen, setDialogOpen] = useState(false);
+   896→  const [generating, setGenerating] = useState(false);
+   897→  const [copyingId, setCopyingId] = useState<number | null>(null);
+   898→
+   899→  const fetchTenders = useCallback(async (isRefresh = false) => {
+   900→    if (isRefresh) setRefreshing(true);
+   901→    else setLoadingTenders(true);
+   902→    setError(null);
+   903→    try {
+   904→      const res = await api.listTenders({ sort: "updated_at", order: "desc" });
+   905→      setTenders(
+   906→        res.items.map((t) => ({
+   907→          id: t.id,
+   908→          reference_number: t.reference_number,
+   909→          title: t.title,
+   910→          client_company: t.client_company,
+   911→          status: t.status,
+   912→          estimated_value: t.estimated_value ?? null,
+   913→        }))
+   914→      );
+   915→    } catch (e: any) {
+   916→      setError(e?.message || "Failed to load tenders");
+   917→    } finally {
+   918→      setLoadingTenders(false);
+   919→      setRefreshing(false);
+   920→    }
+   921→  }, []);
+   922→
+   923→  const fetchVersions = useCallback(async (tenderId: number) => {
+   924→    setLoadingVersions(true);
+   925→    try {
+   926→      const res = await api.listPricing(tenderId);
+   927→      const list = (res.items || []) as PricingVersion[];
+   928→      list.sort((a, b) => b.version_number - a.version_number);
+   929→      setVersions(list);
+   930→    } catch (e: any) {
+   931→      toast.error(e?.message || "Failed to load pricing versions");
+   932→      setVersions([]);
+   933→    } finally {
+   934→      setLoadingVersions(false);
+   935→    }
+   936→  }, []);
+   937→
+   938→  useEffect(() => {
+   939→    fetchTenders();
+   940→  }, [fetchTenders]);
+   941→
+   942→  useEffect(() => {
+   943→    if (selectedTenderId !== null) {
+   944→      fetchVersions(selectedTenderId);
+   945→    } else {
+   946→      setVersions([]);
+   947→    }
+   948→  }, [selectedTenderId, fetchVersions]);
+   949→
+   950→  const selectedTender = useMemo(
+   951→    () => tenders.find((t) => t.id === selectedTenderId) || null,
+   952→    [tenders, selectedTenderId]
+   953→  );
+   954→
+   955→  const nextVersionNumber = useMemo(() => {
+   956→    if (versions.length === 0) return 1;
+   957→    return Math.max(...versions.map((v) => v.version_number)) + 1;
+   958→  }, [versions]);
+   959→
+   960→  const totalValue = useMemo(
+   961→    () => versions.reduce((sum, v) => sum + (v.total || 0), 0),
+   962→    [versions]
+   963→  );
+   964→  const latestTotal = useMemo(
+   965→    () => (versions.length > 0 ? versions[0].total : 0),
+   966→    [versions]
+   967→  );
+   968→
+   969→  const handleDelete = async (versionId: number) => {
+   970→    if (selectedTenderId === null) return;
+   971→    try {
+   972→      await api.deletePricing(versionId);
+   973→      toast.success("Pricing version deleted");
+   974→      fetchVersions(selectedTenderId);
+   975→    } catch (e: any) {
+   976→      toast.error(e?.message || "Failed to delete pricing version");
+   977→    }
+   978→  };
+   979→
+   980→  const handleCopy = async (version: PricingVersion) => {
+   981→    setCopyingId(version.id);
+   982→    try {
+   983→      const newVersion = await api.copyPricingVersion(version.id);
+   984→      toast.success(
+   985→        `Copied v${version.version_number} → v${newVersion?.version_number ?? "new"}`
+   986→      );
+   987→      if (selectedTenderId !== null) fetchVersions(selectedTenderId);
+   988→    } catch (e: any) {
+   989→      toast.error(e?.message || "Failed to copy pricing version");
+   990→    } finally {
+   991→      setCopyingId(null);
+   992→    }
+   993→  };
+   994→
+   995→  const handleGenerate = async () => {
+   996→    if (selectedTenderId === null) return;
+   997→    setGenerating(true);
+   998→    try {
+   999→      const newVersion = await api.generatePricingSheet(selectedTenderId);
+  1000→      toast.success(
+  1001→        `AI generated pricing v${newVersion?.version_number ?? "new"}`
+  1002→      );
+  1003→      fetchVersions(selectedTenderId);
+  1004→    } catch (e: any) {
+  1005→      toast.error(e?.message || "AI pricing generation failed");
+  1006→    } finally {
+  1007→      setGenerating(false);
+  1008→    }
+  1009→  };
+  1010→
+  1011→  const handleRefresh = () => {
+  1012→    fetchTenders(true);
+  1013→    if (selectedTenderId !== null) {
+  1014→      fetchVersions(selectedTenderId);
+  1015→    }
+  1016→  };
+  1017→
+  1018→  const openTenderInTendersTab = () => {
+  1019→    if (selectedTenderId === null) return;
+  1020→    setTab("tenders");
+  1021→    setTimeout(() => selectTender(selectedTenderId), 50);
+  1022→  };
+  1023→
+  1024→  // ---- Loading state ----
+  1025→  if (loadingTenders) {
+  1026→    return (
+  1027→      <div className="space-y-6">
+  1028→        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+  1029→          <div className="space-y-2">
+  1030→            <Skeleton className="h-8 w-48" />
+  1031→            <Skeleton className="h-4 w-72" />
+  1032→          </div>
+  1033→          <Skeleton className="h-9 w-32" />
+  1034→        </div>
+  1035→        <Skeleton className="h-10 w-full max-w-md" />
+  1036→        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+  1037→          {Array.from({ length: 3 }).map((_, i) => (
+  1038→            <Card key={i}>
+  1039→              <CardContent className="flex items-start justify-between gap-3">
+  1040→                <div className="flex-1 space-y-2">
+  1041→                  <Skeleton className="h-7 w-20" />
+  1042→                  <Skeleton className="h-4 w-24" />
+  1043→                </div>
+  1044→                <Skeleton className="h-11 w-11 rounded-xl" />
+  1045→              </CardContent>
+  1046→            </Card>
+  1047→          ))}
+  1048→        </div>
+  1049→        <Card>
+  1050→          <CardHeader>
+  1051→            <Skeleton className="h-5 w-40" />
+  1052→            <Skeleton className="h-4 w-56" />
+  1053→          </CardHeader>
+  1054→          <CardContent className="space-y-3">
+  1055→            {Array.from({ length: 3 }).map((_, i) => (
+  1056→              <Skeleton key={i} className="h-24 w-full" />
+  1057→            ))}
+  1058→          </CardContent>
+  1059→        </Card>
+  1060→      </div>
+  1061→    );
+  1062→  }
+  1063→
+  1064→  // ---- Error state ----
+  1065→  if (error) {
+  1066→    return (
+  1067→      <div className="space-y-6">
+  1068→        <div>
+  1069→          <h1 className="text-2xl font-bold tracking-tight">Pricing Tracking</h1>
+  1070→          <p className="text-sm text-muted-foreground">
+  1071→            Build pricing sheets, track revisions, and compare versions
+  1072→          </p>
+  1073→        </div>
+  1074→        <Alert variant="destructive">
+  1075→          <AlertTriangle className="h-4 w-4" />
+  1076→          <AlertTitle>Couldn&apos;t load pricing data</AlertTitle>
+  1077→          <AlertDescription>
+  1078→            <p className="mb-3">{error}</p>
+  1079→            <Button
+  1080→              size="sm"
+  1081→              variant="outline"
+  1082→              onClick={() => fetchTenders()}
+  1083→              className="border-destructive/40 text-destructive hover:bg-destructive/10"
+  1084→            >
+  1085→              <RefreshCw className="h-3.5 w-3.5" />
+  1086→              Try again
+  1087→            </Button>
+  1088→          </AlertDescription>
+  1089→        </Alert>
+  1090→      </div>
+  1091→    );
+  1092→  }
+  1093→
+  1094→  return (
+  1095→    <div className="space-y-6">
+  1096→      {/* ---- Page header ---- */}
+  1097→      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+  1098→        <div>
+  1099→          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+  1100→            <Calculator className="h-6 w-6 text-primary" />
+  1101→            Pricing Tracking
+  1102→          </h1>
+  1103→          <p className="text-sm text-muted-foreground mt-0.5">
+  1104→            Build pricing sheets, track revisions, and compare versions
+  1105→          </p>
+  1106→        </div>
+  1107→        <Button
+  1108→          variant="ghost"
+  1109→          size="sm"
+  1110→          onClick={handleRefresh}
+  1111→          disabled={refreshing}
+  1112→        >
+  1113→          <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
+  1114→          Refresh
+  1115→        </Button>
+  1116→      </div>
+  1117→
+  1118→      {/* ---- Tender selector ---- */}
+  1119→      <div className="grid gap-2">
+  1120→        <Label className="flex items-center gap-1.5 text-sm font-medium">
+  1121→          <Hash className="h-3.5 w-3.5 text-primary" />
+  1122→          Select a tender to view pricing
+  1123→        </Label>
+  1124→        {tenders.length === 0 ? (
+  1125→          <Alert>
+  1126→            <AlertTriangle className="h-4 w-4" />
+  1127→            <AlertTitle>No tenders available</AlertTitle>
+  1128→            <AlertDescription>
+  1129→              Create a tender first to start building pricing sheets.
+  1130→            </AlertDescription>
+  1131→          </Alert>
+  1132→        ) : (
+  1133→          <Select
+  1134→            value={selectedTenderId !== null ? String(selectedTenderId) : undefined}
+  1135→            onValueChange={(v) => setSelectedTenderId(v ? Number(v) : null)}
+  1136→          >
+  1137→            <SelectTrigger className="w-full max-w-xl">
+  1138→              <SelectValue placeholder="Select a tender…" />
+  1139→            </SelectTrigger>
+  1140→            <SelectContent>
+  1141→              {tenders.map((t) => (
+  1142→                <SelectItem key={t.id} value={String(t.id)}>
+  1143→                  <span className="font-mono text-xs font-semibold text-primary mr-2">
+  1144→                    {t.reference_number}
+  1145→                  </span>
+  1146→                  <span className="truncate">{t.title}</span>
+  1147→                </SelectItem>
+  1148→              ))}
+  1149→            </SelectContent>
+  1150→          </Select>
+  1151→        )}
+  1152→      </div>
+  1153→
+  1154→      {/* ---- No tender selected ---- */}
+  1155→      {selectedTenderId === null ? (
+  1156→        <Card className="border-dashed">
+  1157→          <CardContent>
+  1158→            <EmptyState
+  1159→              icon={Calculator}
+  1160→              message="Select a tender to view pricing"
+  1161→              hint="Pick a tender from the dropdown above to start tracking pricing revisions, generate AI pricing sheets, and compare version history."
+  1162→            />
+  1163→          </CardContent>
+  1164→        </Card>
+  1165→      ) : (
+  1166→        <>
+  1167→          {/* ---- Tender info banner ---- */}
+  1168→          {selectedTender && (
+  1169→            <Card className="border-emerald-200 bg-emerald-50/50 dark:border-emerald-900 dark:bg-emerald-950/20">
+  1170→              <CardContent>
+  1171→                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+  1172→                  <div className="min-w-0 flex-1 space-y-1.5">
+  1173→                    <div className="flex flex-wrap items-center gap-2">
+  1174→                      <span className="font-mono text-xs font-semibold text-primary">
+  1175→                        {selectedTender.reference_number}
+  1176→                      </span>
+  1177→                      <Badge
+  1178→                        className={cn(
+  1179→                          "text-[10px] font-medium",
+  1180→                          statusColor(selectedTender.status)
+  1181→                        )}
+  1182→                      >
+  1183→                        {selectedTender.status}
+  1184→                      </Badge>
+  1185→                      <button
+  1186→                        type="button"
+  1187→                        onClick={openTenderInTendersTab}
+  1188→                        className="text-[11px] text-muted-foreground underline-offset-2 hover:underline hover:text-foreground"
+  1189→                      >
+  1190→                        Open tender →
+  1191→                      </button>
+  1192→                    </div>
+  1193→                    <div className="text-base font-semibold text-foreground line-clamp-1">
+  1194→                      {selectedTender.title}
+  1195→                    </div>
+  1196→                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+  1197→                      <span>
+  1198→                        Client:{" "}
+  1199→                        <span className="text-foreground font-medium">
+  1200→                          {selectedTender.client_company || "—"}
+  1201→                        </span>
+  1202→                      </span>
+  1203→                      {selectedTender.estimated_value != null && (
+  1204→                        <span>
+  1205→                          Est. value:{" "}
+  1206→                          <span className="text-foreground font-medium">
+  1207→                            {formatCurrency(selectedTender.estimated_value)}
+  1208→                          </span>
+  1209→                        </span>
+  1210→                      )}
+  1211→                    </div>
+  1212→                  </div>
+  1213→                </div>
+  1214→              </CardContent>
+  1215→            </Card>
+  1216→          )}
+  1217→
+  1218→          {/* ---- Stats row ---- */}
+  1219→          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+  1220→            <StatCard
+  1221→              icon={Receipt}
+  1222→              iconClass="bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+  1223→              value={versions.length}
+  1224→              label="Pricing Versions"
+  1225→              sublabel="Total revisions tracked"
+  1226→            />
+  1227→            <StatCard
+  1228→              icon={TrendingUp}
+  1229→              iconClass="bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400"
+  1230→              value={formatCurrency(latestTotal)}
+  1231→              label="Latest Total"
+  1232→              sublabel="Most recent version (incl. VAT)"
+  1233→            />
+  1234→            <StatCard
+  1235→              icon={DollarSign}
+  1236→              iconClass="bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+  1237→              value={formatCurrency(totalValue)}
+  1238→              label="All Versions Total"
+  1239→              sublabel="Sum of all versions (incl. VAT)"
+  1240→            />
+  1241→          </div>
+  1242→
+  1243→          {/* ---- Action buttons ---- */}
+  1244→          <div className="flex flex-wrap items-center gap-2">
+  1245→            <Button
+  1246→              onClick={handleGenerate}
+  1247→              disabled={generating}
+  1248→              className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white"
+  1249→            >
+  1250→              {generating ? (
+  1251→                <>
+  1252→                  <Loader2 className="h-4 w-4 animate-spin" />
+  1253→                  Generating…
+  1254→                </>
+  1255→              ) : (
+  1256→                <>
+  1257→                  <Sparkles className="h-4 w-4" />
+  1258→                  AI Generate Pricing
+  1259→                </>
+  1260→              )}
+  1261→            </Button>
+  1262→            <Button
+  1263→              variant="outline"
+  1264→              onClick={() => setDialogOpen(true)}
+  1265→              disabled={generating}
+  1266→            >
+  1267→              <Plus className="h-4 w-4" />
+  1268→              New Pricing Version
+  1269→            </Button>
+  1270→          </div>
+  1271→
+  1272→          {/* ---- AI generating state ---- */}
+  1273→          {generating && <AIGeneratingCard />}
+  1274→
+  1275→          {/* ---- Versions list ---- */}
+  1276→          {loadingVersions ? (
+  1277→            <Card>
+  1278→              <CardHeader>
+  1279→                <Skeleton className="h-5 w-40" />
+  1280→                <Skeleton className="h-4 w-56" />
+  1281→              </CardHeader>
+  1282→              <CardContent className="space-y-3">
+  1283→                {Array.from({ length: 2 }).map((_, i) => (
+  1284→                  <Skeleton key={i} className="h-32 w-full" />
+  1285→                ))}
+  1286→              </CardContent>
+  1287→            </Card>
+  1288→          ) : versions.length === 0 ? (
+  1289→            <Card className="border-dashed">
+  1290→              <CardContent>
+  1291→                <EmptyState
+  1292→                  icon={Calculator}
+  1293→                  message="No pricing versions yet"
+  1294→                  hint="Generate an AI pricing draft based on the tender's requirements, or manually create your first pricing sheet."
+  1295→                >
+  1296→                  <Button
+  1297→                    onClick={handleGenerate}
+  1298→                    disabled={generating}
+  1299→                    className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white"
+  1300→                  >
+  1301→                    <Sparkles className="h-4 w-4" />
+  1302→                    AI Generate Pricing
+  1303→                  </Button>
+  1304→                  <Button variant="outline" onClick={() => setDialogOpen(true)}>
+  1305→                    <Plus className="h-4 w-4" />
+  1306→                    New Pricing Version
+  1307→                  </Button>
+  1308→                </EmptyState>
+  1309→              </CardContent>
+  1310→            </Card>
+  1311→          ) : (
+  1312→            <div className="space-y-3">
+  1313→              <div className="flex items-center justify-between">
+  1314→                <h2 className="text-lg font-semibold flex items-center gap-2">
+  1315→                  <FileText className="h-5 w-5 text-primary" />
+  1316→                  Version History
+  1317→                  <Badge variant="outline" className="text-xs">
+  1318→                    {versions.length}
+  1319→                  </Badge>
+  1320→                </h2>
+  1321→                <span className="text-xs text-muted-foreground">
+  1322→                  Sorted by version (latest first)
+  1323→                </span>
+  1324→              </div>
+  1325→              {versions.map((v, idx) => (
+  1326→                <VersionCard
+  1327→                  key={v.id}
+  1328→                  version={v}
+  1329→                  onDelete={handleDelete}
+  1330→                  onCopy={handleCopy}
+  1331→                  copyingId={copyingId}
+  1332→                  defaultOpen={idx === 0}
+  1333→                />
+  1334→              ))}
+  1335→            </div>
+  1336→          )}
+  1337→        </>
+  1338→      )}
+  1339→
+  1340→      {/* ---- New Pricing Version Dialog ---- */}
+  1341→      {selectedTenderId !== null && (
+  1342→        <NewPricingDialog
+  1343→          open={dialogOpen}
+  1344→          onOpenChange={setDialogOpen}
+  1345→          tenderId={selectedTenderId}
+  1346→          nextVersionNumber={nextVersionNumber}
+  1347→          onSaved={() => fetchVersions(selectedTenderId)}
+  1348→        />
+  1349→      )}
+  1350→    </div>
+  1351→  );
+  1352→}
+  1353→

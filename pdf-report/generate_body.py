@@ -356,8 +356,8 @@ def chart_architecture(path):
     plt.close()
 
 def chart_pricing(path):
-    tiers = ['Starter', 'Professional', 'Business', 'Enterprise']
-    prices = [499, 1499, 3999, 9999]
+    tiers = ['Solo', 'Pro', 'Business', 'Custom']
+    prices = [0, 1499, 3999, 9999]
     colors_list = [ICON_HEX, ACCENT_HEX, HEADER_HEX, '#416252']
     fig, ax = plt.subplots(figsize=(7.6, 3.4))
     bars = ax.bar(tiers, prices, color=colors_list, edgecolor='white', width=0.6)
@@ -371,10 +371,13 @@ def chart_pricing(path):
     ax.tick_params(colors=MUTED_HEX, labelsize=9)
     ax.grid(axis='y', linestyle='--', alpha=0.25, color=BORDER_HEX)
     ax.set_axisbelow(True)
+    ax.yaxis.set_major_locator(plt.MaxNLocator(integer=True))
     for bar, p in zip(bars, prices):
+        label = 'Free' if p == 0 else 'R%s' % format(p, ',')
         ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 120,
-                'R%s' % format(p, ','), ha='center', fontsize=9.5,
+                label, ha='center', fontsize=9.5,
                 color=HEADER_HEX, weight='bold')
+    ax.set_ylim(0, 11500)
     plt.tight_layout()
     plt.savefig(path, dpi=200, bbox_inches='tight', facecolor='white')
     plt.close()
@@ -1625,10 +1628,12 @@ h1('Chapter 14  —  Commercial Strategy & Pricing', story)
 h2('14.1  Pricing Model', story)
 body(
     "TM Flow is priced as a tiered monthly SaaS subscription in South African Rand. Four tiers are "
-    "defined in the landing page, designed to capture the full spectrum from solo contractors to "
+    "defined on the landing page, designed to capture the full spectrum from solo contractors to "
     "established tender consulting agencies. The pricing reflects the value of a single won tender "
     "(typically R100K-R5M in contract value) against the monthly subscription cost — even a single "
-    "win per year pays for years of subscription.",
+    "win per year pays for years of subscription. The free Solo tier removes friction for trial, "
+    "Pro at R1,499/month captures the bulk of the target market, Business at R3,999/month monetises "
+    "the AI features that deliver the most value, and Custom is the enterprise entry point.",
     story)
 
 chart_pricing('/home/z/my-project/pdf-report/chart_pricing.png')
@@ -1637,48 +1642,86 @@ story.append(embed_image('/home/z/my-project/pdf-report/chart_pricing.png',
 caption('Figure 14.1 — The four subscription tiers and their monthly ZAR pricing.', story)
 
 h2('14.2  Tier Comparison', story)
+body(
+    "The tier structure follows a deliberate design principle: the metered resource is AI document "
+    "generation, not the number of tenders a user can track. The reasoning is explained in section "
+    "14.3. The table below summarises the four tiers as currently presented on the public landing "
+    "page.",
+    story)
 data = [
     [Paragraph('Tier', TBL_HEAD), Paragraph('Price (ZAR/mo)', TBL_HEAD_C),
-     Paragraph('Tenders', TBL_HEAD_C), Paragraph('Key Features', TBL_HEAD)],
-    [Paragraph('Starter', TBL_CELL), Paragraph('R499', TBL_CELL_C),
-     Paragraph('5', TBL_CELL_C),
-     Paragraph('Single user, core tender tracking, library, deadlines', TBL_CELL)],
-    [Paragraph('Professional', TBL_CELL), Paragraph('R1,499', TBL_CELL_C),
-     Paragraph('25', TBL_CELL_C),
-     Paragraph('AI document reading, checklist generation, assistant', TBL_CELL)],
+     Paragraph('Tenders', TBL_HEAD_C), Paragraph('AI Doc Generations / mo', TBL_HEAD_C),
+     Paragraph('Key Features', TBL_HEAD)],
+    [Paragraph('Solo', TBL_CELL), Paragraph('Free', TBL_CELL_C),
+     Paragraph('1', TBL_CELL_C), Paragraph('3', TBL_CELL_C),
+     Paragraph('AI reading, assistant, readiness reports, library, deadlines', TBL_CELL)],
+    [Paragraph('Pro', TBL_CELL), Paragraph('R1,499', TBL_CELL_C),
+     Paragraph('Up to 25', TBL_CELL_C), Paragraph('10', TBL_CELL_C),
+     Paragraph('AI document reading, checklist generation, assistant, Excel export', TBL_CELL)],
     [Paragraph('Business', TBL_CELL), Paragraph('R3,999', TBL_CELL_C),
-     Paragraph('Unlimited', TBL_CELL_C),
+     Paragraph('Unlimited', TBL_CELL_C), Paragraph('30', TBL_CELL_C),
      Paragraph('14 AI document generators, readiness reports, addendum AI', TBL_CELL)],
-    [Paragraph('Enterprise', TBL_CELL), Paragraph('R9,999', TBL_CELL_C),
-     Paragraph('Unlimited', TBL_CELL_C),
+    [Paragraph('Custom', TBL_CELL), Paragraph('Custom', TBL_CELL_C),
+     Paragraph('Unlimited', TBL_CELL_C), Paragraph('Custom', TBL_CELL_C),
      Paragraph('Multi-user, API access, dedicated support, SSO', TBL_CELL)],
 ]
-story.append(make_table(data, [0.16, 0.16, 0.12, 0.56]))
-caption('Table 14.1 — Subscription tier feature comparison.', story)
+story.append(make_table(data, [0.10, 0.14, 0.13, 0.18, 0.45]))
+caption('Table 14.1 — Subscription tier feature comparison (realigned v1.1 pricing).', story)
 
-h2('14.3  Go-To-Market', story)
+h2('14.3  Pricing Strategy — Why We Cap AI Credits, Not Tenders', story)
+body(
+    "The original pricing structure capped the number of tenders a user could actively track: Pro "
+    "at 5 tenders, Business at 10+. This created two commercial problems. First, a South African "
+    "contractor typically needs to apply for between fifteen and twenty-five tenders just to win "
+    "one — a conversion rate that is normal in this market but makes a 5-tender cap feel punitive "
+    "at the R1,499/month price point. Customers hit the ceiling within their first active bidding "
+    "month and churn. Second, R3,999/month is a premium price that signals an enterprise-grade "
+    "product; users paying that amount expect to manage their entire active pipeline without "
+    "artificial caps, and a 10-tender limit undermines the value perception.",
+    story)
+body(
+    "The realigned structure removes tender caps entirely from the Business and Custom tiers and "
+    "raises the Pro cap to 25 tenders — enough to cover a realistic monthly bidding volume. The "
+    "metered resource is instead AI document generation, which carries real per-call infrastructure "
+    "cost through the z-ai engine. This aligns the pricing with the actual cost driver of the "
+    "business: a customer who tracks 100 tenders but never generates an AI document costs the "
+    "platform almost nothing, while a customer who generates 50 method statements a month consumes "
+    "real compute. The Solo tier carries 3 AI generations per month (enough to evaluate the "
+    "feature), Pro carries 10, Business carries 30, and Custom is negotiable. Additional credits "
+    "can be topped up or unlocked by upgrading.",
+    story)
+body(
+    "This model has three commercial advantages. It lets users manage their whole pipeline freely, "
+    "which is the core promise of the product. It protects infrastructure margin by metering the "
+    "expensive resource. And it creates a natural upgrade path: a user who hits their monthly "
+    "generation cap has a clear, value-justified reason to move up a tier, rather than an "
+    "artificial tender-count ceiling that feels arbitrary.",
+    story)
+
+h2('14.4  Go-To-Market', story)
 body(
     "The initial go-to-market targets security and cleaning contractors in Gauteng and the Western "
     "Cape, the two provinces with the highest tender volume. The acquisition motion is direct sales "
-    "backed by content marketing (tender-readiness guides, B-BBEE compliance explainers) and a "
-    "freemium Starter tier that lets contractors try the platform on a real tender before upgrading. "
-    "Channel partnerships with PSIRA training providers and CIDB consulting firms are a secondary "
-    "acquisition motion: these partners already serve the target customer and can bundle TM Flow "
-    "into their offerings on a revenue-share basis.",
+    "backed by content marketing (tender-readiness guides, B-BBEE compliance explainers) and the "
+    "free Solo tier that lets contractors try the platform on a real tender before upgrading to "
+    "Pro. Channel partnerships with PSIRA training providers and CIDB consulting firms are a "
+    "secondary acquisition motion: these partners already serve the target customer and can bundle "
+    "TM Flow into their offerings on a revenue-share basis.",
     story)
 
-h2('14.4  Revenue Projections', story)
+h2('14.5  Revenue Projections', story)
 body(
     "At conservative adoption rates, the platform reaches break-even at approximately 25 Business-tier "
     "subscribers (R100K monthly recurring revenue). A realistic 12-month target of 80 paying "
-    "customers across tiers (40 Professional, 30 Business, 10 Enterprise) yields approximately "
-    "R220K monthly recurring revenue, or R2.6M annual recurring revenue. The gross margin is high "
-    "given the low infrastructure cost (single small database instance, object storage, and the "
-    "AI API consumption which is passed through at a markup). The primary cost driver is customer "
-    "acquisition, not infrastructure.",
+    "customers across tiers (40 Pro, 30 Business, 10 Custom) yields approximately R220K monthly "
+    "recurring revenue, or R2.6M annual recurring revenue. AI document generation overage credits "
+    "add a secondary revenue line estimated at 10-15 percent on top of base subscription for the "
+    "Pro and Business tiers. The gross margin is high given the low infrastructure cost (single "
+    "small database instance, object storage, and the AI API consumption which is passed through "
+    "at a markup). The primary cost driver is customer acquisition, not infrastructure.",
     story)
 
-h2('14.5  Competitive Moat', story)
+h2('14.6  Competitive Moat', story)
 body(
     "Three factors compound to form the competitive moat. First, the South African compliance "
     "regime (B-BBEE, PSIRA, CIDB, CIPC, COIDA, SARS) is deeply embedded in the data model and AI "
@@ -1763,9 +1806,10 @@ body(
 h2('15.4  Recommendation', story)
 body(
     "The recommended commercial path is Scenario C: operate TM Flow as a recurring SaaS subscription "
-    "rather than sell the IP. The Starter tier at R499/month removes friction for trial, the "
-    "Professional tier at R1,499/month captures the bulk of the target market, and the Business "
-    "tier at R3,999/month monetises the AI features that deliver the most value. If a one-time "
+    "rather than sell the IP. The free Solo tier removes friction for trial, the Pro tier at "
+    "R1,499/month captures the bulk of the target market, and the Business tier at R3,999/month "
+    "monetises the AI features that deliver the most value. AI document generation credits provide "
+    "a natural metered upgrade path. If a one-time "
     "transaction is unavoidable, the floor should be R150K for IP sale or R90K for single-client "
     "implementation with retained IP. The recurring revenue path is the highest-value outcome for "
     "the builder and the lowest-risk outcome for the customer.",

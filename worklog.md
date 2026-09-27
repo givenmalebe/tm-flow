@@ -1492,3 +1492,34 @@ Stage Summary:
 - 4 embedded charts: architecture diagram, module breakdown donut, API endpoint distribution, pricing tiers
 - 12 data tables, 6 metric callout strips
 - Source files retained: cover.html, generate_body.py, merge.py for future edits
+
+---
+Task ID: PRICING-1
+Agent: Main Orchestrator
+Task: Realign pricing tiers — raise Pro tender cap, make Business unlimited, meter AI generations instead of tenders
+
+Work Log:
+- Searched landing-page.tsx and pricing-tab.tsx for current pricing
+- Found landing page tiers: Solo (R0, 1 tender), Pro (R1,499, 5 tenders), Business (R3,999, 10+ tenders), Custom
+- Updated landing-page.tsx Pricing component:
+  - Solo: added "3 AI document generations / mo"
+  - Pro: "5 tenders" -> "up to 25 tenders", tagline "up to 5 bids" -> "15-25 bids a month", added "10 AI document generations / mo"
+  - Business: "more than 10 tenders" -> "Unlimited tenders", tagline rewritten, added "30 AI document generations / mo"
+  - Custom: rewrote features to lead with "Unlimited tenders" + "Custom AI document generations" + multi-user/API/SSO
+- Added explanatory note card below pricing grid: "Why we cap AI generations, not tenders"
+- Updated FAQ answer about tracking multiple tender teams to match new tier structure
+- Updated report Chapter 14 in generate_body.py:
+  - Section 14.1 Pricing Model rewritten to reference free Solo tier
+  - Table 14.1 rebuilt with 5 columns (Tier, Price, Tenders, AI Doc Gens/mo, Key Features) and realigned rows
+  - Added new section 14.3 "Pricing Strategy — Why We Cap AI Credits, Not Tenders" (3 body paragraphs explaining the rationale)
+  - Renumbered subsequent sections (14.4 GTM, 14.5 Revenue, 14.6 Moat)
+  - Updated chart_pricing(): tier names Solo/Pro/Business/Custom, prices 0/1499/3999/9999, "Free" label on Solo bar
+  - Updated Chapter 15.4 Recommendation to reference Solo/Pro/Business naming and AI credits upgrade path
+- Regenerated body PDF, merged with cover, branded metadata, deployed to public/
+- Verified via agent-browser: all 4 landing page tiers render with correct prices/features/AI-credit lines; PDF re-served with 200 OK
+
+Stage Summary:
+- Landing page now live with realigned pricing (verified via browser extraction)
+- Report PDF regenerated to 40 pages (was 39; +1 page from new section 14.3), 641 KB, deployed at /TM-Flow-Technical-Report.pdf
+- QA: 11/11 critical pdf_qa checks pass; only 11 minor em-dash warnings (unchanged)
+- Key change: tender caps removed from Business/Custom, Pro raised to 25, AI document generation is now the metered resource (Solo 3/mo, Pro 10/mo, Business 30/mo, Custom negotiable)

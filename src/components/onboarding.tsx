@@ -98,7 +98,7 @@ export function Onboarding() {
       await api.updateCompanyProfile(form);
       await api.completeOnboarding({ company_name: form.company_name });
       await refreshUser();
-      toast.success("Onboarding complete! Welcome to TenderFlow.");
+      toast.success("Onboarding complete! Welcome to TM Flow.");
     } catch (e: any) {
       toast.error(e.message || "Failed to complete onboarding");
     } finally {
@@ -149,7 +149,7 @@ export function Onboarding() {
               <Building2 className="h-5 w-5" />
             </div>
             <div>
-              <div className="text-base font-semibold">TenderFlow Onboarding</div>
+              <div className="text-base font-semibold">TM Flow Onboarding</div>
               <div className="text-[10px] text-muted-foreground">Step {step + 1} of {steps.length}</div>
             </div>
           </div>

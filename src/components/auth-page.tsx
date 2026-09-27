@@ -142,7 +142,7 @@ export function AuthPage({
     setLoading(true);
     try {
       await login(siEmail.trim(), siPassword);
-      toast.success("Welcome back to TenderFlow.");
+      toast.success("Welcome back to TM Flow.");
       onSuccess();
     } catch (err) {
       const msg =
@@ -166,7 +166,7 @@ export function AuthPage({
         suPassword,
         suCompany.trim() || undefined
       );
-      toast.success("Account created. Welcome to TenderFlow.");
+      toast.success("Account created. Welcome to TM Flow.");
       setLoading(false);
       setSuccess(true);
       // Celebratory micro-animation: button morphs to a checkmark for 800ms
@@ -663,7 +663,7 @@ function LeftPanel() {
           <div className="flex size-10 items-center justify-center rounded-xl bg-white/15 ring-1 ring-white/30 backdrop-blur-sm">
             <FileText className="size-5" />
           </div>
-          <span className="text-xl font-semibold tracking-tight">TenderFlow</span>
+          <span className="text-xl font-semibold tracking-tight">TM Flow</span>
         </div>
 
         {/* Headline */}

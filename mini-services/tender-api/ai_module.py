@@ -1,5 +1,5 @@
 """
-TenderFlow - AI module
+TM Flow - AI module
 Uses the z-ai-web-dev-sdk CLI (Node.js) via subprocess for:
 - Tender document reading & extraction (chat)
 - AI assistant chat
@@ -284,7 +284,7 @@ Return ONLY the JSON object."""
 
 # ---- AI Assistant (natural language Q&A over tenders) ----
 
-ASSISTANT_SYSTEM = """You are TenderFlow AI, the mission-driven tender-winning assistant for a South African tender management system.
+ASSISTANT_SYSTEM = """You are TM Flow AI, the mission-driven tender-winning assistant for a South African tender management system.
 
 YOUR MISSION: Help the user WIN tenders. Every answer you give should move the user closer to a successful, compliant, on-time tender submission.
 
@@ -344,7 +344,7 @@ def assistant_answer(question: str, context_data: Dict[str, Any]) -> str:
 
     prompt = f"""Answer the user's question using the COMPLETE SYSTEM SNAPSHOT below.
 
-This snapshot contains ALL data from every part of the TenderFlow system:
+This snapshot contains ALL data from every part of the TM Flow system:
 - All tenders with full details, AI-extracted info, checklists, documents, briefings, pricing, submissions, communications, addendums
 - The compliance document library with expiry dates
 - Dashboard statistics
@@ -1427,7 +1427,7 @@ Generate a complete pricing sheet with realistic line items. Return ONLY the JSO
 
 # ---- AI Tender Readiness Report (the "most important requirement") ----
 
-READINESS_SYSTEM = """You are TenderFlow AI, a tender readiness analyst. Your job is to give the user a crystal-clear picture of where they stand with a tender and exactly what they need to do to win it.
+READINESS_SYSTEM = """You are TM Flow AI, a tender readiness analyst. Your job is to give the user a crystal-clear picture of where they stand with a tender and exactly what they need to do to win it.
 
 You produce a READINESS REPORT in plain text with these exact sections (use the section headers as written):
 

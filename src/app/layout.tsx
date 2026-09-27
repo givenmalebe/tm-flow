@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TenderFlow — AI-Powered Tender Management",
+  title: "TM Flow — AI-Powered Tender Management",
   description:
     "The complete tender management system: capture, track, prepare, submit and win tenders with AI-assisted document reading, checklists and deadline management.",
   keywords: [
@@ -30,13 +30,13 @@ export const metadata: Metadata = {
     "compliance",
     "South Africa tenders",
   ],
-  authors: [{ name: "TenderFlow" }],
+  authors: [{ name: "TM Flow" }],
   icons: { icon: "/logo.svg" },
   openGraph: {
-    title: "TenderFlow — AI-Powered Tender Management",
+    title: "TM Flow — AI-Powered Tender Management",
     description:
       "One central system to manage every tender from discovery to outcome.",
-    siteName: "TenderFlow",
+    siteName: "TM Flow",
     type: "website",
   },
 };

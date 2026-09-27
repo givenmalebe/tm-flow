@@ -788,7 +788,7 @@ export function AssistantTab() {
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <h2 className="truncate text-sm font-semibold">TenderFlow AI</h2>
+              <h2 className="truncate text-sm font-semibold">TM Flow AI</h2>
               <Badge
                 variant="outline"
                 className="border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300"
@@ -966,7 +966,7 @@ export function AssistantTab() {
           </div>
           <div className="mt-1.5 flex items-center justify-between px-1 text-[10px] text-muted-foreground">
             <span className="hidden sm:inline">
-              TenderFlow AI can make mistakes. Verify important information
+              TM Flow AI can make mistakes. Verify important information
               against your tender data.
             </span>
             <span className="sm:hidden">Enter to send · Shift+Enter for new line</span>

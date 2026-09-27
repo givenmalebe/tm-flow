@@ -1,5 +1,5 @@
 """
-TenderFlow - Main FastAPI Application
+TM Flow - Main FastAPI Application
 Tender Management System API
 """
 import os
@@ -35,7 +35,7 @@ init_db()
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-app = FastAPI(title="TenderFlow API", version="1.0.0")
+app = FastAPI(title="TM Flow API", version="1.0.0")
 
 # CORS - allow the Next.js frontend (and preview origin)
 app.add_middleware(

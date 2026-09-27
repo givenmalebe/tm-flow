@@ -172,7 +172,7 @@ export function DashboardShell() {
                   <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
                     <FileStack className="h-4 w-4 text-primary-foreground" />
                   </div>
-                  TenderFlow
+                  TM Flow
                 </SheetTitle>
               </SheetHeader>
               <nav className="p-3 space-y-1">
@@ -201,7 +201,7 @@ export function DashboardShell() {
               <FileStack className="h-5 w-5 text-primary-foreground" />
             </div>
             <div className="hidden sm:block">
-              <div className="text-base font-semibold leading-tight">TenderFlow</div>
+              <div className="text-base font-semibold leading-tight">TM Flow</div>
               <div className="text-[10px] text-muted-foreground leading-tight">
                 AI Tender Management
               </div>

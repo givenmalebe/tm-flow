@@ -156,7 +156,7 @@ const FEATURES: {
 ];
 
 const HOW_IT_WORKS = [
-  { step: "01", icon: FileText, title: "Capture the tender", desc: "Paste the details or upload the tender document — TenderFlow stores it in your database." },
+  { step: "01", icon: FileText, title: "Capture the tender", desc: "Paste the details or upload the tender document — TM Flow stores it in your database." },
   { step: "02", icon: ScanText, title: "AI reads & extracts", desc: "The checklist, deadlines and risks surface automatically. No more 4-hour reading sessions." },
   { step: "03", icon: Calculator, title: "Prepare & price", desc: "Pull docs from your compliance library, build pricing versions, assign tasks to your team." },
   { step: "04", icon: Send, title: "Submit & track", desc: "Record the submission, log clarifications, watch addendums, monitor the outcome." },
@@ -192,7 +192,7 @@ const REMINDERS = [
 const FAQS = [
   {
     q: "What types of documents can the AI read?",
-    a: "TenderFlow's AI engine reads PDF, DOCX, DOC and TXT files. For scanned PDFs (images), it uses vision-mode to OCR and extract the same structured fields. You can also paste raw tender text directly into the system.",
+    a: "TM Flow's AI engine reads PDF, DOCX, DOC and TXT files. For scanned PDFs (images), it uses vision-mode to OCR and extract the same structured fields. You can also paste raw tender text directly into the system.",
   },
   {
     q: "Is my data secure?",
@@ -227,7 +227,7 @@ function Logo() {
         <FileText className="size-5" />
       </div>
       <span className="text-lg font-semibold tracking-tight text-foreground">
-        Tender<span className="text-primary">Flow</span>
+        TM <span className="text-primary">Flow</span>
       </span>
     </div>
   );
@@ -564,7 +564,7 @@ function Hero({ onGetStarted }: LandingPageProps) {
               variants={fadeUp}
               className="mx-auto mt-6 max-w-xl text-base text-muted-foreground sm:text-lg lg:mx-0"
             >
-              TenderFlow is the central system that takes you from tender
+              TM Flow is the central system that takes you from tender
               discovery to submission — reading documents, building checklists,
               tracking deadlines and surfacing risks before they cost you the
               bid.
@@ -763,7 +763,7 @@ function HowItWorks() {
             From chaos to submission in 4 steps
           </h2>
           <p className="mt-3 text-muted-foreground">
-            TenderFlow replaces your spreadsheets, sticky notes and shared
+            TM Flow replaces your spreadsheets, sticky notes and shared
             drives with a single, repeatable pipeline.
           </p>
         </Reveal>
@@ -852,7 +852,7 @@ function AIHighlight() {
                 </h2>
                 <p className="mt-3 text-muted-foreground">
                   Stop spending your evenings reading 200-page tender PDFs.
-                  TenderFlow extracts the 16 points that actually matter —
+                  TM Flow extracts the 16 points that actually matter —
                   structured, searchable and ready to action.
                 </p>
 
@@ -944,7 +944,7 @@ function DeadlineLadder() {
             Never miss a deadline
           </h2>
           <p className="mt-3 text-muted-foreground">
-            TenderFlow nudges you at five key milestones, including compulsory
+            TM Flow nudges you at five key milestones, including compulsory
             briefings and site inspections — so the only surprises are the good
             kind.
           </p>
@@ -1038,7 +1038,7 @@ function Testimonial() {
                 </div>
                 <div>
                   <div className="text-sm font-semibold text-foreground">
-                    TenderFlow AI
+                    TM Flow AI
                   </div>
                   <div className="text-xs text-muted-foreground">
                     Your bid-readiness summary, on demand
@@ -1314,7 +1314,7 @@ function FinalCTA({ onGetStarted }: LandingPageProps) {
               <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
                 Stop managing tenders in spreadsheets.
                 <br className="hidden sm:block" /> Start winning them with
-                TenderFlow.
+                TM Flow.
               </h2>
               <p className="mx-auto mt-4 max-w-xl text-emerald-50">
                 Set up your workspace in under two minutes. Your first tender
@@ -1413,7 +1413,7 @@ function Footer() {
         {/* Bottom bar */}
         <div className="mt-12 flex flex-col items-center justify-between gap-4 border-t pt-6 sm:flex-row">
           <p className="text-xs text-muted-foreground">
-            © 2025 TenderFlow. Built for tender teams.
+            © 2025 TM Flow. Built for tender teams.
           </p>
           <Badge
             variant="outline"

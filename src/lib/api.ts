@@ -1,5 +1,5 @@
 /**
- * TenderFlow - Frontend API client
+ * TM Flow - Frontend API client
  * All requests route through the Caddy gateway using XTransformPort=8000
  * to reach the Python FastAPI backend.
  */

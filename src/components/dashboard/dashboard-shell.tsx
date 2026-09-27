@@ -78,11 +78,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "deadlines", label: "Deadlines", icon: CalendarClock, description: "Track & remind" },
   { id: "library", label: "Compliance Library", icon: FolderCheck, description: "Company documents" },
   { id: "company", label: "Company Profile", icon: Building, description: "Branding & letterhead" },
-  { id: "briefings", label: "Briefings", icon: MapPin, description: "Site inspections" },
-  { id: "pricing", label: "Pricing", icon: Calculator, description: "Pricing versions" },
   { id: "submissions", label: "Submissions", icon: Send, description: "Submitted tenders" },
-  { id: "clarifications", label: "Clarifications", icon: MessageSquare, description: "Communications" },
-  { id: "addendums", label: "Addendums", icon: FileDiff, description: "Tender changes" },
   { id: "assistant", label: "AI Assistant", icon: Bot, description: "Ask about tenders" },
 ];
 
@@ -355,11 +351,7 @@ export function DashboardShell() {
             {activeTab === "deadlines" && <DeadlinesTab />}
             {activeTab === "library" && <LibraryTab />}
             {activeTab === "company" && <CompanyTab />}
-            {activeTab === "briefings" && <BriefingsTab />}
-            {activeTab === "pricing" && <PricingTab />}
             {activeTab === "submissions" && <SubmissionsTab />}
-            {activeTab === "clarifications" && <ClarificationsTab />}
-            {activeTab === "addendums" && <AddendumsTab />}
             {activeTab === "assistant" && <AssistantTab />}
           </div>
         </main>

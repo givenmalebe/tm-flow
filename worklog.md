@@ -1463,3 +1463,32 @@ Stage Summary:
   ✅ Register statistics badges (Submitted, Awarded, Unsuccessful, Pending)
   ✅ Search and filtering by all 11 criteria
   ✅ Sorting by 9 fields
+
+---
+Task ID: PDF-1
+Agent: Main Orchestrator
+Task: Generate a full PDF technical & product report for the TM Flow tender management application
+
+Work Log:
+- Invoked the `pdf` skill and loaded the Report brief (ReportLab pipeline)
+- Read main.py (67 API endpoints), database.py (11 SQLAlchemy models), ai_module.py (12 AI features) to extract report content
+- Generated an emerald cascade palette via `pdf.py palette.cascade` (matching the app's emerald theme)
+- Built the cover HTML using Template 01 (HUD Data Terminal) — vertical anchor line, grid background, kicker/hero/summary/stats/meta drawers
+- Fixed cover overlap validation errors (text-line gap, text-text span collision) — passed `cover_validate.js`
+- Rendered cover.pdf via `html2poster.js --width 794px`
+- Wrote `generate_body.py` (~650 lines) — TocDocTemplate + multiBuild, 15 chapters, 4 matplotlib charts, 12 tables, metric callouts, running header/footer with page numbers
+- Fixed font registration (removed missing NotoSansSC path, used NotoSerifSC + FreeSerif + SarasaMonoSC)
+- Fixed matplotlib color arg (ReportLab HexColor object -> hex string)
+- Adjusted TOC page numbering with +1 offset to account for the prepended cover page
+- Ran preflight: `code.sanitize`, `font.check` (0 issues), `toc.check` (resolved after merge)
+- Merged cover + body via pypdf with strict A4 normalization (0.1pt tolerance)
+- Branded metadata via `pdf.py meta.brand`
+- Final `pdf_qa.py` scan: 11/11 critical checks pass, only 11 minor em-dash line-start warnings (CJK rule, lenient for English)
+
+Stage Summary:
+- Final deliverable: `/home/z/my-project/pdf-report/TM-Flow-Technical-Report.pdf` (39 pages, 638 KB)
+- Structure: Cover (p1) -> TOC (p2-5) -> 15 chapters (p6-39) with clickable TOC links
+- All 15 TOC page numbers verified to match actual content pages exactly
+- 4 embedded charts: architecture diagram, module breakdown donut, API endpoint distribution, pricing tiers
+- 12 data tables, 6 metric callout strips
+- Source files retained: cover.html, generate_body.py, merge.py for future edits

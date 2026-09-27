@@ -1,0 +1,2002 @@
+     1→"""
+     2→TM Flow - Main FastAPI Application
+     3→Tender Management System API
+     4→"""
+     5→import os
+     6→import json
+     7→import shutil
+     8→import uuid
+     9→from datetime import datetime, date, timedelta
+    10→from typing import List, Optional, Any
+    11→from pathlib import Path
+    12→
+    13→from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Query, Header
+    14→from fastapi.middleware.cors import CORSMiddleware
+    15→from fastapi.staticfiles import StaticFiles
+    16→from pydantic import BaseModel, EmailStr, Field
+    17→from sqlalchemy.orm import Session, joinedload
+    18→from sqlalchemy import or_, and_, desc, asc
+    19→
+    20→from database import (
+    21→    Base, engine, get_db, init_db,
+    22→    User, Tender, TenderDocument, ChecklistItem, LibraryDocument,
+    23→    Briefing, PricingVersion, Submission, Communication, Addendum, ReminderSetting,
+    24→    CompanyProfile, GeneratedDocument
+    25→)
+    26→from auth import (
+    27→    hash_password, verify_password, create_access_token, get_current_user
+    28→)
+    29→import ai_module
+    30→
+    31→# Initialize DB on import
+    32→init_db()
+    33→
+    34→# Upload directory
+    35→UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+    36→os.makedirs(UPLOAD_DIR, exist_ok=True)
+    37→
+    38→app = FastAPI(title="TM Flow API", version="1.0.0")
+    39→
+    40→# CORS - allow the Next.js frontend (and preview origin)
+    41→app.add_middleware(
+    42→    CORSMiddleware,
+    43→    allow_origins=["*"],
+    44→    allow_credentials=True,
+    45→    allow_methods=["*"],
+    46→    allow_headers=["*"],
+    47→)
+    48→
+    49→# Serve uploaded files
+    50→app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+    51→
+    52→# Available tender statuses
+    53→TENDER_STATUSES = [
+    54→    "New Opportunity", "Under Review", "Interested", "Not Interested",
+    55→    "Preparing", "Documents Outstanding", "Pricing in Progress",
+    56→    "Awaiting Information", "Ready for Submission", "Submitted",
+    57→    "Clarification Requested", "Clarification Submitted", "Shortlisted",
+    58→    "Interview/Presentation", "Negotiation", "Awarded", "Unsuccessful",
+    59→    "Cancelled", "Withdrawn", "Expired",
+    60→]
+    61→
+    62→CHECKLIST_CATEGORIES = [
+    63→    "Company profile", "CIPC documents", "SARS documents",
+    64→    "B-BBEE certificate/affidavit", "PSIRA documents", "COIDA",
+    65→    "Financial statements", "References", "Organogram", "Methodology",
+    66→    "Risk assessment", "SOPs", "POPIA documents", "Signed declarations",
+    67→    "Pricing schedule", "Technical proposal", "Forms required by the client",
+    68→    "Other tender-specific documents",
+    69→]
+    70→
+    71→LIBRARY_CATEGORIES = [
+    72→    "CIPC", "SARS", "B-BBEE", "PSIRA", "COIDA", "Financial statements",
+    73→    "Company profile", "References", "Policies", "Certificates",
+    74→    "Insurance documents", "Organograms", "Standard declarations",
+    75→    "Standard methodologies", "Standard SOPs", "Other",
+    76→]
+    77→
+    78→
+    79→# ---------------------- Pydantic Schemas ----------------------
+    80→
+    81→class UserCreate(BaseModel):
+    82→    email: EmailStr
+    83→    full_name: str
+    84→    company_name: Optional[str] = None
+    85→    password: str = Field(min_length=6)
+    86→
+    87→
+    88→class UserLogin(BaseModel):
+    89→    email: EmailStr
+    90→    password: str
+    91→
+    92→
+    93→class UserOut(BaseModel):
+    94→    id: int
+    95→    email: str
+    96→    full_name: str
+    97→    company_name: Optional[str]
+    98→    role: str
+    99→    onboarding_completed: bool = False
+   100→    class Config:
+   101→        from_attributes = True
+   102→
+   103→
+   104→class TokenOut(BaseModel):
+   105→    access_token: str
+   106→    token_type: str = "bearer"
+   107→    user: UserOut
+   108→
+   109→
+   110→# ---- Tender ----
+   111→class TenderBase(BaseModel):
+   112→    reference_number: str
+   113→    title: str
+   114→    client_company: str
+   115→    description: Optional[str] = None
+   116→    scope_of_work: Optional[str] = None
+   117→    category: Optional[str] = None
+   118→    location_site: Optional[str] = None
+   119→    issue_date: Optional[date] = None
+   120→    closing_date: Optional[date] = None
+   121→    closing_time: Optional[str] = None  # "HH:MM"
+   122→    validity_period: Optional[str] = None
+   123→    estimated_value: Optional[float] = None
+   124→    contract_period: Optional[str] = None
+   125→    status: str = "New Opportunity"
+   126→    contact_person: Optional[str] = None
+   127→    contact_email: Optional[str] = None
+   128→    contact_telephone: Optional[str] = None
+   129→    submission_method: Optional[str] = None
+   130→    person_responsible: Optional[str] = None
+   131→    notes: Optional[str] = None
+   132→    outcome: Optional[str] = None
+   133→    unsuccessful_reason: Optional[str] = None
+   134→
+   135→
+   136→class TenderCreate(TenderBase):
+   137→    pass
+   138→
+   139→
+   140→class TenderUpdate(BaseModel):
+   141→    reference_number: Optional[str] = None
+   142→    title: Optional[str] = None
+   143→    client_company: Optional[str] = None
+   144→    description: Optional[str] = None
+   145→    scope_of_work: Optional[str] = None
+   146→    category: Optional[str] = None
+   147→    location_site: Optional[str] = None
+   148→    issue_date: Optional[date] = None
+   149→    closing_date: Optional[date] = None
+   150→    closing_time: Optional[str] = None
+   151→    validity_period: Optional[str] = None
+   152→    estimated_value: Optional[float] = None
+   153→    contract_period: Optional[str] = None
+   154→    status: Optional[str] = None
+   155→    contact_person: Optional[str] = None
+   156→    contact_email: Optional[str] = None
+   157→    contact_telephone: Optional[str] = None
+   158→    submission_method: Optional[str] = None
+   159→    person_responsible: Optional[str] = None
+   160→    notes: Optional[str] = None
+   161→    outcome: Optional[str] = None
+   162→    unsuccessful_reason: Optional[str] = None
+   163→
+   164→
+   165→class TenderOut(TenderBase):
+   166→    id: int
+   167→    created_at: datetime
+   168→    updated_at: Optional[datetime] = None
+   169→    ai_extracted_info: Optional[Any] = None
+   170→    ai_summary: Optional[str] = None
+   171→    documents: List[Any] = []
+   172→    checklist_items: List[Any] = []
+   173→    briefings: List[Any] = []
+   174→    pricing_versions: List[Any] = []
+   175→    submission: Optional[Any] = None
+   176→    communications: List[Any] = []
+   177→    addendums: List[Any] = []
+   178→
+   179→    class Config:
+   180→        from_attributes = True
+   181→
+   182→
+   183→# ---- Checklist ----
+   184→class ChecklistItemBase(BaseModel):
+   185→    name: str
+   186→    description: Optional[str] = None
+   187→    status: str = "Outstanding"
+   188→    linked_library_doc_id: Optional[int] = None
+   189→    notes: Optional[str] = None
+   190→
+   191→
+   192→class ChecklistItemCreate(ChecklistItemBase):
+   193→    tender_id: int
+   194→
+   195→
+   196→class ChecklistItemUpdate(BaseModel):
+   197→    name: Optional[str] = None
+   198→    description: Optional[str] = None
+   199→    category: Optional[str] = None
+   200→    mandatory: Optional[bool] = None
+   201→    library_category: Optional[str] = None
+   202→    status: Optional[str] = None
+   203→    linked_library_doc_id: Optional[int] = None
+   204→    notes: Optional[str] = None
+   205→
+   206→
+   207→# ---- Library Document ----
+   208→class LibraryDocumentBase(BaseModel):
+   209→    name: str
+   210→    category: str
+   211→    description: Optional[str] = None
+   212→    issue_date: Optional[date] = None
+   213→    expiry_date: Optional[date] = None
+   214→    notes: Optional[str] = None
+   215→
+   216→
+   217→class LibraryDocumentOut(LibraryDocumentBase):
+   218→    id: int
+   219→    filename: str
+   220→    file_size: Optional[int] = None
+   221→    uploaded_at: datetime
+   222→    class Config:
+   223→        from_attributes = True
+   224→
+   225→
+   226→# ---- Briefing ----
+   227→class BriefingBase(BaseModel):
+   228→    briefing_type: str = "Briefing"
+   229→    date: date
+   230→    time: Optional[str] = None
+   231→    location: Optional[str] = None
+   232→    contact_person: Optional[str] = None
+   233→    attendance_required: bool = True
+   234→    attendance_confirmed: bool = False
+   235→    person_attending: Optional[str] = None
+   236→    notes: Optional[str] = None
+   237→
+   238→
+   239→class BriefingCreate(BriefingBase):
+   240→    tender_id: int
+   241→
+   242→
+   243→class BriefingUpdate(BaseModel):
+   244→    briefing_type: Optional[str] = None
+   245→    date: Optional[date] = None
+   246→    time: Optional[str] = None
+   247→    location: Optional[str] = None
+   248→    contact_person: Optional[str] = None
+   249→    attendance_required: Optional[bool] = None
+   250→    attendance_confirmed: Optional[bool] = None
+   251→    person_attending: Optional[str] = None
+   252→    notes: Optional[str] = None
+   253→
+   254→
+   255→# ---- Pricing ----
+   256→class PricingLineItem(BaseModel):
+   257→    category: str = "Labour"
+   258→    description: str = ""
+   259→    quantity: float = 1
+   260→    rate: float = 0
+   261→    total: float = 0
+   262→
+   263→
+   264→class PricingVersionCreate(BaseModel):
+   265→    tender_id: int
+   266→    version_label: Optional[str] = None
+   267→    line_items: List[PricingLineItem] = []
+   268→    notes: Optional[str] = None
+   269→
+   270→
+   271→class PricingVersionOut(BaseModel):
+   272→    id: int
+   273→    tender_id: int
+   274→    version_number: int
+   275→    version_label: Optional[str]
+   276→    line_items: Optional[Any]
+   277→    subtotal: float
+   278→    vat: float
+   279→    total: float
+   280→    notes: Optional[str]
+   281→    created_at: datetime
+   282→    class Config:
+   283→        from_attributes = True
+   284→
+   285→
+   286→# ---- Submission ----
+   287→class SubmissionBase(BaseModel):
+   288→    submission_date: Optional[date] = None
+   289→    submission_time: Optional[str] = None
+   290→    submission_method: Optional[str] = None
+   291→    submitted_by: Optional[str] = None
+   292→    confirmation_reference: Optional[str] = None
+   293→    final_pricing: Optional[float] = None
+   294→    notes: Optional[str] = None
+   295→
+   296→
+   297→class SubmissionCreate(SubmissionBase):
+   298→    tender_id: int
+   299→
+   300→
+   301→class SubmissionUpdate(SubmissionBase):
+   302→    pass
+   303→
+   304→
+   305→# ---- Communication ----
+   306→class CommunicationBase(BaseModel):
+   307→    comm_type: str
+   308→    subject: Optional[str] = None
+   309→    body: Optional[str] = None
+   310→    comm_date: Optional[datetime] = None
+   311→    meeting_date: Optional[datetime] = None
+   312→    meeting_location: Optional[str] = None
+   313→    from_party: Optional[str] = None
+   314→    to_party: Optional[str] = None
+   315→    notes: Optional[str] = None
+   316→
+   317→
+   318→class CommunicationCreate(CommunicationBase):
+   319→    tender_id: int
+   320→
+   321→
+   322→# ---- Addendum ----
+   323→class AddendumBase(BaseModel):
+   324→    addendum_number: Optional[str] = None
+   325→    title: str
+   326→    description: Optional[str] = None
+   327→    issued_date: Optional[date] = None
+   328→
+   329→
+   330→class AddendumCreate(AddendumBase):
+   331→    tender_id: int
+   332→
+   333→
+   334→# ---- AI ----
+   335→class AIQuestion(BaseModel):
+   336→    question: str
+   337→    tender_id: Optional[int] = None
+   338→
+   339→
+   340→# ---------------------- Helpers ----------------------
+   341→
+   342→def _serialize_tender(t: Tender) -> dict:
+   343→    """Serialize a Tender ORM object to dict (for API output)."""
+   344→    return {
+   345→        "id": t.id,
+   346→        "reference_number": t.reference_number,
+   347→        "title": t.title,
+   348→        "client_company": t.client_company,
+   349→        "description": t.description,
+   350→        "scope_of_work": t.scope_of_work,
+   351→        "category": t.category,
+   352→        "location_site": t.location_site,
+   353→        "issue_date": t.issue_date.isoformat() if t.issue_date else None,
+   354→        "closing_date": t.closing_date.isoformat() if t.closing_date else None,
+   355→        "closing_time": t.closing_time.strftime("%H:%M") if t.closing_time else None,
+   356→        "validity_period": t.validity_period,
+   357→        "estimated_value": t.estimated_value,
+   358→        "contract_period": t.contract_period,
+   359→        "status": t.status,
+   360→        "contact_person": t.contact_person,
+   361→        "contact_email": t.contact_email,
+   362→        "contact_telephone": t.contact_telephone,
+   363→        "submission_method": t.submission_method,
+   364→        "person_responsible": t.person_responsible,
+   365→        "notes": t.notes,
+   366→        "outcome": t.outcome,
+   367→        "unsuccessful_reason": t.unsuccessful_reason,
+   368→        "created_at": t.created_at.isoformat() if t.created_at else None,
+   369→        "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+   370→        "ai_extracted_info": t.ai_extracted_info,
+   371→        "ai_summary": t.ai_summary,
+   372→        "documents": [
+   373→            {
+   374→                "id": d.id, "filename": d.original_filename,
+   375→                "file_type": d.file_type, "file_size": d.file_size,
+   376→                "uploaded_at": d.uploaded_at.isoformat() if d.uploaded_at else None,
+   377→                "is_primary": d.is_primary,
+   378→            } for d in t.documents
+   379→        ],
+   380→        "checklist_items": [
+   381→            {
+   382→                "id": c.id, "name": c.name, "description": c.description,
+   383→                "category": c.category, "mandatory": c.mandatory,
+   384→                "library_category": c.library_category,
+   385→                "status": c.status, "notes": c.notes,
+   386→                "linked_library_doc_id": c.linked_library_doc_id,
+   387→            } for c in t.checklist_items
+   388→        ],
+   389→        "briefings": [
+   390→            {
+   391→                "id": b.id, "briefing_type": b.briefing_type,
+   392→                "date": b.date.isoformat() if b.date else None,
+   393→                "time": b.time.strftime("%H:%M") if b.time else None,
+   394→                "location": b.location, "contact_person": b.contact_person,
+   395→                "attendance_required": b.attendance_required,
+   396→                "attendance_confirmed": b.attendance_confirmed,
+   397→                "person_attending": b.person_attending,
+   398→                "certificate_path": b.certificate_path,
+   399→                "certificate_url": f"/uploads/{b.certificate_path}?XTransformPort=8000" if b.certificate_path else None,
+   400→                "notes": b.notes,
+   401→            } for b in t.briefings
+   402→        ],
+   403→        "pricing_versions": [
+   404→            {
+   405→                "id": p.id, "version_number": p.version_number,
+   406→                "version_label": p.version_label,
+   407→                "line_items": p.line_items,
+   408→                "subtotal": p.subtotal, "vat": p.vat, "total": p.total,
+   409→                "notes": p.notes,
+   410→                "created_at": p.created_at.isoformat() if p.created_at else None,
+   411→            } for p in t.pricing_versions
+   412→        ],
+   413→        "submission": (
+   414→            {
+   415→                "id": t.submission.id,
+   416→                "submission_date": t.submission.submission_date.isoformat() if t.submission.submission_date else None,
+   417→                "submission_time": t.submission.submission_time.strftime("%H:%M") if t.submission.submission_time else None,
+   418→                "submission_method": t.submission.submission_method,
+   419→                "submitted_by": t.submission.submitted_by,
+   420→                "confirmation_reference": t.submission.confirmation_reference,
+   421→                "confirmation_file_path": t.submission.confirmation_file_path,
+   422→                "confirmation_file_url": f"/uploads/{t.submission.confirmation_file_path}?XTransformPort=8000" if t.submission.confirmation_file_path else None,
+   423→                "final_documents_path": t.submission.final_documents_path,
+   424→                "final_documents_url": f"/uploads/{t.submission.final_documents_path}?XTransformPort=8000" if t.submission.final_documents_path else None,
+   425→                "final_pricing": t.submission.final_pricing,
+   426→                "notes": t.submission.notes,
+   427→            } if t.submission else None
+   428→        ),
+   429→        "communications": [
+   430→            {
+   431→                "id": c.id, "comm_type": c.comm_type, "subject": c.subject,
+   432→                "body": c.body,
+   433→                "comm_date": c.comm_date.isoformat() if c.comm_date else None,
+   434→                "meeting_date": c.meeting_date.isoformat() if c.meeting_date else None,
+   435→                "meeting_location": c.meeting_location,
+   436→                "from_party": c.from_party, "to_party": c.to_party,
+   437→                "attachment_path": c.attachment_path,
+   438→                "attachment_url": f"/uploads/{c.attachment_path}?XTransformPort=8000" if c.attachment_path else None,
+   439→                "attachment_filename": c.attachment_original_filename,
+   440→                "notes": c.notes,
+   441→            } for c in t.communications
+   442→        ],
+   443→        "addendums": [
+   444→            {
+   445→                "id": a.id, "addendum_number": a.addendum_number,
+   446→                "title": a.title, "description": a.description,
+   447→                "issued_date": a.issued_date.isoformat() if a.issued_date else None,
+   448→                "ai_changes": a.ai_changes,
+   449→                "created_at": a.created_at.isoformat() if a.created_at else None,
+   450→            } for a in t.addendums
+   451→        ],
+   452→        "generated_documents": [
+   453→            {
+   454→                "id": g.id, "doc_type": g.doc_type, "title": g.title,
+   455→                "content": g.content, "table_of_contents": g.table_of_contents,
+   456→                "created_at": g.created_at.isoformat() if g.created_at else None,
+   457→                "updated_at": g.updated_at.isoformat() if g.updated_at else None,
+   458→            } for g in t.generated_documents
+   459→        ],
+   460→    }
+   461→
+   462→
+   463→def _parse_time(s: Optional[str]):
+   464→    if not s:
+   465→        return None
+   466→    try:
+   467→        return datetime.strptime(s, "%H:%M").time()
+   468→    except Exception:
+   469→        return None
+   470→
+   471→
+   472→def _parse_datetime(s: Optional[str]):
+   473→    if not s:
+   474→        return None
+   475→    try:
+   476→        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+   477→    except Exception:
+   478→        return None
+   479→
+   480→
+   481→def _save_upload(upload: UploadFile, subdir: str = "") -> str:
+   482→    """Save an uploaded file to UPLOAD_DIR/subdir and return relative path."""
+   483→    target_dir = os.path.join(UPLOAD_DIR, subdir) if subdir else UPLOAD_DIR
+   484→    os.makedirs(target_dir, exist_ok=True)
+   485→    safe_name = f"{uuid.uuid4().hex}_{Path(upload.filename).name}"
+   486→    target_path = os.path.join(target_dir, safe_name)
+   487→    with open(target_path, "wb") as out:
+   488→        shutil.copyfileobj(upload.file, out)
+   489→    return os.path.relpath(target_path, UPLOAD_DIR)
+   490→
+   491→
+   492→def _build_default_checklist(tender_id: int, db: Session):
+   493→    """Create default checklist items for a tender."""
+   494→    for name in CHECKLIST_CATEGORIES:
+   495→        db.add(ChecklistItem(tender_id=tender_id, name=name, status="Outstanding"))
+   496→
+   497→
+   498→def _auto_link_library_doc(item: ChecklistItem, db: Session):
+   499→    """
+   500→    Auto-link a checklist item to a matching compliance library document.
+   501→    Sets status to Complete if a valid library doc exists, Expired if the doc is expired.
+   502→    """
+   503→    if not item.library_category:
+   504→        return
+   505→    # Find matching library docs by category
+   506→    today = date.today()
+   507→    matching_docs = db.query(LibraryDocument).filter(
+   508→        LibraryDocument.category == item.library_category
+   509→    ).all()
+   510→    if not matching_docs:
+   511→        return
+   512→    # Prefer non-expired docs, then the most recently uploaded
+   513→    best_doc = None
+   514→    best_is_expired = False
+   515→    for d in matching_docs:
+   516→        if d.expiry_date:
+   517→            is_expired = d.expiry_date < today
+   518→            if not is_expired and not best_is_expired:
+   519→                best_doc = d
+   520→                best_is_expired = False
+   521→            elif is_expired and best_doc is None:
+   522→                best_doc = d
+   523→                best_is_expired = True
+   524→        else:
+   525→            # No expiry = always valid
+   526→            if not best_is_expired:
+   527→                best_doc = d
+   528→                best_is_expired = False
+   529→    if best_doc:
+   530→        item.linked_library_doc_id = best_doc.id
+   531→        item.status = "Expired" if best_is_expired else "Complete"
+   532→
+   533→
+   534→def _checklist_from_extracted(tender_id: int, extracted: dict, db: Session):
+   535→    """
+   536→    Create a tender-specific checklist using AI generation.
+   537→    Falls back to default categories + compulsory documents if AI generation fails.
+   538→    Auto-links each item to a matching compliance library document and sets status.
+   539→    """
+   540→    # Try AI-generated checklist first
+   541→    ai_items = []
+   542→    if extracted and not extracted.get("_error"):
+   543→        try:
+   544→            ai_items = ai_module.generate_tender_checklist(extracted)
+   545→        except Exception:
+   546→            ai_items = []
+   547→
+   548→    if ai_items:
+   549→        # Use AI-generated items
+   550→        for item_data in ai_items:
+   551→            item = ChecklistItem(
+   552→                tender_id=tender_id,
+   553→                name=item_data["name"],
+   554→                description=item_data.get("description"),
+   555→                category=item_data.get("category", "Other"),
+   556→                mandatory=item_data.get("mandatory", True),
+   557→                library_category=item_data.get("library_category"),
+   558→                status="Outstanding",
+   559→            )
+   560→            _auto_link_library_doc(item, db)
+   561→            db.add(item)
+   562→    else:
+   563→        # Fallback: default categories + compulsory documents + suggestions
+   564→        compulsory = extracted.get("compulsory_documents", []) if extracted else []
+   565→        suggestions = extracted.get("checklist_suggestions", []) if extracted else []
+   566→        combined = list(dict.fromkeys(CHECKLIST_CATEGORIES + compulsory + suggestions))
+   567→        for name in combined:
+   568→            item = ChecklistItem(
+   569→                tender_id=tender_id,
+   570→                name=name[:500],
+   571→                status="Outstanding",
+   572→                category="Compliance",
+   573→                mandatory=True,
+   574→            )
+   575→            # Try to match a library category by name
+   576→            name_lower = name.lower()
+   577→            lib_cat_map = {
+   578→                "cipc": "CIPC", "sars": "SARS", "b-bbee": "B-BBEE", "bbbee": "B-BBEE",
+   579→                "psira": "PSIRA", "coida": "COIDA", "financial": "Financial statements",
+   580→                "company profile": "Company profile", "references": "References",
+   581→                "organogram": "Organograms", "methodology": "Standard methodologies",
+   582→                "sop": "Standard SOPs", "declaration": "Standard declarations",
+   583→            }
+   584→            for key, cat in lib_cat_map.items():
+   585→                if key in name_lower:
+   586→                    item.library_category = cat
+   587→                    break
+   588→            _auto_link_library_doc(item, db)
+   589→            db.add(item)
+   590→
+   591→
+   592→def _regenerate_checklist(tender_id: int, db: Session):
+   593→    """
+   594→    Delete the existing checklist and regenerate it from the tender's AI-extracted info.
+   595→    Used when the user wants to re-run checklist generation after updating extraction.
+   596→    """
+   597→    db.query(ChecklistItem).filter(ChecklistItem.tender_id == tender_id).delete()
+   598→    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+   599→    if tender and tender.ai_extracted_info:
+   600→        _checklist_from_extracted(tender_id, tender.ai_extracted_info, db)
+   601→    else:
+   602→        _build_default_checklist(tender_id, db)
+   603→    db.flush()
+   604→
+   605→
+   606→# ---------------------- Auth Routes ----------------------
+   607→
+   608→@app.post("/api/auth/register", response_model=TokenOut)
+   609→def register(payload: UserCreate, db: Session = Depends(get_db)):
+   610→    existing = db.query(User).filter(User.email == payload.email.lower()).first()
+   611→    if existing:
+   612→        raise HTTPException(status_code=400, detail="Email already registered")
+   613→    user = User(
+   614→        email=payload.email.lower(),
+   615→        full_name=payload.full_name,
+   616→        company_name=payload.company_name,
+   617→        hashed_password=hash_password(payload.password),
+   618→    )
+   619→    db.add(user)
+   620→    db.commit()
+   621→    db.refresh(user)
+   622→    token = create_access_token({"sub": str(user.id)})
+   623→    return TokenOut(access_token=token, user=UserOut.model_validate(user))
+   624→
+   625→
+   626→@app.post("/api/auth/login", response_model=TokenOut)
+   627→def login(payload: UserLogin, db: Session = Depends(get_db)):
+   628→    user = db.query(User).filter(User.email == payload.email.lower()).first()
+   629→    if not user or not verify_password(payload.password, user.hashed_password):
+   630→        raise HTTPException(status_code=401, detail="Invalid email or password")
+   631→    token = create_access_token({"sub": str(user.id)})
+   632→    return TokenOut(access_token=token, user=UserOut.model_validate(user))
+   633→
+   634→
+   635→@app.get("/api/auth/me", response_model=UserOut)
+   636→def me(user: User = Depends(get_current_user)):
+   637→    return user
+   638→
+   639→
+   640→@app.post("/api/auth/complete-onboarding")
+   641→def complete_onboarding(
+   642→    payload: dict,
+   643→    db: Session = Depends(get_db),
+   644→    user: User = Depends(get_current_user),
+   645→):
+   646→    """Complete the onboarding process — saves company profile and marks onboarding as done."""
+   647→    # Update user's company name
+   648→    if payload.get("company_name"):
+   649→        user.company_name = payload["company_name"]
+   650→    user.onboarding_completed = True
+   651→    db.commit()
+   652→    db.refresh(user)
+   653→    return {"onboarding_completed": True, "user": UserOut.model_validate(user).model_dump()}
+   654→
+   655→
+   656→@app.post("/api/company-profile/company-profile-doc")
+   657→async def upload_company_profile_doc(
+   658→    file: UploadFile = File(...),
+   659→    db: Session = Depends(get_db),
+   660→    user: User = Depends(get_current_user),
+   661→):
+   662→    """Upload the company profile document (PDF/DOCX). The AI uses it when generating company profile documents."""
+   663→    rel_path = _save_upload(file, subdir="company")
+   664→    profile = db.query(CompanyProfile).filter(CompanyProfile.user_id == user.id).first()
+   665→    if not profile:
+   666→        profile = CompanyProfile(
+   667→            user_id=user.id,
+   668→            company_name=user.company_name or user.full_name,
+   669→            company_profile_doc_path=rel_path,
+   670→        )
+   671→        db.add(profile)
+   672→    else:
+   673→        profile.company_profile_doc_path = rel_path
+   674→    db.commit()
+   675→    db.refresh(profile)
+   676→    return {
+   677→        "company_profile_doc_path": rel_path,
+   678→        "company_profile_doc_url": f"/uploads/{rel_path}?XTransformPort=8000",
+   679→    }
+   680→
+   681→
+   682→@app.delete("/api/company-profile/company-profile-doc")
+   683→def delete_company_profile_doc(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+   684→    """Remove the company profile document."""
+   685→    profile = db.query(CompanyProfile).filter(CompanyProfile.user_id == user.id).first()
+   686→    if not profile:
+   687→        raise HTTPException(status_code=404, detail="Company profile not found")
+   688→    if profile.company_profile_doc_path:
+   689→        full_path = os.path.join(UPLOAD_DIR, profile.company_profile_doc_path)
+   690→        if os.path.exists(full_path):
+   691→            try:
+   692→                os.unlink(full_path)
+   693→            except OSError:
+   694→                pass
+   695→        profile.company_profile_doc_path = None
+   696→    db.commit()
+   697→    return {"deleted": True}
+   698→
+   699→
+   700→# ---------------------- Tender Routes ----------------------
+   701→
+   702→@app.get("/api/tenders")
+   703→def list_tenders(
+   704→    search: Optional[str] = None,
+   705→    status: Optional[str] = None,
+   706→    category: Optional[str] = None,
+   707→    person_responsible: Optional[str] = None,
+   708→    outcome: Optional[str] = None,
+   709→    location: Optional[str] = None,
+   710→    closing_date_from: Optional[str] = None,
+   711→    closing_date_to: Optional[str] = None,
+   712→    value_min: Optional[float] = None,
+   713→    value_max: Optional[float] = None,
+   714→    submission_date_from: Optional[str] = None,
+   715→    submission_date_to: Optional[str] = None,
+   716→    sort: str = "updated_at",
+   717→    order: str = "desc",
+   718→    skip: int = 0,
+   719→    limit: int = 200,
+   720→    db: Session = Depends(get_db),
+   721→    user: User = Depends(get_current_user),
+   722→):
+   723→    q = db.query(Tender)
+   724→    # Text search across multiple fields
+   725→    if search:
+   726→        like = f"%{search}%"
+   727→        q = q.filter(or_(
+   728→            Tender.reference_number.ilike(like),
+   729→            Tender.title.ilike(like),
+   730→            Tender.client_company.ilike(like),
+   731→            Tender.location_site.ilike(like),
+   732→            Tender.person_responsible.ilike(like),
+   733→        ))
+   734→    # Exact filters
+   735→    if status:
+   736→        q = q.filter(Tender.status == status)
+   737→    if category:
+   738→        q = q.filter(Tender.category == category)
+   739→    if person_responsible:
+   740→        q = q.filter(Tender.person_responsible == person_responsible)
+   741→    if outcome:
+   742→        q = q.filter(Tender.outcome == outcome)
+   743→    # Location filter (partial match)
+   744→    if location:
+   745→        q = q.filter(Tender.location_site.ilike(f"%{location}%"))
+   746→    # Closing date range
+   747→    if closing_date_from:
+   748→        try:
+   749→            q = q.filter(Tender.closing_date >= date.fromisoformat(closing_date_from))
+   750→        except ValueError:
+   751→            pass
+   752→    if closing_date_to:
+   753→        try:
+   754→            q = q.filter(Tender.closing_date <= date.fromisoformat(closing_date_to))
+   755→        except ValueError:
+   756→            pass
+   757→    # Value range
+   758→    if value_min is not None:
+   759→        q = q.filter(Tender.estimated_value >= value_min)
+   760→    if value_max is not None:
+   761→        q = q.filter(Tender.estimated_value <= value_max)
+   762→    # Submission date range (filter tenders that have a submission)
+   763→    if submission_date_from or submission_date_to:
+   764→        from sqlalchemy import select as sa_select
+   765→        # Join with Submission table
+   766→        q = q.outerjoin(Submission, Submission.tender_id == Tender.id)
+   767→        if submission_date_from:
+   768→            try:
+   769→                q = q.filter(Submission.submission_date >= date.fromisoformat(submission_date_from))
+   770→            except ValueError:
+   771→                pass
+   772→        if submission_date_to:
+   773→            try:
+   774→                q = q.filter(Submission.submission_date <= date.fromisoformat(submission_date_to))
+   775→            except ValueError:
+   776→                pass
+   777→    # Sorting
+   778→    sort_col = {
+   779→        "updated_at": Tender.updated_at,
+   780→        "created_at": Tender.created_at,
+   781→        "closing_date": Tender.closing_date,
+   782→        "estimated_value": Tender.estimated_value,
+   783→        "reference_number": Tender.reference_number,
+   784→        "title": Tender.title,
+   785→        "client_company": Tender.client_company,
+   786→        "location_site": Tender.location_site,
+   787→        "category": Tender.category,
+   788→        "person_responsible": Tender.person_responsible,
+   789→    }.get(sort, Tender.updated_at)
+   790→    q = q.order_by(asc(sort_col) if order == "asc" else desc(sort_col))
+   791→    q = q.distinct()  # Avoid duplicates from outerjoin
+   792→    total = q.count()
+   793→    tenders = q.offset(skip).limit(limit).all()
+   794→    return {"items": [_serialize_tender(t) for t in tenders], "total": total}
+   795→
+   796→
+   797→@app.post("/api/tenders")
+   798→def create_tender(payload: TenderCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+   799→    t = Tender(
+   800→        reference_number=payload.reference_number,
+   801→        title=payload.title,
+   802→        client_company=payload.client_company,
+   803→        description=payload.description,
+   804→        scope_of_work=payload.scope_of_work,
+   805→        category=payload.category,
+   806→        location_site=payload.location_site,
+   807→        issue_date=payload.issue_date,
+   808→        closing_date=payload.closing_date,
+   809→        closing_time=_parse_time(payload.closing_time),
+   810→        validity_period=payload.validity_period,
+   811→        estimated_value=payload.estimated_value,
+   812→        contract_period=payload.contract_period,
+   813→        status=payload.status,
+   814→        contact_person=payload.contact_person,
+   815→        contact_email=payload.contact_email,
+   816→        contact_telephone=payload.contact_telephone,
+   817→        submission_method=payload.submission_method,
+   818→        person_responsible=payload.person_responsible,
+   819→        notes=payload.notes,
+   820→        outcome=payload.outcome,
+   821→        unsuccessful_reason=payload.unsuccessful_reason,
+   822→        created_by=user.id,
+   823→    )
+   824→    db.add(t)
+   825→    db.commit()
+   826→    db.refresh(t)
+   827→    _build_default_checklist(t.id, db)
+   828→    db.commit()
+   829→    db.refresh(t)
+   830→    return _serialize_tender(t)
+   831→
+   832→
+   833→@app.get("/api/tenders/export")
+   834→def export_tenders(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+   835→    """Export the complete tender register as an Excel (.xlsx) file.
+   836→    Includes all 16 required fields for every tender — including historical records."""
+   837→    import io
+   838→    from openpyxl import Workbook
+   839→    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+   840→    from openpyxl.utils import get_column_letter
+   841→    from fastapi.responses import StreamingResponse
+   842→
+   843→    all_tenders = db.query(Tender).order_by(desc(Tender.created_at)).all()
+   844→
+   845→    wb = Workbook()
+   846→    ws = wb.active
+   847→    ws.title = "Tender Register"
+   848→
+   849→    # Define styles
+   850→    header_font = Font(bold=True, color="FFFFFF", size=11)
+   851→    header_fill = PatternFill(start_color="0F766E", end_color="0F766E", fill_type="solid")
+   852→    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+   853→    cell_alignment = Alignment(vertical="top", wrap_text=True)
+   854→    thin_border = Border(
+   855→        left=Side(style="thin"),
+   856→        right=Side(style="thin"),
+   857→        top=Side(style="thin"),
+   858→        bottom=Side(style="thin"),
+   859→    )
+   860→
+   861→    # Header row with all required fields
+   862→    headers = [
+   863→        "Tender/RFP Number",
+   864→        "Client/Organisation",
+   865→        "Tender Description",
+   866→        "Date Received",
+   867→        "Closing Date",
+   868→        "Closing Time",
+   869→        "Region/Site",
+   870→        "Tender Value (ZAR)",
+   871→        "Person Responsible",
+   872→        "Submission Status",
+   873→        "Outcome",
+   874→        "Reason for Unsuccessful Bid",
+   875→        "Tender Validity Period",
+   876→        "Contract Period",
+   877→        "Category",
+   878→        "Required Documents (Complete)",
+   879→        "Outstanding Documents",
+   880→        "Notes and Comments",
+   881→        "Created At",
+   882→        "Last Updated",
+   883→    ]
+   884→
+   885→    for col_idx, header in enumerate(headers, 1):
+   886→        cell = ws.cell(row=1, column=col_idx, value=header)
+   887→        cell.font = header_font
+   888→        cell.fill = header_fill
+   889→        cell.alignment = header_alignment
+   890→        cell.border = thin_border
+   891→
+   892→    # Data rows
+   893→    for row_idx, t in enumerate(all_tenders, 2):
+   894→        checklist = t.checklist_items or []
+   895→        complete_docs = [c.name for c in checklist if c.status == "Complete"]
+   896→        outstanding_docs = [c.name for c in checklist if c.status == "Outstanding"]
+   897→
+   898→        row_data = [
+   899→            t.reference_number or "",
+   900→            t.client_company or "",
+   901→            t.description or t.title or "",
+   902→            t.issue_date.isoformat() if t.issue_date else (t.created_at.strftime("%Y-%m-%d") if t.created_at else ""),
+   903→            t.closing_date.isoformat() if t.closing_date else "",
+   904→            t.closing_time.strftime("%H:%M") if t.closing_time else "",
+   905→            t.location_site or "",
+   906→            t.estimated_value if t.estimated_value else "",
+   907→            t.person_responsible or "",
+   908→            t.status or "",
+   909→            t.outcome or "Pending",
+   910→            t.unsuccessful_reason or "",
+   911→            t.validity_period or "",
+   912→            t.contract_period or "",
+   913→            t.category or "",
+   914→            "; ".join(complete_docs) if complete_docs else "",
+   915→            "; ".join(outstanding_docs) if outstanding_docs else "",
+   916→            t.notes or "",
+   917→            t.created_at.strftime("%Y-%m-%d %H:%M") if t.created_at else "",
+   918→            t.updated_at.strftime("%Y-%m-%d %H:%M") if t.updated_at else "",
+   919→        ]
+   920→
+   921→        for col_idx, value in enumerate(row_data, 1):
+   922→            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+   923→            cell.alignment = cell_alignment
+   924→            cell.border = thin_border
+   925→            # Color-code outcome column
+   926→            if col_idx == 11:  # Outcome column
+   927→                if value == "Awarded":
+   928→                    cell.fill = PatternFill(start_color="D1FAE5", end_color="D1FAE5", fill_type="solid")
+   929→                    cell.font = Font(color="065F46", bold=True)
+   930→                elif value == "Unsuccessful":
+   931→                    cell.fill = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
+   932→                    cell.font = Font(color="991B1B", bold=True)
+   933→                elif value == "Withdrawn":
+   934→                    cell.fill = PatternFill(start_color="F3F4F6", end_color="F3F4F6", fill_type="solid")
+   935→                    cell.font = Font(color="6B7280", bold=True)
+   936→                elif value == "Pending":
+   937→                    cell.fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
+   938→                    cell.font = Font(color="92400E", bold=True)
+   939→            # Format tender value column
+   940→            if col_idx == 8 and isinstance(value, (int, float)) and value:
+   941→                cell.number_format = '#,##0.00'
+   942→
+   943→    # Auto-size columns
+   944→    column_widths = {
+   945→        1: 18, 2: 25, 3: 40, 4: 14, 5: 14, 6: 10, 7: 20, 8: 16,
+   946→        9: 20, 10: 22, 11: 14, 12: 30, 13: 18, 14: 16, 15: 18,
+   947→        16: 40, 17: 40, 18: 30, 19: 20, 20: 20,
+   948→    }
+   949→    for col_idx, width in column_widths.items():
+   950→        ws.column_dimensions[get_column_letter(col_idx)].width = width
+   951→
+   952→    # Freeze the header row
+   953→    ws.freeze_panes = "A2"
+   954→
+   955→    # Auto-filter
+   956→    ws.auto_filter.ref = ws.dimensions
+   957→
+   958→    # Save to bytes
+   959→    output = io.BytesIO()
+   960→    wb.save(output)
+   961→    output.seek(0)
+   962→
+   963→    return StreamingResponse(
+   964→        iter([output.getvalue()]),
+   965→        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+   966→        headers={
+   967→            "Content-Disposition": f"attachment; filename=tender_register_{date.today().isoformat()}.xlsx"
+   968→        }
+   969→    )
+   970→
+   971→
+   972→@app.get("/api/tenders/{tender_id}")
+   973→def get_tender(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+   974→    t = db.query(Tender).filter(Tender.id == tender_id).first()
+   975→    if not t:
+   976→        raise HTTPException(status_code=404, detail="Tender not found")
+   977→    return _serialize_tender(t)
+   978→
+   979→
+   980→@app.put("/api/tenders/{tender_id}")
+   981→def update_tender(tender_id: int, payload: TenderUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+   982→    t = db.query(Tender).filter(Tender.id == tender_id).first()
+   983→    if not t:
+   984→        raise HTTPException(status_code=404, detail="Tender not found")
+   985→    data = payload.model_dump(exclude_unset=True)
+   986→    if "closing_time" in data:
+   987→        data["closing_time"] = _parse_time(data["closing_time"])
+   988→    for k, v in data.items():
+   989→        setattr(t, k, v)
+   990→    t.updated_at = datetime.utcnow()
+   991→    db.commit()
+   992→    db.refresh(t)
+   993→    return _serialize_tender(t)
+   994→
+   995→
+   996→@app.delete("/api/tenders/{tender_id}")
+   997→def delete_tender(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+   998→    t = db.query(Tender).filter(Tender.id == tender_id).first()
+   999→    if not t:
+  1000→        raise HTTPException(status_code=404, detail="Tender not found")
+  1001→    db.delete(t)
+  1002→    db.commit()
+  1003→    return {"deleted": True, "id": tender_id}
+  1004→
+  1005→
+  1006→@app.post("/api/tenders/{tender_id}/archive")
+  1007→def archive_tender(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1008→    t = db.query(Tender).filter(Tender.id == tender_id).first()
+  1009→    if not t:
+  1010→        raise HTTPException(status_code=404, detail="Tender not found")
+  1011→    t.status = "Withdrawn"
+  1012→    t.updated_at = datetime.utcnow()
+  1013→    db.commit()
+  1014→    return _serialize_tender(t)
+  1015→
+  1016→
+  1017→@app.post("/api/tenders/{tender_id}/documents")
+  1018→async def upload_tender_document(
+  1019→    tender_id: int,
+  1020→    file: UploadFile = File(...),
+  1021→    is_primary: bool = Form(False),
+  1022→    db: Session = Depends(get_db),
+  1023→    user: User = Depends(get_current_user),
+  1024→):
+  1025→    t = db.query(Tender).filter(Tender.id == tender_id).first()
+  1026→    if not t:
+  1027→        raise HTTPException(status_code=404, detail="Tender not found")
+  1028→    rel_path = _save_upload(file, subdir=f"tenders/{tender_id}")
+  1029→    file_size = os.path.getsize(os.path.join(UPLOAD_DIR, rel_path))
+  1030→    doc = TenderDocument(
+  1031→        tender_id=tender_id,
+  1032→        filename=rel_path,
+  1033→        original_filename=file.filename,
+  1034→        file_path=rel_path,
+  1035→        file_type=file.content_type,
+  1036→        file_size=file_size,
+  1037→        is_primary=is_primary,
+  1038→    )
+  1039→    db.add(doc)
+  1040→    db.commit()
+  1041→    db.refresh(doc)
+  1042→    return {
+  1043→        "id": doc.id, "filename": doc.original_filename,
+  1044→        "file_type": doc.file_type, "file_size": doc.file_size,
+  1045→        "uploaded_at": doc.uploaded_at, "is_primary": doc.is_primary,
+  1046→    }
+  1047→
+  1048→
+  1049→@app.delete("/api/tenders/{tender_id}/documents/{doc_id}")
+  1050→def delete_tender_document(tender_id: int, doc_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1051→    doc = db.query(TenderDocument).filter(TenderDocument.id == doc_id, TenderDocument.tender_id == tender_id).first()
+  1052→    if not doc:
+  1053→        raise HTTPException(status_code=404, detail="Document not found")
+  1054→    full_path = os.path.join(UPLOAD_DIR, doc.file_path)
+  1055→    if os.path.exists(full_path):
+  1056→        try:
+  1057→            os.unlink(full_path)
+  1058→        except OSError:
+  1059→            pass
+  1060→    db.delete(doc)
+  1061→    db.commit()
+  1062→    return {"deleted": True}
+  1063→
+  1064→
+  1065→@app.post("/api/tenders/{tender_id}/ai-extract")
+  1066→def ai_extract_tender(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1067→    """Run AI extraction on the tender's documents and update the tender record."""
+  1068→    t = db.query(TenderDocument).filter(TenderDocument.tender_id == tender_id)  # placeholder
+  1069→    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+  1070→    if not tender:
+  1071→        raise HTTPException(status_code=404, detail="Tender not found")
+  1072→    if not tender.documents:
+  1073→        raise HTTPException(status_code=400, detail="No documents uploaded for this tender")
+  1074→    # Concatenate text from all documents
+  1075→    combined_text = ""
+  1076→    for doc in tender.documents:
+  1077→        full_path = os.path.join(UPLOAD_DIR, doc.file_path)
+  1078→        if os.path.exists(full_path):
+  1079→            combined_text += f"\n\n=== {doc.original_filename} ===\n"
+  1080→            combined_text += ai_module.extract_text_from_file(full_path, doc.original_filename)
+  1081→    if len(combined_text.strip()) < 50:
+  1082→        raise HTTPException(status_code=400, detail="Could not extract text from documents")
+  1083→    extracted = ai_module.extract_tender_info(combined_text, tender.reference_number)
+  1084→    tender.ai_extracted_info = extracted
+  1085→    # Auto-fill tender fields from extraction if missing
+  1086→    if extracted.get("tender_number") and not tender.reference_number:
+  1087→        tender.reference_number = extracted["tender_number"]
+  1088→    if extracted.get("client") and not tender.client_company:
+  1089→        tender.client_company = extracted["client"]
+  1090→    if extracted.get("tender_title") and not tender.title:
+  1091→        tender.title = extracted["tender_title"]
+  1092→    if extracted.get("closing_date") and not tender.closing_date:
+  1093→        try:
+  1094→            tender.closing_date = date.fromisoformat(extracted["closing_date"][:10])
+  1095→        except Exception:
+  1096→            pass
+  1097→    if extracted.get("closing_time") and not tender.closing_time:
+  1098→        tender.closing_time = _parse_time(extracted["closing_time"][:5])
+  1099→    if extracted.get("scope_of_work") and not tender.scope_of_work:
+  1100→        tender.scope_of_work = extracted["scope_of_work"]
+  1101→    if extracted.get("contract_period") and not tender.contract_period:
+  1102→        tender.contract_period = extracted["contract_period"]
+  1103→    if extracted.get("submission_method") and not tender.submission_method:
+  1104→        tender.submission_method = extracted["submission_method"]
+  1105→    if extracted.get("site_locations") and not tender.location_site:
+  1106→        tender.location_site = "; ".join(extracted["site_locations"])
+  1107→    # Reset checklist and rebuild from extracted compulsory documents
+  1108→    db.query(ChecklistItem).filter(ChecklistItem.tender_id == tender_id).delete()
+  1109→    _checklist_from_extracted(tender_id, extracted, db)
+  1110→    tender.updated_at = datetime.utcnow()
+  1111→    db.commit()
+  1112→    db.refresh(tender)
+  1113→    return _serialize_tender(tender)
+  1114→
+  1115→
+  1116→@app.post("/api/tenders/{tender_id}/ai-summary")
+  1117→def ai_tender_summary(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1118→    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+  1119→    if not tender:
+  1120→        raise HTTPException(status_code=404, detail="Tender not found")
+  1121→    tender_data = _serialize_tender(tender)
+  1122→    summary = ai_module.generate_tender_summary(tender_data, tender.ai_extracted_info or {})
+  1123→    tender.ai_summary = summary
+  1124→    tender.updated_at = datetime.utcnow()
+  1125→    db.commit()
+  1126→    return {"summary": summary}
+  1127→
+  1128→
+  1129→# ---------------------- Standalone AI Document Reading ----------------------
+  1130→
+  1131→@app.post("/api/ai/read-document")
+  1132→async def ai_read_document(
+  1133→    file: UploadFile = File(...),
+  1134→    user: User = Depends(get_current_user),
+  1135→):
+  1136→    """
+  1137→    Standalone AI document reader. Upload ANY tender document (PDF/DOCX/TXT)
+  1138→    and get back the full AI extraction + summary — without needing to create
+  1139→    a tender first.
+  1140→    """
+  1141→    # Save the uploaded file temporarily
+  1142→    rel_path = _save_upload(file, subdir="ai_reader")
+  1143→    full_path = os.path.join(UPLOAD_DIR, rel_path)
+  1144→    file_size = os.path.getsize(full_path)
+  1145→
+  1146→    # Extract text
+  1147→    document_text = ai_module.extract_text_from_file(full_path, file.filename)
+  1148→    if not document_text or len(document_text.strip()) < 50:
+  1149→        # Clean up the file
+  1150→        try:
+  1151→            os.unlink(full_path)
+  1152→        except OSError:
+  1153→            pass
+  1154→        raise HTTPException(
+  1155→            status_code=400,
+  1156→            detail="Could not extract text from this document. Please ensure it is a valid PDF, DOCX, or text file with readable content.",
+  1157→        )
+  1158→
+  1159→    # Run AI extraction
+  1160→    extracted = ai_module.extract_tender_info(document_text, file.filename)
+  1161→
+  1162→    # Generate a summary from the extracted info
+  1163→    summary = ""
+  1164→    if extracted and not extracted.get("_error"):
+  1165→        try:
+  1166→            summary = ai_module.generate_tender_summary(
+  1167→                {"reference_number": extracted.get("tender_number"),
+  1168→                 "title": extracted.get("tender_title"),
+  1169→                 "client_company": extracted.get("client"),
+  1170→                 "closing_date": extracted.get("closing_date"),
+  1171→                 "contract_period": extracted.get("contract_period"),
+  1172→                 "location_site": "; ".join(extracted.get("site_locations", []) or []),
+  1173→                 "scope_of_work": extracted.get("scope_of_work"),
+  1174→                 "status": "New Opportunity"},
+  1175→                extracted
+  1176→            )
+  1177→        except Exception:
+  1178→            summary = ""
+  1179→
+  1180→    # Clean up the temporary file (we don't keep it)
+  1181→    try:
+  1182→        os.unlink(full_path)
+  1183→    except OSError:
+  1184→        pass
+  1185→
+  1186→    return {
+  1187→        "filename": file.filename,
+  1188→        "file_size": file_size,
+  1189→        "extracted_text_preview": document_text[:2000] + ("...[truncated]" if len(document_text) > 2000 else ""),
+  1190→        "extraction": extracted,
+  1191→        "summary": summary,
+  1192→    }
+  1193→
+  1194→
+  1195→@app.post("/api/ai/read-document-and-create")
+  1196→async def ai_read_document_and_create(
+  1197→    file: UploadFile = File(...),
+  1198→    db: Session = Depends(get_db),
+  1199→    user: User = Depends(get_current_user),
+  1200→):
+  1201→    """
+  1202→    Upload a tender document, run AI extraction, AND create a new tender in the
+  1203→    database with all the extracted fields auto-filled. Returns the new tender.
+  1204→    """
+  1205→    rel_path = _save_upload(file, subdir=f"tenders/ai_created")
+  1206→    full_path = os.path.join(UPLOAD_DIR, rel_path)
+  1207→    file_size = os.path.getsize(full_path)
+  1208→
+  1209→    document_text = ai_module.extract_text_from_file(full_path, file.filename)
+  1210→    if not document_text or len(document_text.strip()) < 50:
+  1211→        try:
+  1212→            os.unlink(full_path)
+  1213→        except OSError:
+  1214→            pass
+  1215→        raise HTTPException(
+  1216→            status_code=400,
+  1217→            detail="Could not extract text from this document. Please ensure it is a valid PDF, DOCX, or text file.",
+  1218→        )
+  1219→
+  1220→    extracted = ai_module.extract_tender_info(document_text, file.filename)
+  1221→
+  1222→    # Generate reference number if not extracted
+  1223→    ref = extracted.get("tender_number") or f"TENDER-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+  1224→    title = extracted.get("tender_title") or file.filename.rsplit(".", 1)[0]
+  1225→
+  1226→    # Create the tender
+  1227→    t = Tender(
+  1228→        reference_number=ref,
+  1229→        title=title[:500],
+  1230→        client_company=extracted.get("client") or "Unknown",
+  1231→        description=extracted.get("scope_of_work"),
+  1232→        scope_of_work=extracted.get("scope_of_work"),
+  1233→        category="Security Services" if extracted.get("required_psira_grades") else None,
+  1234→        location_site="; ".join(extracted.get("site_locations", []) or []) or None,
+  1235→        closing_date=date.fromisoformat(extracted["closing_date"][:10]) if extracted.get("closing_date") else None,
+  1236→        closing_time=_parse_time(extracted["closing_time"][:5]) if extracted.get("closing_time") else None,
+  1237→        contract_period=extracted.get("contract_period"),
+  1238→        submission_method=extracted.get("submission_method"),
+  1239→        status="New Opportunity",
+  1240→        person_responsible=user.full_name,
+  1241→        notes=f"Created via AI Document Reader. Source file: {file.filename}",
+  1242→        ai_extracted_info=extracted,
+  1243→        created_by=user.id,
+  1244→    )
+  1245→    # Try to parse estimated value from pricing requirements
+  1246→    import re as _re
+  1247→    pricing = extracted.get("pricing_requirements", [])
+  1248→    pricing_text = " ".join(pricing) if isinstance(pricing, list) else str(pricing)
+  1249→    nums = _re.findall(r"R?\s*([\d,.]+)\s*(?:million|mil)?", pricing_text, _re.I)
+  1250→    if nums:
+  1251→        try:
+  1252→            val = float(nums[0].replace(",", ""))
+  1253→            if "million" in pricing_text.lower() or "mil" in pricing_text.lower():
+  1254→                val *= 1_000_000
+  1255→            t.estimated_value = val
+  1256→        except (ValueError, IndexError):
+  1257→            pass
+  1258→
+  1259→    db.add(t)
+  1260→    db.commit()
+  1261→    db.refresh(t)
+  1262→
+  1263→    # Attach the document to the new tender
+  1264→    # Move the file to the tender's directory
+  1265→    new_rel_path = os.path.join(UPLOAD_DIR, f"tenders/{t.id}", os.path.basename(rel_path))
+  1266→    new_dir = os.path.dirname(new_rel_path)
+  1267→    if not os.path.exists(new_dir):
+  1268→        os.makedirs(new_dir, exist_ok=True)
+  1269→    try:
+  1270→        os.rename(full_path, new_rel_path)
+  1271→    except OSError:
+  1272→        new_rel_path = full_path  # keep original if rename fails
+  1273→
+  1274→    doc = TenderDocument(
+  1275→        tender_id=t.id,
+  1276→        filename=os.path.relpath(new_rel_path, UPLOAD_DIR),
+  1277→        original_filename=file.filename,
+  1278→        file_path=os.path.relpath(new_rel_path, UPLOAD_DIR),
+  1279→        file_type=file.content_type,
+  1280→        file_size=file_size,
+  1281→        is_primary=True,
+  1282→    )
+  1283→    db.add(doc)
+  1284→
+  1285→    # Build checklist from extracted compulsory documents
+  1286→    _checklist_from_extracted(t.id, extracted, db)
+  1287→
+  1288→    # Generate and save AI summary
+  1289→    if extracted and not extracted.get("_error"):
+  1290→        try:
+  1291→            summary = ai_module.generate_tender_summary(
+  1292→                {"reference_number": t.reference_number, "title": t.title,
+  1293→                 "client_company": t.client_company, "closing_date": t.closing_date.isoformat() if t.closing_date else None,
+  1294→                 "contract_period": t.contract_period, "location_site": t.location_site,
+  1295→                 "scope_of_work": t.scope_of_work, "status": t.status},
+  1296→                extracted
+  1297→            )
+  1298→            t.ai_summary = summary
+  1299→        except Exception:
+  1300→            pass
+  1301→
+  1302→    t.updated_at = datetime.utcnow()
+  1303→    db.commit()
+  1304→    db.refresh(t)
+  1305→    return _serialize_tender(t)
+  1306→
+  1307→
+  1308→# ---------------------- Checklist Routes ----------------------
+  1309→
+  1310→@app.post("/api/tenders/{tender_id}/checklist/regenerate")
+  1311→def regenerate_checklist(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1312→    """Regenerate the tender checklist from the AI-extracted info.
+  1313→    Uses the AI to produce a tender-specific checklist, then auto-links library docs."""
+  1314→    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+  1315→    if not tender:
+  1316→        raise HTTPException(status_code=404, detail="Tender not found")
+  1317→    if not tender.ai_extracted_info:
+  1318→        raise HTTPException(status_code=400, detail="No AI extraction found. Please upload and extract the tender document first.")
+  1319→    _regenerate_checklist(tender_id, db)
+  1320→    db.commit()
+  1321→    db.refresh(tender)
+  1322→    return _serialize_tender(tender)
+  1323→
+  1324→
+  1325→@app.post("/api/tenders/{tender_id}/checklist")
+  1326→def add_checklist_item(tender_id: int, item: ChecklistItemBase, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1327→    if not db.query(Tender).filter(Tender.id == tender_id).first():
+  1328→        raise HTTPException(status_code=404, detail="Tender not found")
+  1329→    c = ChecklistItem(
+  1330→        tender_id=tender_id, name=item.name, description=item.description,
+  1331→        status=item.status, linked_library_doc_id=item.linked_library_doc_id,
+  1332→        notes=item.notes,
+  1333→    )
+  1334→    db.add(c)
+  1335→    db.commit()
+  1336→    db.refresh(c)
+  1337→    return {"id": c.id, "name": c.name, "status": c.status}
+  1338→
+  1339→
+  1340→@app.put("/api/checklist/{item_id}")
+  1341→def update_checklist_item(item_id: int, payload: ChecklistItemUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1342→    c = db.query(ChecklistItem).filter(ChecklistItem.id == item_id).first()
+  1343→    if not c:
+  1344→        raise HTTPException(status_code=404, detail="Checklist item not found")
+  1345→    data = payload.model_dump(exclude_unset=True)
+  1346→    for k, v in data.items():
+  1347→        setattr(c, k, v)
+  1348→    c.updated_at = datetime.utcnow()
+  1349→    db.commit()
+  1350→    db.refresh(c)
+  1351→    return {"id": c.id, "name": c.name, "status": c.status, "notes": c.notes}
+  1352→
+  1353→
+  1354→@app.delete("/api/checklist/{item_id}")
+  1355→def delete_checklist_item(item_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1356→    c = db.query(ChecklistItem).filter(ChecklistItem.id == item_id).first()
+  1357→    if not c:
+  1358→        raise HTTPException(status_code=404, detail="Checklist item not found")
+  1359→    db.delete(c)
+  1360→    db.commit()
+  1361→    return {"deleted": True}
+  1362→
+  1363→
+  1364→# ---------------------- Library Document Routes ----------------------
+  1365→
+  1366→@app.get("/api/library")
+  1367→def list_library(
+  1368→    category: Optional[str] = None,
+  1369→    search: Optional[str] = None,
+  1370→    db: Session = Depends(get_db),
+  1371→    user: User = Depends(get_current_user),
+  1372→):
+  1373→    q = db.query(LibraryDocument)
+  1374→    if category:
+  1375→        q = q.filter(LibraryDocument.category == category)
+  1376→    if search:
+  1377→        like = f"%{search}%"
+  1378→        q = q.filter(or_(
+  1379→            LibraryDocument.name.ilike(like),
+  1380→            LibraryDocument.description.ilike(like),
+  1381→        ))
+  1382→    docs = q.order_by(LibraryDocument.category, LibraryDocument.name).all()
+  1383→    today = date.today()
+  1384→    result = []
+  1385→    for d in docs:
+  1386→        days_to_expiry = None
+  1387→        status = "Active"
+  1388→        if d.expiry_date:
+  1389→            days_to_expiry = (d.expiry_date - today).days
+  1390→            if days_to_expiry < 0:
+  1391→                status = "Expired"
+  1392→            elif days_to_expiry <= 30:
+  1393→                status = "Expiring Soon"
+  1394→        result.append({
+  1395→            "id": d.id, "name": d.name, "category": d.category,
+  1396→            "description": d.description, "filename": d.filename,
+  1397→            "file_size": d.file_size,
+  1398→            "issue_date": d.issue_date.isoformat() if d.issue_date else None,
+  1399→            "expiry_date": d.expiry_date.isoformat() if d.expiry_date else None,
+  1400→            "notes": d.notes,
+  1401→            "uploaded_at": d.uploaded_at.isoformat() if d.uploaded_at else None,
+  1402→            "days_to_expiry": days_to_expiry,
+  1403→            "status": status,
+  1404→        })
+  1405→    return {"items": result}
+  1406→
+  1407→
+  1408→@app.post("/api/library")
+  1409→async def upload_library_document(
+  1410→    name: str = Form(...),
+  1411→    category: str = Form(...),
+  1412→    description: Optional[str] = Form(None),
+  1413→    issue_date: Optional[str] = Form(None),
+  1414→    expiry_date: Optional[str] = Form(None),
+  1415→    notes: Optional[str] = Form(None),
+  1416→    file: UploadFile = File(...),
+  1417→    db: Session = Depends(get_db),
+  1418→    user: User = Depends(get_current_user),
+  1419→):
+  1420→    rel_path = _save_upload(file, subdir="library")
+  1421→    file_size = os.path.getsize(os.path.join(UPLOAD_DIR, rel_path))
+  1422→    doc = LibraryDocument(
+  1423→        name=name, category=category, description=description,
+  1424→        filename=rel_path, file_path=rel_path,
+  1425→        file_type=file.content_type, file_size=file_size,
+  1426→        issue_date=date.fromisoformat(issue_date) if issue_date else None,
+  1427→        expiry_date=date.fromisoformat(expiry_date) if expiry_date else None,
+  1428→        notes=notes, created_by=user.id,
+  1429→    )
+  1430→    db.add(doc)
+  1431→    db.commit()
+  1432→    db.refresh(doc)
+  1433→    return {"id": doc.id, "name": doc.name, "category": doc.category}
+  1434→
+  1435→
+  1436→@app.put("/api/library/{doc_id}")
+  1437→def update_library_document(
+  1438→    doc_id: int,
+  1439→    name: Optional[str] = None,
+  1440→    category: Optional[str] = None,
+  1441→    description: Optional[str] = None,
+  1442→    issue_date: Optional[str] = None,
+  1443→    expiry_date: Optional[str] = None,
+  1444→    notes: Optional[str] = None,
+  1445→    db: Session = Depends(get_db),
+  1446→    user: User = Depends(get_current_user),
+  1447→):
+  1448→    d = db.query(LibraryDocument).filter(LibraryDocument.id == doc_id).first()
+  1449→    if not d:
+  1450→        raise HTTPException(status_code=404, detail="Document not found")
+  1451→    if name is not None: d.name = name
+  1452→    if category is not None: d.category = category
+  1453→    if description is not None: d.description = description
+  1454→    if issue_date is not None and issue_date != "":
+  1455→        d.issue_date = date.fromisoformat(issue_date)
+  1456→    if expiry_date is not None and expiry_date != "":
+  1457→        d.expiry_date = date.fromisoformat(expiry_date)
+  1458→    if notes is not None: d.notes = notes
+  1459→    db.commit()
+  1460→    return {"id": d.id, "name": d.name, "category": d.category}
+  1461→
+  1462→
+  1463→@app.delete("/api/library/{doc_id}")
+  1464→def delete_library_document(doc_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1465→    d = db.query(LibraryDocument).filter(LibraryDocument.id == doc_id).first()
+  1466→    if not d:
+  1467→        raise HTTPException(status_code=404, detail="Document not found")
+  1468→    full_path = os.path.join(UPLOAD_DIR, d.file_path)
+  1469→    if os.path.exists(full_path):
+  1470→        try:
+  1471→            os.unlink(full_path)
+  1472→        except OSError:
+  1473→            pass
+  1474→    db.delete(d)
+  1475→    db.commit()
+  1476→    return {"deleted": True}
+  1477→
+  1478→
+  1479→# ---------------------- Briefing Routes ----------------------
+  1480→
+  1481→@app.post("/api/tenders/{tender_id}/briefings")
+  1482→def create_briefing(tender_id: int, payload: BriefingCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1483→    if payload.tender_id != tender_id:
+  1484→        payload.tender_id = tender_id
+  1485→    if not db.query(Tender).filter(Tender.id == tender_id).first():
+  1486→        raise HTTPException(status_code=404, detail="Tender not found")
+  1487→    b = Briefing(
+  1488→        tender_id=tender_id,
+  1489→        briefing_type=payload.briefing_type,
+  1490→        date=payload.date,
+  1491→        time=_parse_time(payload.time),
+  1492→        location=payload.location,
+  1493→        contact_person=payload.contact_person,
+  1494→        attendance_required=payload.attendance_required,
+  1495→        attendance_confirmed=payload.attendance_confirmed,
+  1496→        person_attending=payload.person_attending,
+  1497→        notes=payload.notes,
+  1498→    )
+  1499→    db.add(b)
+  1500→    db.commit()
+  1501→    db.refresh(b)
+  1502→    return {"id": b.id, "briefing_type": b.briefing_type, "date": b.date.isoformat() if b.date else None}
+  1503→
+  1504→
+  1505→@app.get("/api/briefings")
+  1506→def list_briefings(
+  1507→    upcoming_only: bool = False,
+  1508→    days: int = 30,
+  1509→    db: Session = Depends(get_db),
+  1510→    user: User = Depends(get_current_user),
+  1511→):
+  1512→    q = db.query(Briefing).join(Tender, Briefing.tender_id == Tender.id)
+  1513→    if upcoming_only:
+  1514→        cutoff = date.today() + timedelta(days=days)
+  1515→        q = q.filter(Briefing.date >= date.today(), Briefing.date <= cutoff)
+  1516→    briefings = q.order_by(Briefing.date).all()
+  1517→    result = []
+  1518→    for b in briefings:
+  1519→        result.append({
+  1520→            "id": b.id, "tender_id": b.tender_id,
+  1521→            "tender_reference": b.tender.reference_number if b.tender else None,
+  1522→            "tender_title": b.tender.title if b.tender else None,
+  1523→            "client": b.tender.client_company if b.tender else None,
+  1524→            "briefing_type": b.briefing_type,
+  1525→            "date": b.date.isoformat() if b.date else None,
+  1526→            "time": b.time.strftime("%H:%M") if b.time else None,
+  1527→            "location": b.location,
+  1528→            "contact_person": b.contact_person,
+  1529→            "attendance_required": b.attendance_required,
+  1530→            "attendance_confirmed": b.attendance_confirmed,
+  1531→            "person_attending": b.person_attending,
+  1532→            "certificate_path": b.certificate_path,
+  1533→            "certificate_url": f"/uploads/{b.certificate_path}?XTransformPort=8000" if b.certificate_path else None,
+  1534→            "notes": b.notes,
+  1535→        })
+  1536→    return {"items": result}
+  1537→
+  1538→
+  1539→@app.put("/api/briefings/{briefing_id}")
+  1540→def update_briefing(briefing_id: int, payload: BriefingUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1541→    b = db.query(Briefing).filter(Briefing.id == briefing_id).first()
+  1542→    if not b:
+  1543→        raise HTTPException(status_code=404, detail="Briefing not found")
+  1544→    data = payload.model_dump(exclude_unset=True)
+  1545→    if "time" in data:
+  1546→        data["time"] = _parse_time(data["time"])
+  1547→    for k, v in data.items():
+  1548→        setattr(b, k, v)
+  1549→    db.commit()
+  1550→    return {"id": b.id, "updated": True}
+  1551→
+  1552→
+  1553→@app.delete("/api/briefings/{briefing_id}")
+  1554→def delete_briefing(briefing_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1555→    b = db.query(Briefing).filter(Briefing.id == briefing_id).first()
+  1556→    if not b:
+  1557→        raise HTTPException(status_code=404, detail="Briefing not found")
+  1558→    db.delete(b)
+  1559→    db.commit()
+  1560→    return {"deleted": True}
+  1561→
+  1562→
+  1563→@app.post("/api/briefings/{briefing_id}/certificate")
+  1564→async def upload_briefing_certificate(
+  1565→    briefing_id: int,
+  1566→    file: UploadFile = File(...),
+  1567→    db: Session = Depends(get_db),
+  1568→    user: User = Depends(get_current_user),
+  1569→):
+  1570→    """Upload an attendance confirmation/certificate for a briefing."""
+  1571→    b = db.query(Briefing).filter(Briefing.id == briefing_id).first()
+  1572→    if not b:
+  1573→        raise HTTPException(status_code=404, detail="Briefing not found")
+  1574→    rel_path = _save_upload(file, subdir=f"briefings/{briefing_id}")
+  1575→    b.certificate_path = rel_path
+  1576→    # Auto-mark attendance as confirmed when certificate is uploaded
+  1577→    b.attendance_confirmed = True
+  1578→    db.commit()
+  1579→    db.refresh(b)
+  1580→    return {
+  1581→        "id": b.id,
+  1582→        "certificate_path": rel_path,
+  1583→        "certificate_url": f"/uploads/{rel_path}?XTransformPort=8000",
+  1584→        "attendance_confirmed": b.attendance_confirmed,
+  1585→    }
+  1586→
+  1587→
+  1588→@app.delete("/api/briefings/{briefing_id}/certificate")
+  1589→def delete_briefing_certificate(briefing_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1590→    """Remove the attendance certificate from a briefing."""
+  1591→    b = db.query(Briefing).filter(Briefing.id == briefing_id).first()
+  1592→    if not b:
+  1593→        raise HTTPException(status_code=404, detail="Briefing not found")
+  1594→    if b.certificate_path:
+  1595→        full_path = os.path.join(UPLOAD_DIR, b.certificate_path)
+  1596→        if os.path.exists(full_path):
+  1597→            try:
+  1598→                os.unlink(full_path)
+  1599→            except OSError:
+  1600→                pass
+  1601→        b.certificate_path = None
+  1602→    db.commit()
+  1603→    return {"deleted": True}
+  1604→
+  1605→
+  1606→@app.get("/api/briefings/alerts")
+  1607→def get_briefing_alerts(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1608→    """
+  1609→    Get alerts for upcoming compulsory briefings and site inspections.
+  1610→    Returns briefings that:
+  1611→    - Are within the next 14 days
+  1612→    - Have attendance_required = True
+  1613→    - Are either: not confirmed, or confirmed but no person assigned
+  1614→    Also returns a summary of upcoming briefings by urgency.
+  1615→    """
+  1616→    today = date.today()
+  1617→    all_briefings = db.query(Briefing).join(Tender, Briefing.tender_id == Tender.id).all()
+  1618→
+  1619→    alerts = []
+  1620→    upcoming = []
+  1621→    for b in all_briefings:
+  1622→        if not b.date:
+  1623→            continue
+  1624→        days_until = (b.date - today).days
+  1625→        briefing_data = {
+  1626→            "id": b.id,
+  1627→            "tender_id": b.tender_id,
+  1628→            "tender_reference": b.tender.reference_number if b.tender else None,
+  1629→            "tender_title": b.tender.title if b.tender else None,
+  1630→            "client": b.tender.client_company if b.tender else None,
+  1631→            "briefing_type": b.briefing_type,
+  1632→            "date": b.date.isoformat(),
+  1633→            "time": b.time.strftime("%H:%M") if b.time else None,
+  1634→            "location": b.location,
+  1635→            "contact_person": b.contact_person,
+  1636→            "attendance_required": b.attendance_required,
+  1637→            "attendance_confirmed": b.attendance_confirmed,
+  1638→            "person_attending": b.person_attending,
+  1639→            "certificate_path": b.certificate_path,
+  1640→            "certificate_url": f"/uploads/{b.certificate_path}?XTransformPort=8000" if b.certificate_path else None,
+  1641→            "notes": b.notes,
+  1642→            "days_until": days_until,
+  1643→            "is_past": days_until < 0,
+  1644→            "is_today": days_until == 0,
+  1645→        }
+  1646→
+  1647→        # Upcoming = within next 30 days (or today)
+  1648→        if 0 <= days_until <= 30:
+  1649→            briefing_data["urgency"] = (
+  1650→                "today" if days_until == 0
+  1651→                else "critical" if days_until <= 1
+  1652→                else "urgent" if days_until <= 3
+  1653→                else "soon" if days_until <= 7
+  1654→                else "normal"
+  1655→            )
+  1656→            upcoming.append(briefing_data)
+  1657→            # Alert if compulsory and not confirmed, or no person attending
+  1658→            if b.attendance_required and (not b.attendance_confirmed or not b.person_attending):
+  1659→                alerts.append(briefing_data)
+  1660→
+  1661→    # Sort by date ascending
+  1662→    upcoming.sort(key=lambda x: x["date"])
+  1663→    alerts.sort(key=lambda x: x["date"])
+  1664→
+  1665→    summary = {
+  1666→        "total_upcoming": len(upcoming),
+  1667→        "total_alerts": len(alerts),
+  1668→        "today_count": len([b for b in upcoming if b["is_today"]]),
+  1669→        "critical_count": len([b for b in upcoming if b["urgency"] == "critical"]),
+  1670→        "urgent_count": len([b for b in upcoming if b["urgency"] == "urgent"]),
+  1671→        "soon_count": len([b for b in upcoming if b["urgency"] == "soon"]),
+  1672→        "unconfirmed_count": len([b for b in upcoming if b["attendance_required"] and not b["attendance_confirmed"]]),
+  1673→        "no_attendee_count": len([b for b in upcoming if b["attendance_required"] and not b["person_attending"]]),
+  1674→    }
+  1675→
+  1676→    return {
+  1677→        "alerts": alerts,
+  1678→        "upcoming": upcoming,
+  1679→        "summary": summary,
+  1680→    }
+  1681→
+  1682→
+  1683→# ---------------------- Pricing Routes ----------------------
+  1684→
+  1685→@app.post("/api/tenders/{tender_id}/pricing")
+  1686→def create_pricing_version(tender_id: int, payload: PricingVersionCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1687→    if not db.query(Tender).filter(Tender.id == tender_id).first():
+  1688→        raise HTTPException(status_code=404, detail="Tender not found")
+  1689→    count = db.query(PricingVersion).filter(PricingVersion.tender_id == tender_id).count()
+  1690→    line_items = [li.model_dump() for li in payload.line_items]
+  1691→    # Calculate totals
+  1692→    subtotal = sum(li.get("total") or (li.get("quantity", 0) * li.get("rate", 0)) for li in line_items)
+  1693→    vat = round(subtotal * 0.15, 2)
+  1694→    total = round(subtotal + vat, 2)
+  1695→    pv = PricingVersion(
+  1696→        tender_id=tender_id,
+  1697→        version_number=count + 1,
+  1698→        version_label=payload.version_label or f"v{count + 1}",
+  1699→        line_items=line_items,
+  1700→        subtotal=round(subtotal, 2),
+  1701→        vat=vat,
+  1702→        total=total,
+  1703→        notes=payload.notes,
+  1704→    )
+  1705→    db.add(pv)
+  1706→    db.commit()
+  1707→    db.refresh(pv)
+  1708→    return {
+  1709→        "id": pv.id, "version_number": pv.version_number,
+  1710→        "subtotal": pv.subtotal, "vat": pv.vat, "total": pv.total,
+  1711→    }
+  1712→
+  1713→
+  1714→@app.get("/api/tenders/{tender_id}/pricing")
+  1715→def list_pricing_versions(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1716→    versions = db.query(PricingVersion).filter(PricingVersion.tender_id == tender_id).order_by(PricingVersion.version_number).all()
+  1717→    return {"items": [
+  1718→        {
+  1719→            "id": p.id, "version_number": p.version_number, "version_label": p.version_label,
+  1720→            "line_items": p.line_items, "subtotal": p.subtotal, "vat": p.vat, "total": p.total,
+  1721→            "notes": p.notes,
+  1722→            "created_at": p.created_at.isoformat() if p.created_at else None,
+  1723→        } for p in versions
+  1724→    ]}
+  1725→
+  1726→
+  1727→@app.delete("/api/pricing/{version_id}")
+  1728→def delete_pricing_version(version_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1729→    pv = db.query(PricingVersion).filter(PricingVersion.id == version_id).first()
+  1730→    if not pv:
+  1731→        raise HTTPException(status_code=404, detail="Pricing version not found")
+  1732→    db.delete(pv)
+  1733→    db.commit()
+  1734→    return {"deleted": True}
+  1735→
+  1736→
+  1737→@app.post("/api/tenders/{tender_id}/pricing/generate")
+  1738→def generate_pricing_sheet(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1739→    """AI generates a pricing sheet draft based on the tender's extracted requirements."""
+  1740→    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+  1741→    if not tender:
+  1742→        raise HTTPException(status_code=404, detail="Tender not found")
+  1743→    extracted = tender.ai_extracted_info or {}
+  1744→    tender_data = {
+  1745→        "reference_number": tender.reference_number,
+  1746→        "title": tender.title,
+  1747→        "client_company": tender.client_company,
+  1748→        "contract_period": tender.contract_period,
+  1749→        "estimated_value": tender.estimated_value,
+  1750→        "location_site": tender.location_site,
+  1751→    }
+  1752→    result = ai_module.generate_pricing_sheet(tender_data, extracted)
+  1753→    # Create a new pricing version from the AI-generated sheet
+  1754→    count = db.query(PricingVersion).filter(PricingVersion.tender_id == tender_id).count()
+  1755→    line_items = result.get("line_items", [])
+  1756→    subtotal = round(sum(li.get("total", 0) for li in line_items), 2)
+  1757→    vat_rate = result.get("vat_rate", 0.15)
+  1758→    vat = round(subtotal * vat_rate, 2)
+  1759→    total = round(subtotal + vat, 2)
+  1760→    pv = PricingVersion(
+  1761→        tender_id=tender_id,
+  1762→        version_number=count + 1,
+  1763→        version_label=f"AI Draft v{count + 1}",
+  1764→        line_items=line_items,
+  1765→        subtotal=subtotal,
+  1766→        vat=vat,
+  1767→        total=total,
+  1768→        notes=result.get("pricing_notes", "AI-generated pricing sheet — review and adjust."),
+  1769→    )
+  1770→    db.add(pv)
+  1771→    db.commit()
+  1772→    db.refresh(pv)
+  1773→    return {
+  1774→        "id": pv.id, "version_number": pv.version_number,
+  1775→        "version_label": pv.version_label,
+  1776→        "line_items": pv.line_items,
+  1777→        "subtotal": pv.subtotal, "vat": pv.vat, "total": pv.total,
+  1778→        "notes": pv.notes,
+  1779→        "created_at": pv.created_at.isoformat() if pv.created_at else None,
+  1780→    }
+  1781→
+  1782→
+  1783→@app.post("/api/pricing/{version_id}/copy")
+  1784→def copy_pricing_version(version_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1785→    """Create a new pricing version by copying an existing one (for revisions)."""
+  1786→    source = db.query(PricingVersion).filter(PricingVersion.id == version_id).first()
+  1787→    if not source:
+  1788→        raise HTTPException(status_code=404, detail="Pricing version not found")
+  1789→    count = db.query(PricingVersion).filter(PricingVersion.tender_id == source.tender_id).count()
+  1790→    pv = PricingVersion(
+  1791→        tender_id=source.tender_id,
+  1792→        version_number=count + 1,
+  1793→        version_label=f"v{count + 1} (copy of v{source.version_number})",
+  1794→        line_items=source.line_items,
+  1795→        subtotal=source.subtotal,
+  1796→        vat=source.vat,
+  1797→        total=source.total,
+  1798→        notes=source.notes,
+  1799→    )
+  1800→    db.add(pv)
+  1801→    db.commit()
+  1802→    db.refresh(pv)
+  1803→    return {
+  1804→        "id": pv.id, "version_number": pv.version_number,
+  1805→        "version_label": pv.version_label,
+  1806→        "line_items": pv.line_items,
+  1807→        "subtotal": pv.subtotal, "vat": pv.vat, "total": pv.total,
+  1808→        "notes": pv.notes,
+  1809→        "created_at": pv.created_at.isoformat() if pv.created_at else None,
+  1810→    }
+  1811→
+  1812→
+  1813→# ---------------------- Submission Routes ----------------------
+  1814→
+  1815→@app.post("/api/tenders/{tender_id}/submission")
+  1816→def create_or_update_submission(tender_id: int, payload: SubmissionCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1817→    if not db.query(Tender).filter(Tender.id == tender_id).first():
+  1818→        raise HTTPException(status_code=404, detail="Tender not found")
+  1819→    sub = db.query(Submission).filter(Submission.tender_id == tender_id).first()
+  1820→    if sub:
+  1821→        sub.submission_date = payload.submission_date
+  1822→        sub.submission_time = _parse_time(payload.submission_time)
+  1823→        sub.submission_method = payload.submission_method
+  1824→        sub.submitted_by = payload.submitted_by
+  1825→        sub.confirmation_reference = payload.confirmation_reference
+  1826→        sub.final_pricing = payload.final_pricing
+  1827→        sub.notes = payload.notes
+  1828→    else:
+  1829→        sub = Submission(
+  1830→            tender_id=tender_id,
+  1831→            submission_date=payload.submission_date,
+  1832→            submission_time=_parse_time(payload.submission_time),
+  1833→            submission_method=payload.submission_method,
+  1834→            submitted_by=payload.submitted_by,
+  1835→            confirmation_reference=payload.confirmation_reference,
+  1836→            final_pricing=payload.final_pricing,
+  1837→            notes=payload.notes,
+  1838→        )
+  1839→        db.add(sub)
+  1840→    # Auto-update tender status to Submitted
+  1841→    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+  1842→    if tender and tender.status not in ("Submitted", "Awarded", "Unsuccessful", "Withdrawn"):
+  1843→        tender.status = "Submitted"
+  1844→    db.commit()
+  1845→    db.refresh(sub)
+  1846→    return {"id": sub.id, "tender_id": sub.tender_id}
+  1847→
+  1848→
+  1849→@app.post("/api/tenders/{tender_id}/submission/confirmation-file")
+  1850→async def upload_submission_confirmation(
+  1851→    tender_id: int,
+  1852→    file: UploadFile = File(...),
+  1853→    db: Session = Depends(get_db),
+  1854→    user: User = Depends(get_current_user),
+  1855→):
+  1856→    """Upload the submission confirmation/receipt file."""
+  1857→    if not db.query(Tender).filter(Tender.id == tender_id).first():
+  1858→        raise HTTPException(status_code=404, detail="Tender not found")
+  1859→    sub = db.query(Submission).filter(Submission.tender_id == tender_id).first()
+  1860→    if not sub:
+  1861→        sub = Submission(tender_id=tender_id)
+  1862→        db.add(sub)
+  1863→        db.commit()
+  1864→        db.refresh(sub)
+  1865→    rel_path = _save_upload(file, subdir=f"submissions/{tender_id}")
+  1866→    sub.confirmation_file_path = rel_path
+  1867→    db.commit()
+  1868→    db.refresh(sub)
+  1869→    return {
+  1870→        "id": sub.id,
+  1871→        "confirmation_file_path": rel_path,
+  1872→        "confirmation_file_url": f"/uploads/{rel_path}?XTransformPort=8000",
+  1873→    }
+  1874→
+  1875→
+  1876→@app.delete("/api/tenders/{tender_id}/submission/confirmation-file")
+  1877→def delete_submission_confirmation(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1878→    """Remove the submission confirmation file."""
+  1879→    sub = db.query(Submission).filter(Submission.tender_id == tender_id).first()
+  1880→    if not sub:
+  1881→        raise HTTPException(status_code=404, detail="Submission not found")
+  1882→    if sub.confirmation_file_path:
+  1883→        full_path = os.path.join(UPLOAD_DIR, sub.confirmation_file_path)
+  1884→        if os.path.exists(full_path):
+  1885→            try:
+  1886→                os.unlink(full_path)
+  1887→            except OSError:
+  1888→                pass
+  1889→        sub.confirmation_file_path = None
+  1890→    db.commit()
+  1891→    return {"deleted": True}
+  1892→
+  1893→
+  1894→@app.post("/api/tenders/{tender_id}/submission/final-documents")
+  1895→async def upload_final_documents(
+  1896→    tender_id: int,
+  1897→    file: UploadFile = File(...),
+  1898→    db: Session = Depends(get_db),
+  1899→    user: User = Depends(get_current_user),
+  1900→):
+  1901→    """Upload the final submitted documents bundle."""
+  1902→    if not db.query(Tender).filter(Tender.id == tender_id).first():
+  1903→        raise HTTPException(status_code=404, detail="Tender not found")
+  1904→    sub = db.query(Submission).filter(Submission.tender_id == tender_id).first()
+  1905→    if not sub:
+  1906→        sub = Submission(tender_id=tender_id)
+  1907→        db.add(sub)
+  1908→        db.commit()
+  1909→        db.refresh(sub)
+  1910→    rel_path = _save_upload(file, subdir=f"submissions/{tender_id}")
+  1911→    sub.final_documents_path = rel_path
+  1912→    db.commit()
+  1913→    db.refresh(sub)
+  1914→    return {
+  1915→        "id": sub.id,
+  1916→        "final_documents_path": rel_path,
+  1917→        "final_documents_url": f"/uploads/{rel_path}?XTransformPort=8000",
+  1918→    }
+  1919→
+  1920→
+  1921→@app.delete("/api/tenders/{tender_id}/submission/final-documents")
+  1922→def delete_final_documents(tender_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1923→    """Remove the final documents file."""
+  1924→    sub = db.query(Submission).filter(Submission.tender_id == tender_id).first()
+  1925→    if not sub:
+  1926→        raise HTTPException(status_code=404, detail="Submission not found")
+  1927→    if sub.final_documents_path:
+  1928→        full_path = os.path.join(UPLOAD_DIR, sub.final_documents_path)
+  1929→        if os.path.exists(full_path):
+  1930→            try:
+  1931→                os.unlink(full_path)
+  1932→            except OSError:
+  1933→                pass
+  1934→        sub.final_documents_path = None
+  1935→    db.commit()
+  1936→    return {"deleted": True}
+  1937→
+  1938→
+  1939→# ---------------------- Communication Routes ----------------------
+  1940→
+  1941→@app.post("/api/tenders/{tender_id}/communications")
+  1942→def create_communication(tender_id: int, payload: CommunicationCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1943→    if not db.query(Tender).filter(Tender.id == tender_id).first():
+  1944→        raise HTTPException(status_code=404, detail="Tender not found")
+  1945→    c = Communication(
+  1946→        tender_id=tender_id,
+  1947→        comm_type=payload.comm_type,
+  1948→        subject=payload.subject,
+  1949→        body=payload.body,
+  1950→        comm_date=payload.comm_date,
+  1951→        meeting_date=payload.meeting_date,
+  1952→        meeting_location=payload.meeting_location,
+  1953→        from_party=payload.from_party,
+  1954→        to_party=payload.to_party,
+  1955→        notes=payload.notes,
+  1956→    )
+  1957→    db.add(c)
+  1958→    db.commit()
+  1959→    db.refresh(c)
+  1960→    return {"id": c.id, "comm_type": c.comm_type}
+  1961→
+  1962→
+  1963→@app.post("/api/communications/{comm_id}/attachment")
+  1964→async def upload_communication_attachment(
+  1965→    comm_id: int,
+  1966→    file: UploadFile = File(...),
+  1967→    db: Session = Depends(get_db),
+  1968→    user: User = Depends(get_current_user),
+  1969→):
+  1970→    """Upload an attachment for a communication."""
+  1971→    c = db.query(Communication).filter(Communication.id == comm_id).first()
+  1972→    if not c:
+  1973→        raise HTTPException(status_code=404, detail="Communication not found")
+  1974→    rel_path = _save_upload(file, subdir=f"communications/{comm_id}")
+  1975→    c.attachment_path = rel_path
+  1976→    c.attachment_original_filename = file.filename
+  1977→    db.commit()
+  1978→    db.refresh(c)
+  1979→    return {
+  1980→        "id": c.id,
+  1981→        "attachment_path": rel_path,
+  1982→        "attachment_url": f"/uploads/{rel_path}?XTransformPort=8000",
+  1983→        "attachment_filename": file.filename,
+  1984→    }
+  1985→
+  1986→
+  1987→@app.delete("/api/communications/{comm_id}/attachment")
+  1988→def delete_communication_attachment(comm_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+  1989→    """Remove an attachment from a communication."""
+  1990→    c = db.query(Communication).filter(Communication.id == comm_id).first()
+  1991→    if not c:
+  1992→        raise HTTPException(status_code=404, detail="Communication not found")
+  1993→    if c.attachment_path:
+  1994→        full_path = os.path.join(UPLOAD_DIR, c.attachment_path)
+  1995→        if os.path.exists(full_path):
+  1996→            try:
+  1997→                os.unlink(full_path)
+  1998→            except OSError:
+  1999→                pass
+  2000→        c.attachment_path = None
+
+[showing lines 1-2000 of 3334; use offset=2001 with limit to continue reading]

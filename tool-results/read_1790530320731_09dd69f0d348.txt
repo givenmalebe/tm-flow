@@ -1,0 +1,1587 @@
+     1→"""
+     2→TM Flow - AI module
+     3→Uses the z-ai-web-dev-sdk CLI (Node.js) via subprocess for:
+     4→- Tender document reading & extraction (chat)
+     5→- AI assistant chat
+     6→- AI tender summaries
+     7→- Addendum change detection
+     8→"""
+     9→import os
+    10→import json
+    11→import subprocess
+    12→import tempfile
+    13→from typing import Optional, Dict, Any, List
+    14→
+    15→Z_AI_CLI = os.path.join(
+    16→    os.environ.get("Z_AI_CLI_PATH", "/home/z/my-project/node_modules/.bin/z-ai")
+    17→)
+    18→
+    19→
+    20→def _run_zai_chat(prompt: str, system: Optional[str] = None, max_tokens: int = 8000) -> str:
+    21→    """Run the z-ai chat CLI and return the assistant text content."""
+    22→    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+    23→        out_path = f.name
+    24→    try:
+    25→        cmd = [Z_AI_CLI, "chat", "--prompt", prompt, "--output", out_path]
+    26→        if system:
+    27→            cmd += ["--system", system]
+    28→        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    29→        if proc.returncode != 0:
+    30→            raise RuntimeError(f"z-ai chat failed: {proc.stderr[:500]}")
+    31→        with open(out_path, "r") as fp:
+    32→            data = json.load(fp)
+    33→        # Response structure: {choices:[{message:{content}}]} or {content}
+    34→        if isinstance(data, dict):
+    35→            if "choices" in data and data["choices"]:
+    36→                msg = data["choices"][0].get("message", {})
+    37→                return msg.get("content", "")
+    38→            if "content" in data:
+    39→                return data["content"]
+    40→            return json.dumps(data)
+    41→        return str(data)
+    42→    finally:
+    43→        try:
+    44→            os.unlink(out_path)
+    45→        except OSError:
+    46→            pass
+    47→
+    48→
+    49→# ---- Tender document extraction prompt ----
+    50→
+    51→EXTRACTION_SYSTEM = """You are a professional tender analyst who reads South African tender documents (often security/guards/PSIRA related) and extracts structured information.
+    52→You MUST respond with ONLY a valid JSON object (no markdown, no code fences, no extra text).
+    53→Use the schema below. If a field is not found, use null or an empty array.
+    54→Schema:
+    55→{
+    56→  "tender_number": string|null,
+    57→  "client": string|null,
+    58→  "tender_title": string|null,
+    59→  "closing_date": string|null (ISO format YYYY-MM-DD if mentioned),
+    60→  "closing_time": string|null (HH:MM),
+    61→  "scope_of_work": string|null,
+    62→  "contract_period": string|null,
+    63→  "site_locations": [string],
+    64→  "number_of_personnel_guards": string|null,
+    65→  "required_qualifications": [string],
+    66→  "required_psira_grades": [string],
+    67→  "required_equipment": [string],
+    68→  "mandatory_requirements": [string],
+    69→  "functionality_requirements": [string],
+    70→  "evaluation_criteria": [string],
+    71→  "pricing_requirements": [string],
+    72→  "compulsory_documents": [string],
+    73→  "compulsory_briefing_site_inspection": string|null (Yes/No + details),
+    74→  "briefing_date": string|null,
+    75→  "briefing_time": string|null,
+    76→  "submission_requirements": [string],
+    77→  "submission_method": string|null,
+    78→  "important_conditions": [string],
+    79→  "important_deadlines": [string],
+    80→  "disqualification_requirements": [string],
+    81→  "checklist_suggestions": [string]  // suggested submission checklist documents
+    82→}"""
+    83→
+    84→
+    85→def extract_tender_info(document_text: str, filename: str = "") -> Dict[str, Any]:
+    86→    """Send document text to AI and get structured extraction."""
+    87→    if not document_text or len(document_text.strip()) < 50:
+    88→        return {}
+    89→    # Truncate very long documents
+    90→    if len(document_text) > 50000:
+    91→        document_text = document_text[:50000] + "\n...[truncated]..."
+    92→    prompt = f"""Analyze the following tender document and extract the key information.
+    93→Document filename: {filename}
+    94→
+    95→DOCUMENT CONTENT:
+    96→{document_text}
+    97→
+    98→Respond with ONLY the JSON object as specified."""
+    99→    try:
+   100→        result = _run_zai_chat(prompt, system=EXTRACTION_SYSTEM)
+   101→        # Strip any potential markdown fences
+   102→        result = result.strip()
+   103→        if result.startswith("```"):
+   104→            result = result.split("\n", 1)[1] if "\n" in result else result[3:]
+   105→            if result.endswith("```"):
+   106→                result = result[:-3]
+   107→            result = result.strip()
+   108→        if result.startswith("json"):
+   109→            result = result[4:].strip()
+   110→        # Find first { and last }
+   111→        first = result.find("{")
+   112→        last = result.rfind("}")
+   113→        if first >= 0 and last > first:
+   114→            result = result[first:last + 1]
+   115→        return json.loads(result)
+   116→    except (json.JSONDecodeError, RuntimeError, Exception) as e:
+   117→        return {"_error": f"AI extraction failed: {str(e)}"}
+   118→
+   119→
+   120→# ---- AI-powered tender-specific checklist generation ----
+   121→
+   122→CHECKLIST_SYSTEM = """You are a South African tender compliance analyst.
+   123→Given a tender document's extracted information, you must produce a COMPLETE submission checklist that is SPECIFIC to this tender.
+   124→You MUST respond with ONLY a valid JSON array (no markdown, no code fences, no extra text).
+   125→
+   126→Each checklist item must follow this schema:
+   127→{
+   128→  "name": string (short name, e.g. "B-BBEE certificate", "PSIRA registration certificates", "Pricing schedule"),
+   129→  "category": one of ["Compliance", "Technical", "Pricing", "Forms", "Personnel", "Company", "Methodology", "References", "Other"],
+   130→  "description": string (1-2 sentences explaining WHAT this is and WHY it's required for this specific tender),
+   131→  "mandatory": boolean (true if compulsory/mandatory, false if optional/recommended),
+   132→  "library_category": string or null (the matching compliance library category if this document can be reused from the company library, else null). Must be one of: "CIPC", "SARS", "B-BBEE", "PSIRA", "COIDA", "Financial statements", "Company profile", "References", "Policies", "Certificates", "Insurance documents", "Organograms", "Standard declarations", "Standard methodologies", "Standard SOPs", "Other"
+   133→}
+   134→
+   135→Rules:
+   136→- Always include the standard compliance documents (Company profile, CIPC, SARS, B-BBEE, PSIRA, COIDA, Financial statements) — mark them mandatory if the tender requires compliance documents, optional otherwise.
+   137→- Include ALL compulsory_documents mentioned in the extraction.
+   138→- Include a "Pricing schedule" item (mandatory) for every tender.
+   139→- Include a "Technical proposal" item if the tender has functionality requirements.
+   140→- Include a "Methodology" item if scope_of_work is detailed.
+   141→- Include a "Risk assessment" item for security/service tenders.
+   142→- Include "SOPs" (Standard Operating Procedures) for service tenders.
+   143→- Include "Organogram" if personnel/guards are required.
+   144→- Include "POPIA documents" and "Signed declarations" for government tenders.
+   145→- Include personnel-specific items (e.g. "Certified ID copies of all guards", "PSIRA certificates for all guards") if personnel are required.
+   146→- Include any "Forms required by the client" mentioned in submission_requirements.
+   147→- Include compulsory briefing attendance as a checklist item if a compulsory briefing is required.
+   148→- For each item, set library_category to the matching library category so the system can auto-link existing company documents.
+   149→- Be specific to THIS tender — don't add generic items that don't apply.
+   150→- Aim for 15-30 items depending on the tender complexity."""
+   151→
+   152→
+   153→def generate_tender_checklist(extracted: Dict[str, Any]) -> List[Dict[str, Any]]:
+   154→    """
+   155→    Generate a tender-specific checklist using AI, based on the extracted tender info.
+   156→    Returns a list of checklist items with name, category, description, mandatory, library_category.
+   157→    """
+   158→    if not extracted or extracted.get("_error"):
+   159→        return []
+   160→
+   161→    prompt = f"""Based on the following tender extraction, generate a complete submission checklist specific to this tender.
+   162→
+   163→TENDER EXTRACTION (JSON):
+   164→{json.dumps(extracted, indent=2, default=str)[:15000]}
+   165→
+   166→Return ONLY the JSON array as specified. Include every document and requirement needed to submit this tender."""
+   167→
+   168→    try:
+   169→        result = _run_zai_chat(prompt, system=CHECKLIST_SYSTEM)
+   170→        result = result.strip()
+   171→        if result.startswith("```"):
+   172→            result = result.split("\n", 1)[1] if "\n" in result else result[3:]
+   173→            if result.endswith("```"):
+   174→                result = result[:-3]
+   175→            result = result.strip()
+   176→        if result.startswith("json"):
+   177→            result = result[4:].strip()
+   178→        # Find first [ and last ]
+   179→        first = result.find("[")
+   180→        last = result.rfind("]")
+   181→        if first >= 0 and last > first:
+   182→            result = result[first:last + 1]
+   183→        items = json.loads(result)
+   184→        if not isinstance(items, list):
+   185→            return []
+   186→        # Validate each item
+   187→        valid_items = []
+   188→        for item in items:
+   189→            if isinstance(item, dict) and item.get("name"):
+   190→                valid_items.append({
+   191→                    "name": str(item["name"])[:500],
+   192→                    "category": str(item.get("category", "Other")),
+   193→                    "description": str(item.get("description", ""))[:1000],
+   194→                    "mandatory": bool(item.get("mandatory", True)),
+   195→                    "library_category": item.get("library_category") if item.get("library_category") else None,
+   196→                })
+   197→        return valid_items
+   198→    except (json.JSONDecodeError, RuntimeError, Exception):
+   199→        # Fallback: return empty list — the caller will use default categories
+   200→        return []
+   201→
+   202→SUMMARY_SYSTEM = """You are a professional tender analyst. Produce a concise tender summary in plain text using this exact format:
+   203→
+   204→Tender: <title>
+   205→Client: <client>
+   206→Reference: <ref>
+   207→Closing Date: <date>
+   208→Contract Period: <period>
+   209→Location: <location>
+   210→Scope: <scope summary>
+   211→Personnel Required: <details>
+   212→PSIRA Requirements: <grades>
+   213→Mandatory Requirements: <bullet list>
+   214→Documents Required: <bullet list>
+   215→Briefing Required: <yes/no + details>
+   216→Evaluation Criteria: <list>
+   217→Pricing Requirements: <details>
+   218→Submission Method: <method>
+   219→Important Risks/Disqualification Points: <list>
+   220→Current Status: <status>
+   221→Outstanding Items: <list>
+   222→
+   223→Keep it factual and concise. Do not add markdown headings."""
+   224→
+   225→
+   226→def generate_tender_summary(tender_data: Dict[str, Any], extracted: Dict[str, Any]) -> str:
+   227→    prompt = f"""Produce a tender summary using the data below.
+   228→
+   229→TENDER RECORD:
+   230→{json.dumps(tender_data, indent=2, default=str)}
+   231→
+   232→AI EXTRACTED INFO:
+   233→{json.dumps(extracted, indent=2, default=str)}
+   234→"""
+   235→    try:
+   236→        return _run_zai_chat(prompt, system=SUMMARY_SYSTEM)
+   237→    except RuntimeError as e:
+   238→        return f"Summary generation failed: {e}"
+   239→
+   240→
+   241→# ---- Addendum change detection ----
+   242→
+   243→ADDENDUM_SYSTEM = """You are a tender addendum analyst. Compare the original tender requirements with the addendum and identify changes.
+   244→Respond with ONLY a JSON object:
+   245→{
+   246→  "new_requirements": [string],
+   247→  "removed_requirements": [string],
+   248→  "changed_dates": [{"field": string, "from": string, "to": string}],
+   249→  "changed_pricing": [string],
+   250→  "changed_scope": [string],
+   251→  "changed_submission": [string],
+   252→  "other_changes": [string],
+   253→  "checklist_additions": [string],
+   254→  "checklist_removals": [string],
+   255→  "summary": string
+   256→}
+   257→
+   258→The "checklist_additions" field should list new documents or requirements that should be added to the submission checklist based on the addendum.
+   259→The "checklist_removals" field should list items that are no longer required due to the addendum.
+   260→Be specific and actionable in all fields."""
+   261→
+   262→
+   263→def detect_addendum_changes(original_text: str, addendum_text: str) -> Dict[str, Any]:
+   264→    prompt = f"""Compare the original tender with the addendum and identify changes.
+   265→
+   266→ORIGINAL TENDER EXCERPT:
+   267→{original_text[:20000]}
+   268→
+   269→ADDENDUM CONTENT:
+   270→{addendum_text[:20000]}
+   271→
+   272→Return ONLY the JSON object."""
+   273→    try:
+   274→        result = _run_zai_chat(prompt, system=ADDENDUM_SYSTEM)
+   275→        result = result.strip()
+   276→        first = result.find("{")
+   277→        last = result.rfind("}")
+   278→        if first >= 0 and last > first:
+   279→            result = result[first:last + 1]
+   280→        return json.loads(result)
+   281→    except (json.JSONDecodeError, RuntimeError) as e:
+   282→        return {"_error": f"Change detection failed: {e}", "summary": addendum_text[:500]}
+   283→
+   284→
+   285→# ---- AI Assistant (natural language Q&A over tenders) ----
+   286→
+   287→ASSISTANT_SYSTEM = """You are TM Flow AI, the mission-driven tender-winning assistant for a South African tender management system.
+   288→
+   289→YOUR MISSION: Help the user WIN tenders. Every answer you give should move the user closer to a successful, compliant, on-time tender submission.
+   290→
+   291→YOU KNOW EVERYTHING IN THE SYSTEM SNAPSHOT PROVIDED TO YOU, including:
+   292→- Every tender in the database (reference, title, client, status, closing date, scope, estimated value, person responsible)
+   293→- AI-extracted tender information (PSIRA grades, guards required, mandatory requirements, disqualification risks, evaluation criteria, compulsory documents, briefing details)
+   294→- The submission checklist for each tender (what's Complete, Outstanding, Expired, Not Applicable)
+   295→- All uploaded tender documents and their extracted text content
+   296→- The compliance document library (CIPC, SARS, B-BBEE, PSIRA, COIDA, financials, etc. with expiry dates)
+   297→- All briefings and site inspections (dates, locations, attendance status)
+   298→- All pricing versions (line items, subtotal, VAT, total) for each tender
+   299→- Submission details (method, date, confirmation reference, final pricing)
+   300→- All communications (emails, clarifications, meetings, addendums, extensions)
+   301→- All addendums with AI-detected changes (new/removed/changed requirements)
+   302→- The dashboard stats (active tenders, closing this week, documents expiring, awarded)
+   303→
+   304→HOW TO ANSWER:
+   305→1. Be specific — reference tenders by their reference number (e.g. "E137") and title.
+   306→2. Be actionable — don't just state facts; tell the user what to DO next to win the tender.
+   307→3. Be a coach — if a tender is at risk (deadline close, documents missing, briefing not confirmed), say so clearly and recommend immediate action.
+   308→4. Be honest — if data is missing or you don't know, say "I don't have that information" rather than inventing it.
+   309→5. Be structured — use bullet points and short paragraphs. For lists of missing items, use checklists.
+   310→6. Be South-Africa-aware — understand PSIRA grades (A/B/C/D/E), B-BBEE levels, CIPC, SARS, COIDA, POPIA, SBD forms, functionality/price evaluation, 80/20 or 90/10 preference points.
+   311→7. Be deadline-focused — always highlight closing dates, days remaining, and urgency.
+   312→8. Be compliance-focused — flag expired/expiring compliance documents that could disqualify a bid.
+   313→
+   314→YOU CAN ANSWER QUESTIONS LIKE:
+   315→- "Which tenders are closing this week?" → list them with days remaining
+   316→- "What documents are missing for Tender E137?" → list the Outstanding checklist items
+   317→- "Which tenders require a compulsory briefing?" → list them with briefing dates
+   318→- "What are the requirements for Tender E137?" → summarize the AI-extracted info
+   319→- "Summarise this tender for me" → use the AI summary format
+   320→- "What are the potential disqualification requirements?" → list them per tender
+   321→- "What PSIRA grades are required?" → list per tender
+   322→- "How many guards are required?" → list per tender
+   323→- "Which of our documents are going to expire before this tender closes?" → cross-reference library expiry dates with tender closing dates
+   324→- "Show me all tenders that we have submitted and are still waiting for an outcome" → list submitted tenders with no outcome set
+   325→- "Which tenders have we won this year?" → list Awarded tenders
+   326→- "Which tenders were unsuccessful and why?" → list with unsuccessful_reason
+   327→- "What's in the tender document?" → answer from the extracted document text
+   328→- "What changed in the addendum?" → summarize AI-detected changes
+   329→- "What's our pricing for E137?" → list pricing versions with totals
+   330→- "What should I do next to win E137?" → give a prioritized action plan
+   331→
+   332→When the user asks a general tender advice question (not about specific data), draw on your knowledge of South African procurement best practices.
+   333→
+   334→YOUR TONE: Professional, encouraging, direct. You are the user's bid manager and you want them to win."""
+   335→
+   336→
+   337→def assistant_answer(question: str, context_data: Dict[str, Any]) -> str:
+   338→    """Answer a user question given the comprehensive system context."""
+   339→    # Build a focused context — include everything but cap size to avoid token limits
+   340→    context_str = json.dumps(context_data, default=str)
+   341→    # Cap at 40000 chars (~10000 tokens) to leave room for the answer
+   342→    if len(context_str) > 40000:
+   343→        context_str = context_str[:40000] + "\n...[truncated, more data exists]..."
+   344→
+   345→    prompt = f"""Answer the user's question using the COMPLETE SYSTEM SNAPSHOT below.
+   346→
+   347→This snapshot contains ALL data from every part of the TM Flow system:
+   348→- All tenders with full details, AI-extracted info, checklists, documents, briefings, pricing, submissions, communications, addendums
+   349→- The compliance document library with expiry dates
+   350→- Dashboard statistics
+   351→- Extracted text from uploaded tender documents
+   352→
+   353→COMPLETE SYSTEM SNAPSHOT (JSON):
+   354→{context_str}
+   355→
+   356→USER QUESTION:
+   357→{question}
+   358→
+   359→Remember your mission: help the user WIN this tender. Be specific, actionable, and honest. Reference tenders by their reference number. If the question is about a specific tender, focus on that tender's data. If data is missing, say so."""
+   360→    try:
+   361→        return _run_zai_chat(prompt, system=ASSISTANT_SYSTEM, max_tokens=6000)
+   362→    except RuntimeError as e:
+   363→        return f"I couldn't process that request right now. ({e})"
+   364→
+   365→
+   366→def answer_general_question(question: str) -> str:
+   367→    """General fallback chat (no system data)."""
+   368→    try:
+   369→        return _run_zai_chat(question, system=ASSISTANT_SYSTEM)
+   370→    except RuntimeError as e:
+   371→        return f"I couldn't process that request right now. ({e})"
+   372→
+   373→
+   374→# ---- Document text extraction (PDF / txt) ----
+   375→
+   376→def extract_text_from_pdf(file_path: str) -> str:
+   377→    """Extract text from a PDF using pdfplumber."""
+   378→    try:
+   379→        import pdfplumber
+   380→        text_parts = []
+   381→        with pdfplumber.open(file_path) as pdf:
+   382→            for i, page in enumerate(pdf.pages):
+   383→                try:
+   384→                    page_text = page.extract_text() or ""
+   385→                except Exception:
+   386→                    page_text = ""
+   387→                text_parts.append(page_text)
+   388→                if i >= 50:  # cap pages
+   389→                    break
+   390→        return "\n".join(text_parts)
+   391→    except Exception as e:
+   392→        return f"[PDF extraction error: {e}]"
+   393→
+   394→
+   395→def extract_text_from_file(file_path: str, filename: str) -> str:
+   396→    """Extract text from supported file types."""
+   397→    lower = filename.lower()
+   398→    if lower.endswith(".pdf"):
+   399→        return extract_text_from_pdf(file_path)
+   400→    if lower.endswith((".txt", ".md", ".csv", ".json", ".log")):
+   401→        try:
+   402→            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+   403→                return f.read()
+   404→        except Exception as e:
+   405→            return f"[Text extraction error: {e}]"
+   406→    # For docx, try a simple zip-based extraction
+   407→    if lower.endswith(".docx"):
+   408→        try:
+   409→            import zipfile, re
+   410→            with zipfile.ZipFile(file_path) as z:
+   411→                with z.open("word/document.xml") as f:
+   412→                    content = f.read().decode("utf-8", errors="ignore")
+   413→            # Strip XML tags
+   414→            text = re.sub(r"<[^>]+>", " ", content)
+   415→            text = re.sub(r"\s+", " ", text)
+   416→            return text
+   417→        except Exception as e:
+   418→            return f"[DOCX extraction error: {e}]"
+   419→    return f"[Unsupported file type: {filename}]"
+   420→
+   421→
+   422→# ---- AI Tender Discovery (web search) ----
+   423→
+   424→def _run_zai_web_search(query: str, num: int = 10) -> List[Dict[str, Any]]:
+   425→    """Run the z-ai web_search function CLI and return search results."""
+   426→    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+   427→        out_path = f.name
+   428→    try:
+   429→        args = json.dumps({"query": query, "num": num})
+   430→        cmd = [Z_AI_CLI, "function", "-n", "web_search", "-a", args, "-o", out_path]
+   431→        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+   432→        if proc.returncode != 0:
+   433→            raise RuntimeError(f"z-ai web_search failed: {proc.stderr[:500]}")
+   434→        with open(out_path, "r") as fp:
+   435→            data = json.load(fp)
+   436→        if isinstance(data, list):
+   437→            return data
+   438→        if isinstance(data, dict) and "results" in data:
+   439→            return data["results"]
+   440→        return []
+   441→    except (json.JSONDecodeError, RuntimeError, Exception):
+   442→        return []
+   443→    finally:
+   444→        try:
+   445→            os.unlink(out_path)
+   446→        except OSError:
+   447→            pass
+   448→
+   449→
+   450→# South African tender portals to prioritize in search
+   451→TENDER_SITES = [
+   452→    "tenderbulletins.co.za",
+   453→    "tenderalerts.co.za",
+   454→    "etenders.gov.za",
+   455→    "globaltenders.com",
+   456→    "tenderflow.co.za",
+   457→    "easytenders.co.za",
+   458→    "security.co.za",
+   459→    "psira.co.za",
+   460→    "municipalities.co.za",
+   461→    "gov.za",
+   462→]
+   463→
+   464→DISCOVER_SYSTEM = """You are a tender discovery analyst specializing in South African procurement.
+   465→You analyze web search results and identify real, open tender opportunities.
+   466→You MUST respond with ONLY a valid JSON array (no markdown, no code fences, no extra text).
+   467→Each element in the array must follow this schema:
+   468→{
+   469→  "title": string (the tender title),
+   470→  "client": string (the organisation/client issuing the tender, or "Unknown" if not clear),
+   471→  "category": string (e.g. "Security Services", "Cleaning", "Construction"),
+   472→  "location": string (region/city/province, or "South Africa" if not specified),
+   473→  "closing_date": string (ISO format YYYY-MM-DD if mentioned, or null),
+   474→  "description": string (1-3 sentence summary of what the tender is about),
+   475→  "source_site": string (the domain name of the source),
+   476→  "url": string (the direct link to the tender page),
+   477→  "reference_number": string (if a tender/RFP number is mentioned, else null),
+   478→  "estimated_value": string (if a value is mentioned, else null),
+   479→  "relevance": "high" | "medium" | "low" (how relevant this is to the user's search)
+   480→}
+   481→Only include results that are ACTUAL tender opportunities (not news articles, not blog posts, not generic pages).
+   482→If no results are actual tenders, return an empty array [].
+   483→Deduplicate by URL."""
+   484→
+   485→
+   486→def discover_tenders(
+   487→    category: str,
+   488→    keywords: str = "",
+   489→    location: str = "South Africa",
+   490→    num_results: int = 15,
+   491→) -> Dict[str, Any]:
+   492→    """
+   493→    Find real open tenders matching the given criteria.
+   494→    Uses Python scrapers to directly fetch real tender listings from SA portals,
+   495→    then falls back to AI web search for broader coverage.
+   496→    Returns a dict with 'query', 'results', 'sources', 'raw_count'.
+   497→    """
+   498→    parts = []
+   499→    if category:
+   500→        parts.append(category)
+   501→    if keywords:
+   502→        parts.append(keywords)
+   503→    parts.append("tender")
+   504→    parts.append("open")
+   505→    if location:
+   506→        parts.append(location)
+   507→    query = " ".join(parts)
+   508→
+   509→    # --- Step 1: Python scrapers (direct fetch from real tender portals) ---
+   510→    scraped_results: List[Dict[str, Any]] = []
+   511→    sources_used: List[str] = []
+   512→    scrape_errors: List[str] = []
+   513→
+   514→    try:
+   515→        from scraper import scrape_all
+   516→        scrape_data = scrape_all(category, keywords, location, limit=num_results)
+   517→        scraped_results = scrape_data.get("results", [])
+   518→        sources_used = scrape_data.get("sources", [])
+   519→        scrape_errors = scrape_data.get("errors", [])
+   520→    except Exception as e:
+   521→        scrape_errors.append(f"scraper module: {str(e)[:100]}")
+   522→
+   523→    # --- Step 2: AI web search for additional coverage ---
+   524→    web_search_results: List[Dict[str, Any]] = []
+   525→    if len(scraped_results) < num_results:
+   526→        try:
+   527→            raw_results = _run_zai_web_search(query, num=num_results)
+   528→            if raw_results:
+   529→                # Use AI to structure the raw web search results
+   530→                raw_text = json.dumps(raw_results, indent=2, default=str)[:20000]
+   531→                prompt = f"""Analyze these web search results and extract ONLY actual tender opportunities.
+   532→If a result is a news article, blog post, or generic page (not an actual tender listing), EXCLUDE it.
+   533→
+   534→The user is looking for: {category} {keywords} in {location}
+   535→
+   536→RAW SEARCH RESULTS (JSON):
+   537→{raw_text}
+   538→
+   539→Return ONLY the JSON array as specified. Exclude non-tender results."""
+   540→                try:
+   541→                    response = _run_zai_chat(prompt, system=DISCOVER_SYSTEM)
+   542→                    response = response.strip()
+   543→                    if response.startswith("```"):
+   544→                        response = response.split("\n", 1)[1] if "\n" in response else response[3:]
+   545→                        if response.endswith("```"):
+   546→                            response = response[:-3]
+   547→                        response = response.strip()
+   548→                    if response.startswith("json"):
+   549→                        response = response[4:].strip()
+   550→                    first = response.find("[")
+   551→                    last = response.rfind("]")
+   552→                    if first >= 0 and last > first:
+   553→                        response = response[first:last + 1]
+   554→                    structured = json.loads(response)
+   555→                    if isinstance(structured, list):
+   556→                        web_search_results = structured
+   557→                        if web_search_results:
+   558→                            sources_used.append(f"AI web search ({len(web_search_results)} tenders)")
+   559→                except (json.JSONDecodeError, RuntimeError):
+   560→                    pass
+   561→        except Exception:
+   562→            pass
+   563→
+   564→    # --- Merge & deduplicate ---
+   565→    all_results = scraped_results + web_search_results
+   566→    seen_urls = set()
+   567→    seen_titles = set()
+   568→    deduped = []
+   569→    for r in all_results:
+   570→        url = r.get("url", "")
+   571→        title = r.get("title", "").lower().strip()[:80]
+   572→        if url in seen_urls or title in seen_titles:
+   573→            continue
+   574→        seen_urls.add(url)
+   575→        seen_titles.add(title)
+   576→        deduped.append(r)
+   577→
+   578→    # Sort by relevance then closing date
+   579→    rel_order = {"high": 0, "medium": 1, "low": 2}
+   580→    deduped.sort(key=lambda r: (rel_order.get(r.get("relevance", "medium"), 1), r.get("closing_date") or "9999"))
+   581→
+   582→    return {
+   583→        "query": query,
+   584→        "results": deduped[:num_results],
+   585→        "sources": sources_used,
+   586→        "errors": scrape_errors,
+   587→        "raw_count": len(deduped),
+   588→        "scraped_count": len(scraped_results),
+   589→        "web_search_count": len(web_search_results),
+   590→    }
+   591→
+   592→
+   593→# ---- AI Document Generation (tender-specific documents on company letterhead) ----
+   594→
+   595→DOC_GEN_SYSTEM = """You are a professional tender document writer for South African companies.
+   596→You generate formal, submission-ready tender documents that are specific to each tender.
+   597→Your documents must be:
+   598→1. Professional and formal in tone
+   599→2. Specific to the tender (reference the tender number, client, scope)
+   600→3. Comprehensive and detailed
+   601→4. Structured with clear headings and sections
+   602→5. Ready to be placed on company letterhead
+   603→
+   604→Output format: Use plain text with clear section headings in UPPERCASE, numbered sections, and bullet points where appropriate.
+   605→Do NOT use markdown formatting (no **, no ##, no `). Use plain text only.
+   606→
+   607→If a letterhead image URL is provided, start the document with:
+   608→[LETTERHEAD: <letterhead_url>]
+   609→
+   610→Then the document content.
+   611→If no letterhead URL is provided, start each document with a formal header block:
+   612→
+   613→[COMPANY NAME]
+   614→[Company Address]
+   615→[Phone] | [Email] | [Website]
+   616→Registration No: [Reg Number] | VAT: [VAT] | PSIRA: [PSIRA No]
+   617→
+   618→Then the document title, reference, and date.
+   619→Then the table of contents (if applicable).
+   620→Then the body content.
+   621→End with a signature block for the director/authorized signatory.
+   622→
+   623→If a signature image URL is provided, include a reference to it in the signature block:
+   624→[SIGNATURE: <signature_url>]
+   625→
+   626→The signature block should include:
+   627→- The signature image reference (if provided)
+   628→- Director/Authorized Signatory name
+   629→- Title (e.g. Managing Director)
+   630→- Date
+   631→- Company stamp/seal placeholder"""
+   632→
+   633→
+   634→def _build_company_header(company: Dict[str, Any]) -> str:
+   635→    """Build a company letterhead header string from company profile data."""
+   636→    lines = []
+   637→    if company.get("company_name"):
+   638→        lines.append(company["company_name"].upper())
+   639→    if company.get("address"):
+   640→        lines.append(company["address"])
+   641→    contact_parts = []
+   642→    if company.get("phone"):
+   643→        contact_parts.append(f"Tel: {company['phone']}")
+   644→    if company.get("email"):
+   645→        contact_parts.append(f"Email: {company['email']}")
+   646→    if company.get("website"):
+   647→        contact_parts.append(f"Web: {company['website']}")
+   648→    if contact_parts:
+   649→        lines.append(" | ".join(contact_parts))
+   650→    reg_parts = []
+   651→    if company.get("registration_number"):
+   652→        reg_parts.append(f"Reg No: {company['registration_number']}")
+   653→    if company.get("vat_number"):
+   654→        reg_parts.append(f"VAT: {company['vat_number']}")
+   655→    if company.get("psira_number"):
+   656→        reg_parts.append(f"PSIRA: {company['psira_number']}")
+   657→    if reg_parts:
+   658→        lines.append(" | ".join(reg_parts))
+   659→    if company.get("bbbbee_level"):
+   660→        lines.append(f"B-BBEE: {company['bbbbee_level']}")
+   661→    return "\n".join(lines) if lines else "[COMPANY NAME]"
+   662→
+   663→
+   664→def generate_method_statement(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+   665→    """Generate a tender-specific Method Statement on company letterhead."""
+   666→    header = _build_company_header(company)
+   667→    prompt = f"""Generate a comprehensive METHOD STATEMENT for the following tender.
+   668→This must be a formal, detailed document that explains HOW the company will deliver the services.
+   669→
+   670→COMPANY PROFILE:
+   671→{header}
+   672→Director: {company.get('director_name', '[Director Name]')}, {company.get('director_title', 'Director')}
+   673→
+   674→TENDER DETAILS:
+   675→- Reference: {tender.get('reference_number', 'N/A')}
+   676→- Title: {tender.get('title', 'N/A')}
+   677→- Client: {tender.get('client_company', 'N/A')}
+   678→- Location: {tender.get('location_site', 'N/A')}
+   679→- Contract Period: {tender.get('contract_period', 'N/A')}
+   680→
+   681→AI-EXTRACTED TENDER INFO:
+   682→{json.dumps(extracted, default=str, indent=2)[:8000]}
+   683→
+   684→The Method Statement must include:
+   685→1. Introduction and project understanding
+   686→2. Scope of work (specific to this tender)
+   687→3. Methodology and approach
+   688→4. Personnel and staffing plan (including PSIRA grades if security tender)
+   689→5. Equipment and resources
+   690→6. Operational procedures
+   691→7. Quality assurance
+   692→8. Health and safety
+   693→9. Supervision and management
+   694→10. Reporting and communication
+   695→
+   696→Make it specific to THIS tender — reference the client, the scope, the personnel requirements.
+   697→Generate at least 2000 words. Be detailed and professional."""
+   698→    try:
+   699→        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=6000)
+   700→    except RuntimeError as e:
+   701→        return f"Document generation failed: {e}"
+   702→
+   703→
+   704→def generate_implementation_plan(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+   705→    """Generate a tender-specific Implementation Plan on company letterhead."""
+   706→    header = _build_company_header(company)
+   707→    prompt = f"""Generate a comprehensive IMPLEMENTATION PLAN for the following tender.
+   708→This must be a formal, detailed document that explains the step-by-step plan for implementing the contract.
+   709→
+   710→COMPANY PROFILE:
+   711→{header}
+   712→
+   713→TENDER DETAILS:
+   714→- Reference: {tender.get('reference_number', 'N/A')}
+   715→- Title: {tender.get('title', 'N/A')}
+   716→- Client: {tender.get('client_company', 'N/A')}
+   717→- Contract Period: {tender.get('contract_period', 'N/A')}
+   718→
+   719→AI-EXTRACTED TENDER INFO:
+   720→{json.dumps(extracted, default=str, indent=2)[:8000]}
+   721→
+   722→The Implementation Plan must include:
+   723→1. Project initiation and mobilization
+   724→2. Phase 1: Setup and preparation (first 30 days)
+   725→3. Phase 2: Full deployment (day 31-60)
+   726→4. Phase 3: Steady-state operations (ongoing)
+   727→5. Timeline with milestones (use a week-by-week breakdown for the first 90 days)
+   728→6. Resource allocation per phase
+   729→7. Key deliverables and deadlines
+   730→8. Risk mitigation during implementation
+   731→9. Transition and handover plan
+   732→10. Monitoring and review schedule
+   733→
+   734→Make it specific to THIS tender. Generate at least 2000 words."""
+   735→    try:
+   736→        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=6000)
+   737→    except RuntimeError as e:
+   738→        return f"Document generation failed: {e}"
+   739→
+   740→
+   741→def generate_technical_proposal(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+   742→    """Generate a tender-specific Technical Proposal on company letterhead."""
+   743→    header = _build_company_header(company)
+   744→    functionality = extracted.get("functionality_requirements", [])
+   745→    eval_criteria = extracted.get("evaluation_criteria", [])
+   746→    prompt = f"""Generate a comprehensive TECHNICAL PROPOSAL for the following tender.
+   747→This must address the functionality requirements and evaluation criteria to maximize the technical score.
+   748→
+   749→COMPANY PROFILE:
+   750→{header}
+   751→
+   752→TENDER DETAILS:
+   753→- Reference: {tender.get('reference_number', 'N/A')}
+   754→- Title: {tender.get('title', 'N/A')}
+   755→- Client: {tender.get('client_company', 'N/A')}
+   756→- Contract Period: {tender.get('contract_period', 'N/A')}
+   757→
+   758→AI-EXTRACTED TENDER INFO:
+   759→Functionality requirements: {json.dumps(functionality, default=str)}
+   760→Evaluation criteria: {json.dumps(eval_criteria, default=str)}
+   761→Mandatory requirements: {json.dumps(extracted.get('mandatory_requirements', []), default=str)}
+   762→Scope: {extracted.get('scope_of_work', 'N/A')}
+   763→Personnel required: {extracted.get('number_of_personnel_guards', 'N/A')}
+   764→PSIRA grades: {extracted.get('required_psira_grades', [])}
+   765→
+   766→The Technical Proposal must include:
+   767→1. Executive summary
+   768→2. Understanding of the client's needs
+   769→3. Company capability and experience
+   770→4. Technical approach (addressing each functionality requirement)
+   771→5. Personnel deployment plan (with PSIRA grades if applicable)
+   772→6. Equipment and technology
+   773→7. Training and development
+   774→8. Quality management system
+   775→9. Performance monitoring
+   776→10. Compliance with mandatory requirements (address each one)
+   777→
+   778→Address EVERY functionality requirement and evaluation criterion explicitly.
+   779→Generate at least 2500 words. Be persuasive — this is what wins the technical score."""
+   780→    try:
+   781→        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=6000)
+   782→    except RuntimeError as e:
+   783→        return f"Document generation failed: {e}"
+   784→
+   785→
+   786→def generate_risk_assessment(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+   787→    """Generate a tender-specific Risk Assessment on company letterhead."""
+   788→    header = _build_company_header(company)
+   789→    prompt = f"""Generate a comprehensive RISK ASSESSMENT for the following tender.
+   790→This must be a formal risk assessment document specific to the tender's scope and location.
+   791→
+   792→COMPANY PROFILE:
+   793→{header}
+   794→
+   795→TENDER DETAILS:
+   796→- Reference: {tender.get('reference_number', 'N/A')}
+   797→- Title: {tender.get('title', 'N/A')}
+   798→- Client: {tender.get('client_company', 'N/A')}
+   799→- Location: {tender.get('location_site', 'N/A')}
+   800→- Scope: {extracted.get('scope_of_work', 'N/A')}
+   801→
+   802→The Risk Assessment must include:
+   803→1. Introduction and methodology
+   804→2. Risk identification (at least 15 risks specific to this tender)
+   805→3. Risk analysis matrix (likelihood x impact) — present as a table
+   806→4. Risk evaluation and priority
+   807→5. Risk mitigation strategies for each identified risk
+   808→6. Residual risk assessment
+   809→7. Risk monitoring and review
+   810→8. Emergency response procedures
+   811→9. Contingency plans
+   812→
+   813→For each risk, include: Risk ID, Description, Likelihood (High/Medium/Low), Impact (High/Medium/Low), Risk Rating, Mitigation, Owner.
+   814→Generate at least 2000 words."""
+   815→    try:
+   816→        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=6000)
+   817→    except RuntimeError as e:
+   818→        return f"Document generation failed: {e}"
+   819→
+   820→
+   821→def generate_sops(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+   822→    """Generate Standard Operating Procedures specific to the tender."""
+   823→    header = _build_company_header(company)
+   824→    prompt = f"""Generate comprehensive STANDARD OPERATING PROCEDURES (SOPs) for the following tender.
+   825→These must be operational procedures that staff will follow daily.
+   826→
+   827→COMPANY PROFILE:
+   828→{header}
+   829→
+   830→TENDER DETAILS:
+   831→- Reference: {tender.get('reference_number', 'N/A')}
+   832→- Title: {tender.get('title', 'N/A')}
+   833→- Client: {tender.get('client_company', 'N/A')}
+   834→- Scope: {extracted.get('scope_of_work', 'N/A')}
+   835→- Personnel: {extracted.get('number_of_personnel_guards', 'N/A')}
+   836→- PSIRA grades: {extracted.get('required_psira_grades', [])}
+   837→
+   838→Generate at least 10 SOPs, each with:
+   839→- SOP Number and Title
+   840→- Purpose
+   841→- Scope
+   842→- Responsibilities
+   843→- Procedure (step by step)
+   844→- Related documents
+   845→
+   846→Include SOPs for:
+   847→1. Guard deployment and shift handover
+   848→2. Access control
+   849→3. Incident reporting and response
+   850→4. Emergency procedures
+   851→5. Patrol and surveillance
+   852→6. Communication protocols
+   853→7. Equipment use and maintenance
+   854→8. Health and safety
+   855→9. Training and induction
+   856→10. Performance monitoring
+   857→
+   858→Generate at least 2500 words. Be specific to this tender's scope."""
+   859→    try:
+   860→        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=6000)
+   861→    except RuntimeError as e:
+   862→        return f"Document generation failed: {e}"
+   863→
+   864→
+   865→def generate_table_of_contents(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+   866→    """Generate a Table of Contents for the full tender submission package."""
+   867→    prompt = f"""Generate a comprehensive TABLE OF CONTENTS for a tender submission package for the following tender.
+   868→This should cover ALL documents that would be included in the final submission.
+   869→
+   870→TENDER DETAILS:
+   871→- Reference: {tender.get('reference_number', 'N/A')}
+   872→- Title: {tender.get('title', 'N/A')}
+   873→- Client: {tender.get('client_company', 'N/A')}
+   874→
+   875→AI-EXTRACTED COMPULSORY DOCUMENTS:
+   876→{json.dumps(extracted.get('compulsory_documents', []), default=str)}
+   877→
+   878→Generate a table of contents with:
+   879→1. Cover letter
+   880→2. Company profile
+   881→3. Compliance documents (CIPC, SARS, B-BBEE, PSIRA, COIDA, etc.)
+   882→4. Technical proposal
+   883→5. Method statement
+   884→6. Implementation plan
+   885→7. Risk assessment
+   886→8. SOPs
+   887→9. Organogram
+   888→10. Pricing schedule
+   889→11. References
+   890→12. Signed declarations
+   891→13. Appendices
+   892→
+   893→Number each section (1, 2, 3...) with sub-sections (1.1, 1.2, ...).
+   894→Also include a brief description of what each section contains.
+   895→Format as a clean, professional table of contents."""
+   896→    try:
+   897→        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=3000)
+   898→    except RuntimeError as e:
+   899→        return f"Document generation failed: {e}"
+   900→
+   901→
+   902→# ---- Additional document generators ----
+   903→
+   904→def generate_cover_letter(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+   905→    header = _build_company_header(company)
+   906→    prompt = f"""Generate a formal COVER LETTER for the following tender submission.
+   907→
+   908→COMPANY PROFILE:
+   909→{header}
+   910→Director: {company.get('director_name', '[Director Name]')}, {company.get('director_title', 'Director')}
+   911→
+   912→TENDER DETAILS:
+   913→- Reference: {tender.get('reference_number', 'N/A')}
+   914→- Title: {tender.get('title', 'N/A')}
+   915→- Client: {tender.get('client_company', 'N/A')}
+   916→- Closing Date: {tender.get('closing_date', 'N/A')}
+   917→
+   918→The Cover Letter must include:
+   919→1. INTRODUCTION AND PURPOSE OF SUBMISSION
+   920→   - Formal introduction of the company
+   921→   - Statement of intent to submit a bid for this tender
+   922→   - Reference to the tender number and title
+   923→2. CONFIRMATION OF UNDERSTANDING OF TENDER REQUIREMENTS
+   924→   - Demonstrate understanding of the scope of work
+   925→   - Acknowledge all mandatory requirements and conditions
+   926→   - Confirm ability to meet all submission deadlines
+   927→3. SUMMARY OF KEY STRENGTHS AND QUALIFICATIONS
+   928→   - Relevant experience in similar contracts
+   929→   - Key personnel qualifications (PSIRA grades if applicable)
+   930→   - Track record of successful service delivery
+   931→   - B-BBEE status and compliance credentials
+   932→4. EXPRESSION OF COMMITMENT TO QUALITY SERVICE DELIVERY
+   933→   - Commitment to meeting and exceeding service standards
+   934→   - Dedication to client satisfaction
+   935→   - Willingness to adapt to client requirements
+   936→5. CONTACT INFORMATION FOR FOLLOW-UP QUERIES
+   937→   - Primary contact person and details
+   938→   - Availability for clarifications or presentations
+   939→
+   940→Generate at least 800 words. Be formal, professional, and persuasive."""
+   941→    try:
+   942→        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=4000)
+   943→    except RuntimeError as e:
+   944→        return f"Document generation failed: {e}"
+   945→
+   946→
+   947→def generate_company_profile(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+   948→    header = _build_company_header(company)
+   949→    prompt = f"""Generate a comprehensive COMPANY PROFILE document for the following tender submission.
+   950→
+   951→COMPANY PROFILE:
+   952→{header}
+   953→
+   954→TENDER DETAILS:
+   955→- Reference: {tender.get('reference_number', 'N/A')}
+   956→- Title: {tender.get('title', 'N/A')}
+   957→- Client: {tender.get('client_company', 'N/A')}
+   958→- Scope: {extracted.get('scope_of_work', 'N/A')}
+   959→
+   960→The Company Profile must include:
+   961→1. COMPANY OVERVIEW AND HISTORY
+   962→   - Founding date and background
+   963→   - Growth trajectory and milestones
+   964→   - Current operational scale
+   965→2. MISSION, VISION, AND VALUES
+   966→   - Mission statement
+   967→   - Vision for the future
+   968→   - Core values (integrity, excellence, etc.)
+   969→3. CORE BUSINESS ACTIVITIES
+   970→   - Primary services offered
+   971→   - Specialized capabilities
+   972→   - Industry sectors served
+   973→4. KEY DIFFERENTIATORS AND COMPETITIVE ADVANTAGES
+   974→   - What sets the company apart
+   975→   - Unique service offerings
+   976→   - Technology and innovation
+   977→5. GEOGRAPHIC COVERAGE AND SERVICE AREAS
+   978→   - Regions of operation
+   979→   - Service delivery capabilities
+   980→   - Response times
+   981→6. COMPANY ACHIEVEMENTS AND CERTIFICATIONS
+   982→   - PSIRA registration (if security company)
+   983→   - B-BBEE status
+   984→   - ISO certifications
+   985→   - Industry awards and recognition
+   986→
+   987→Generate at least 1500 words. Be professional and detailed."""
+   988→    try:
+   989→        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=5000)
+   990→    except RuntimeError as e:
+   991→        return f"Document generation failed: {e}"
+   992→
+   993→
+   994→def generate_compliance_docs(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+   995→    header = _build_company_header(company)
+   996→    prompt = f"""Generate a COMPLIANCE DOCUMENTS summary/cover sheet for the following tender submission.
+   997→
+   998→COMPANY PROFILE:
+   999→{header}
+  1000→
+  1001→TENDER DETAILS:
+  1002→- Reference: {tender.get('reference_number', 'N/A')}
+  1003→- Client: {tender.get('client_company', 'N/A')}
+  1004→
+  1005→AI-EXTRACTED COMPULSORY DOCUMENTS:
+  1006→{json.dumps(extracted.get('compulsory_documents', []), default=str)}
+  1007→
+  1008→The Compliance Documents section must include a formal cover sheet listing:
+  1009→1. CIPC REGISTRATION CERTIFICATE
+  1010→   - Company registration number
+  1011→   - Confirmation of current registration status
+  1012→2. SARS TAX COMPLIANCE CERTIFICATE
+  1013→   - Tax reference number
+  1014→   - Confirmation of tax compliance status
+  1015→3. B-BBEE CERTIFICATE AND AFFIDAVIT
+  1016→   - B-BBEE level
+  1017→   - Certificate validity period
+  1018→4. PSIRA REGISTRATION CERTIFICATES FOR ALL SECURITY PERSONNEL
+  1019→   - PSIRA registration number
+  1020→   - Confirmation of grades (if applicable: {extracted.get('required_psira_grades', [])})
+  1021→5. COIDA REGISTRATION CERTIFICATE
+  1022→   - Registration number
+  1023→   - Confirmation of good standing
+  1024→6. VALID PUBLIC LIABILITY INSURANCE CERTIFICATE
+  1025→   - Insurance provider
+  1026→   - Coverage amount and validity
+  1027→7. WORKER'S COMPENSATION REGISTRATION
+  1028→   - Registration details
+  1029→8. PROOF OF VAT REGISTRATION
+  1030→   - VAT number
+  1031→9. SIGNED DECLARATION OF COMPLIANCE WITH ALL REGULATORY REQUIREMENTS
+  1032→   - Formal declaration text
+  1033→   - Director's signature block
+  1034→
+  1035→For each item, provide a formal declaration that the document is attached and valid.
+  1036→Generate at least 1000 words."""
+  1037→    try:
+  1038→        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=4000)
+  1039→    except RuntimeError as e:
+  1040→        return f"Document generation failed: {e}"
+  1041→
+  1042→
+  1043→def generate_organogram(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+  1044→    header = _build_company_header(company)
+  1045→    organogram_text = company.get("organogram_text", "")
+  1046→    organogram_section = ""
+  1047→    if organogram_text:
+  1048→        organogram_section = f"""
+  1049→
+  1050→IMPORTANT — THE COMPANY'S ACTUAL ORGANOGRAM (extracted from uploaded file):
+  1051→Use this real organizational structure as the basis for the generated organogram.
+  1052→Match the actual roles, names, titles, and reporting lines from this document.
+  1053→Adapt the structure to include any additional roles required by the tender (e.g. extra guards, supervisors),
+  1054→but keep the real company structure as the foundation.
+  1055→
+  1056→ORGANOGRAM CONTENT:
+  1057→{organogram_text[:8000]}
+  1058→"""
+  1059→    prompt = f"""Generate an ORGANOGRAM document for the following tender.
+  1060→
+  1061→COMPANY PROFILE:
+  1062→{header}
+  1063→
+  1064→TENDER DETAILS:
+  1065→- Reference: {tender.get('reference_number', 'N/A')}
+  1066→- Client: {tender.get('client_company', 'N/A')}
+  1067→- Personnel required: {extracted.get('number_of_personnel_guards', 'N/A')}
+  1068→- PSIRA grades: {extracted.get('required_psira_grades', [])}
+  1069→{organogram_section}
+  1070→
+  1071→The Organogram must include:
+  1072→1. ORGANIZATIONAL STRUCTURE
+  1073→   - Visual description of the hierarchy (describe in text since this is a text document)
+  1074→   - Top-level management
+  1075→   - Middle management / supervisors
+  1076→   - Operational staff
+  1077→2. KEY PERSONNEL ROLES AND RESPONSIBILITIES
+  1078→   2.1 Management Team
+  1079→   - Project Manager / Director
+  1080→   - Operations Manager
+  1081→   - Compliance Officer
+  1082→   2.2 Supervisory Staff
+  1083→   - Site Supervisors (per location if applicable)
+  1084→   - Shift Leaders
+  1085→   2.3 Security Personnel / Operational Staff
+  1086→   - Guards / Officers (by grade if applicable)
+  1087→   - Control Room Operators
+  1088→   - Response Team
+  1089→3. REPORTING LINES AND COMMUNICATION CHANNELS
+  1090→   - Chain of command
+  1091→   - Escalation procedures
+  1092→   - Communication flow between levels
+  1093→4. STAFFING DEPLOYMENT MODEL
+  1094→   - Shift patterns
+  1095→   - Staff allocation per site
+  1096→   - Relief and backup arrangements
+  1097→
+  1098→Generate at least 1200 words. Be specific to this tender's personnel requirements."""
+  1099→    try:
+  1100→        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=4000)
+  1101→    except RuntimeError as e:
+  1102→        return f"Document generation failed: {e}"
+  1103→
+  1104→
+  1105→def generate_pricing_schedule(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+  1106→    header = _build_company_header(company)
+  1107→    prompt = f"""Generate a PRICING SCHEDULE document for the following tender.
+  1108→
+  1109→COMPANY PROFILE:
+  1110→{header}
+  1111→
+  1112→TENDER DETAILS:
+  1113→- Reference: {tender.get('reference_number', 'N/A')}
+  1114→- Client: {tender.get('client_company', 'N/A')}
+  1115→- Contract Period: {tender.get('contract_period', 'N/A')}
+  1116→- Estimated Value: {tender.get('estimated_value', 'N/A')}
+  1117→
+  1118→AI-EXTRACTED PRICING REQUIREMENTS:
+  1119→{json.dumps(extracted.get('pricing_requirements', []), default=str)}
+  1120→Personnel: {extracted.get('number_of_personnel_guards', 'N/A')}
+  1121→PSIRA grades: {extracted.get('required_psira_grades', [])}
+  1122→Equipment: {extracted.get('required_equipment', [])}
+  1123→
+  1124→The Pricing Schedule must include:
+  1125→1. DETAILED COST BREAKDOWN
+  1126→   - Labour costs (by role/grade with monthly rates)
+  1127→   - Equipment costs
+  1128→   - Consumables
+  1129→   - Transport
+  1130→   - Overheads
+  1131→   - Profit margin
+  1132→2. PRICING STRUCTURE PER FACILITY/SHIFT
+  1133→   - Day shift rates
+  1134→   - Night shift rates
+  1135→   - Weekend rates (if applicable)
+  1136→   - Holiday rates
+  1137→3. ADDITIONAL SERVICE COSTS
+  1138→   - Optional services
+  1139→   - Ad-hoc services
+  1140→4. PAYMENT TERMS AND CONDITIONS
+  1141→   - Payment cycle (monthly in arrears, etc.)
+  1142→   - Invoice requirements
+  1143→   - Late payment terms
+  1144→5. PRICE ADJUSTMENT MECHANISMS
+  1145→   - Annual escalation clauses
+  1146→   - CPI-linked adjustments
+  1147→   - Fuel price adjustments (if transport involved)
+  1148→6. VALUE-ADDED SERVICES
+  1149→   - Included at no extra cost
+  1150→   - Optional premium services
+  1151→
+  1152→Present the pricing in clear table format (using text-based tables).
+  1153→Generate at least 1500 words."""
+  1154→    try:
+  1155→        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=5000)
+  1156→    except RuntimeError as e:
+  1157→        return f"Document generation failed: {e}"
+  1158→
+  1159→
+  1160→def generate_references(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+  1161→    header = _build_company_header(company)
+  1162→    prompt = f"""Generate a REFERENCES document for the following tender.
+  1163→
+  1164→COMPANY PROFILE:
+  1165→{header}
+  1166→
+  1167→TENDER DETAILS:
+  1168→- Reference: {tender.get('reference_number', 'N/A')}
+  1169→- Client: {tender.get('client_company', 'N/A')}
+  1170→- Scope: {extracted.get('scope_of_work', 'N/A')}
+  1171→
+  1172→The References document must include:
+  1173→1. CLIENT REFERENCE 1: [Client Name], [Project Details]
+  1174→   - Client name and contact information
+  1175→   - Contract value and duration
+  1176→   - Scope of services provided
+  1177→   - Key achievements and performance metrics
+  1178→   - Client testimonial
+  1179→2. CLIENT REFERENCE 2: [Client Name], [Project Details]
+  1180→   - Same structure as above
+  1181→3. CLIENT REFERENCE 3: [Client Name], [Project Details]
+  1182→   - Same structure as above
+  1183→4. CASE STUDIES OF SIMILAR PROJECTS
+  1184→   - Project overview
+  1185→   - Challenges and solutions
+  1186→   - Results and outcomes
+  1187→   - Lessons learned
+  1188→5. TESTIMONIALS FROM EXISTING CLIENTS
+  1189→   - Direct quotes from clients
+  1190→   - Specific praise for service quality
+  1191→   - Recommendations
+  1192→
+  1193→Use placeholder names where real client details are not available, but make them realistic for the South African security/services industry.
+  1194→Generate at least 1200 words."""
+  1195→    try:
+  1196→        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=4000)
+  1197→    except RuntimeError as e:
+  1198→        return f"Document generation failed: {e}"
+  1199→
+  1200→
+  1201→def generate_signed_declarations(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+  1202→    header = _build_company_header(company)
+  1203→    director = company.get('director_name', '[Director Name]')
+  1204→    director_title = company.get('director_title', 'Director')
+  1205→    prompt = f"""Generate a SIGNED DECLARATIONS document for the following tender.
+  1206→
+  1207→COMPANY PROFILE:
+  1208→{header}
+  1209→Director: {director}, {director_title}
+  1210→
+  1211→TENDER DETAILS:
+  1212→- Reference: {tender.get('reference_number', 'N/A')}
+  1213→- Title: {tender.get('title', 'N/A')}
+  1214→- Client: {tender.get('client_company', 'N/A')}
+  1215→
+  1216→The Signed Declarations must include:
+  1217→1. DECLARATION OF ACCURACY OF INFORMATION PROVIDED
+  1218→   - Formal statement that all information in the submission is true and accurate
+  1219→   - Acknowledgment of consequences of false information
+  1220→   - Signature block
+  1221→2. DECLARATION OF COMPLIANCE WITH TENDER REQUIREMENTS
+  1222→   - Confirmation that all mandatory requirements are met
+  1223→   - Acknowledgment of all terms and conditions
+  1224→   - Signature block
+  1225→3. DECLARATION OF NO CONFLICT OF INTEREST
+  1226→   - Statement of no existing conflict of interest
+  1227→   - Disclosure of any potential conflicts
+  1228→   - Signature block
+  1229→4. DECLARATION OF UNDERSTANDING OF CONTRACTUAL TERMS
+  1230→   - Confirmation of understanding of contract period, payment terms, etc.
+  1231→   - Acknowledgment of penalties for non-performance
+  1232→   - Signature block
+  1233→5. DIRECTOR'S AUTHORIZATION OF SUBMISSION
+  1234→   - Formal authorization by the director
+  1235→   - Confirmation of authority to submit
+  1236→   - Director's signature block with date
+  1237→
+  1238→Each declaration should be a formal, legally-worded statement with a signature block.
+  1239→Generate at least 1000 words."""
+  1240→    try:
+  1241→        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=4000)
+  1242→    except RuntimeError as e:
+  1243→        return f"Document generation failed: {e}"
+  1244→
+  1245→
+  1246→def generate_appendices(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+  1247→    header = _build_company_header(company)
+  1248→    prompt = f"""Generate an APPENDICES document for the following tender submission.
+  1249→
+  1250→COMPANY PROFILE:
+  1251→{header}
+  1252→
+  1253→TENDER DETAILS:
+  1254→- Reference: {tender.get('reference_number', 'N/A')}
+  1255→- Client: {tender.get('client_company', 'N/A')}
+  1256→- Scope: {extracted.get('scope_of_work', 'N/A')}
+  1257→- Personnel: {extracted.get('number_of_personnel_guards', 'N/A')}
+  1258→- PSIRA grades: {extracted.get('required_psira_grades', [])}
+  1259→- Equipment: {extracted.get('required_equipment', [])}
+  1260→
+  1261→The Appendices must include:
+  1262→1. ADDITIONAL COMPANY DOCUMENTATION
+  1263→   - List of additional supporting documents attached
+  1264→   - Description of each document's relevance
+  1265→2. DETAILED TRAINING PROGRAMS
+  1266→   - Induction training curriculum
+  1267→   - On-the-job training schedule
+  1268→   - Refresher training program
+  1269→   - PSIRA-required training modules
+  1270→   - Specialized training (fire safety, first aid, etc.)
+  1271→3. SAMPLE REPORTS AND FORMS
+  1272→   - Daily occurrence report template
+  1273→   - Incident report template
+  1274→   - Site inspection checklist
+  1275→   - Shift handover form
+  1276→   - Visitor register template
+  1277→4. EQUIPMENT SPECIFICATIONS
+  1278→   - Communication equipment (radios, phones)
+  1279→   - Security equipment (if applicable)
+  1280→   - Uniform specifications
+  1281→   - Patrol equipment
+  1282→5. TECHNICAL SPECIFICATIONS
+  1283→   - Control room specifications
+  1284→   - Monitoring systems
+  1285→   - Reporting software
+  1286→6. SUPPORTING CERTIFICATES AND DOCUMENTATION
+  1287→   - List of all certificates attached
+  1288→   - Training certificates
+  1289→   - Compliance certificates
+  1290→   - Insurance certificates
+  1291→
+  1292→Generate at least 1500 words. Be specific to this tender's requirements."""
+  1293→    try:
+  1294→        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=5000)
+  1295→    except RuntimeError as e:
+  1296→        return f"Document generation failed: {e}"
+  1297→
+  1298→
+  1299→# Map doc types to their generator functions
+  1300→DOCUMENT_GENERATORS = {
+  1301→    "cover_letter": generate_cover_letter,
+  1302→    "company_profile": generate_company_profile,
+  1303→    "compliance_docs": generate_compliance_docs,
+  1304→    "technical_proposal": generate_technical_proposal,
+  1305→    "method_statement": generate_method_statement,
+  1306→    "implementation_plan": generate_implementation_plan,
+  1307→    "risk_assessment": generate_risk_assessment,
+  1308→    "sops": generate_sops,
+  1309→    "organogram": generate_organogram,
+  1310→    "pricing_schedule": generate_pricing_schedule,
+  1311→    "references": generate_references,
+  1312→    "signed_declarations": generate_signed_declarations,
+  1313→    "appendices": generate_appendices,
+  1314→    "table_of_contents": generate_table_of_contents,
+  1315→}
+  1316→
+  1317→DOCUMENT_TYPE_INFO = {
+  1318→    "cover_letter": {"title": "Cover Letter", "description": "Formal introduction and purpose of submission"},
+  1319→    "company_profile": {"title": "Company Profile", "description": "Company overview, history, mission and capabilities"},
+  1320→    "compliance_docs": {"title": "Compliance Documents", "description": "Cover sheet for CIPC, SARS, B-BBEE, PSIRA, COIDA and declarations"},
+  1321→    "technical_proposal": {"title": "Technical Proposal", "description": "Addresses functionality requirements to maximize technical score"},
+  1322→    "method_statement": {"title": "Method Statement", "description": "How the company will deliver the services"},
+  1323→    "implementation_plan": {"title": "Implementation Plan", "description": "Step-by-step plan for implementing the contract"},
+  1324→    "risk_assessment": {"title": "Risk Assessment", "description": "Risk identification, analysis and mitigation"},
+  1325→    "sops": {"title": "Standard Operating Procedures", "description": "Daily operational procedures for staff"},
+  1326→    "organogram": {"title": "Organogram", "description": "Organizational structure, roles and reporting lines"},
+  1327→    "pricing_schedule": {"title": "Pricing Schedule", "description": "Detailed cost breakdown and pricing structure"},
+  1328→    "references": {"title": "References", "description": "Client references, case studies and testimonials"},
+  1329→    "signed_declarations": {"title": "Signed Declarations", "description": "Formal declarations of compliance and accuracy"},
+  1330→    "appendices": {"title": "Appendices", "description": "Training programs, sample forms, equipment specs"},
+  1331→    "table_of_contents": {"title": "Table of Contents", "description": "Full submission package table of contents"},
+  1332→}
+  1333→
+  1334→
+  1335→
+  1336→
+  1337→# ---- AI Pricing Sheet Generation ----
+  1338→
+  1339→PRICING_SYSTEM = """You are a South African tender pricing analyst.
+  1340→You generate tender pricing sheets based on the tender requirements and standard industry rates.
+  1341→You MUST respond with ONLY a valid JSON object (no markdown, no code fences).
+  1342→
+  1343→Schema:
+  1344→{
+  1345→  "line_items": [
+  1346→    {
+  1347→      "category": one of ["Labour", "Equipment", "Consumables", "Transport", "Other"],
+  1348→      "description": string (e.g. "Security Guard Grade C - Day shift"),
+  1349→      "quantity": number,
+  1350→      "rate": number (ZAR, monthly or hourly rate),
+  1351→      "total": number (quantity * rate)
+  1352→    }
+  1353→  ],
+  1354→  "pricing_notes": string (notes about the pricing approach, assumptions, exclusions),
+  1355→  "vat_rate": number (0.15 for 15%)
+  1356→}
+  1357→
+  1358→Rules:
+  1359→- For security tenders: include labour items for each PSIRA grade required (Grade A, B, C, D, E) with appropriate quantities based on the number of guards/personnel required and the contract period.
+  1360→- Use realistic South African security industry rates (2024/2025):
+  1361→  * Grade C guard: R6,000-R8,000/month
+  1362→  * Grade B guard: R7,000-R9,000/month
+  1363→  * Grade A guard: R8,000-R12,000/month
+  1364→  * Site supervisor: R10,000-R15,000/month
+  1365→  * Project manager: R20,000-R35,000/month
+  1366→- Include equipment items if the tender requires equipment (radios, uniforms, torches, etc.)
+  1367→- Include transport costs if site locations are mentioned.
+  1368→- Calculate totals correctly: total = quantity * rate for each line.
+  1369→- Set vat_rate to 0.15 (15% standard VAT in South Africa).
+  1370→- In pricing_notes, explain your assumptions (e.g. "Rates based on 12-month contract, PSIRA-compliant guards, includes basic uniform but excludes firearms").
+  1371→- If the tender mentions a specific pricing format or schedule, follow it."""
+  1372→
+  1373→
+  1374→def generate_pricing_sheet(tender: Dict[str, Any], extracted: Dict[str, Any]) -> Dict[str, Any]:
+  1375→    """
+  1376→    Generate a pricing sheet draft using AI based on the tender's extracted requirements.
+  1377→    Returns { line_items, pricing_notes, vat_rate }.
+  1378→    """
+  1379→    prompt = f"""Generate a pricing sheet for the following tender.
+  1380→
+  1381→TENDER DETAILS:
+  1382→- Reference: {tender.get('reference_number', 'N/A')}
+  1383→- Title: {tender.get('title', 'N/A')}
+  1384→- Client: {tender.get('client_company', 'N/A')}
+  1385→- Contract Period: {tender.get('contract_period', 'N/A')}
+  1386→- Estimated Value: {tender.get('estimated_value', 'N/A')}
+  1387→- Location: {tender.get('location_site', 'N/A')}
+  1388→
+  1389→AI-EXTRACTED TENDER INFO:
+  1390→- Scope: {extracted.get('scope_of_work', 'N/A')}
+  1391→- Personnel required: {extracted.get('number_of_personnel_guards', 'N/A')}
+  1392→- PSIRA grades: {extracted.get('required_psira_grades', [])}
+  1393→- Required equipment: {extracted.get('required_equipment', [])}
+  1394→- Pricing requirements: {extracted.get('pricing_requirements', [])}
+  1395→- Site locations: {extracted.get('site_locations', [])}
+  1396→
+  1397→Generate a complete pricing sheet with realistic line items. Return ONLY the JSON object."""
+  1398→    try:
+  1399→        result = _run_zai_chat(prompt, system=PRICING_SYSTEM)
+  1400→        result = result.strip()
+  1401→        if result.startswith("```"):
+  1402→            result = result.split("\n", 1)[1] if "\n" in result else result[3:]
+  1403→            if result.endswith("```"):
+  1404→                result = result[:-3]
+  1405→            result = result.strip()
+  1406→        if result.startswith("json"):
+  1407→            result = result[4:].strip()
+  1408→        first = result.find("{")
+  1409→        last = result.rfind("}")
+  1410→        if first >= 0 and last > first:
+  1411→            result = result[first:last + 1]
+  1412→        data = json.loads(result)
+  1413→        # Ensure totals are calculated
+  1414→        for li in data.get("line_items", []):
+  1415→            if "total" not in li or li["total"] == 0:
+  1416→                li["total"] = round(float(li.get("quantity", 0)) * float(li.get("rate", 0)), 2)
+  1417→        if "vat_rate" not in data:
+  1418→            data["vat_rate"] = 0.15
+  1419→        return data
+  1420→    except (json.JSONDecodeError, RuntimeError, Exception):
+  1421→        return {
+  1422→            "line_items": [],
+  1423→            "pricing_notes": "AI pricing generation failed. Please add line items manually.",
+  1424→            "vat_rate": 0.15,
+  1425→        }
+  1426→
+  1427→
+  1428→# ---- AI Tender Readiness Report (the "most important requirement") ----
+  1429→
+  1430→READINESS_SYSTEM = """You are TM Flow AI, a tender readiness analyst. Your job is to give the user a crystal-clear picture of where they stand with a tender and exactly what they need to do to win it.
+  1431→
+  1432→You produce a READINESS REPORT in plain text with these exact sections (use the section headers as written):
+  1433→
+  1434→=== WHAT THE TENDER REQUIRES ===
+  1435→[List all mandatory requirements, compulsory documents, PSIRA grades, personnel, equipment, functionality requirements, evaluation criteria, and submission requirements. Be specific.]
+  1436→
+  1437→=== WHAT YOU HAVE ===
+  1438→[List the checklist items that are marked "Complete" and any compliance library documents that are linked. Be specific about what's already done.]
+  1439→
+  1440→=== WHAT YOU ARE MISSING ===
+  1441→[List the checklist items that are "Outstanding" or "Expired". For each, explain what it is and why it's needed. Prioritize mandatory items first. This is the most critical section — be thorough.]
+  1442→
+  1443→=== DEADLINES ===
+  1444→[List all critical deadlines: closing date and time, days remaining, briefing dates (if any), and any other important deadlines from the tender. Use urgency language if deadlines are close.]
+  1445→
+  1446→=== RISKS ===
+  1447→[List all potential risks: disqualification requirements, expired compliance documents, missing compulsory documents, unconfirmed briefing attendance, missing personnel, tight deadlines, etc. For each risk, explain the impact and recommend immediate action.]
+  1448→
+  1449→=== WHAT NEEDS TO BE DONE BEFORE SUBMISSION ===
+  1450→[Provide a prioritized action list — numbered steps the user must take before submitting. Start with the most urgent/critical items. Be specific and actionable. Include: documents to obtain, people to contact, tasks to complete, reviews to do, and the final submission itself.]
+  1451→
+  1452→=== READINESS SCORE ===
+  1453→[Provide a readiness score out of 100 based on: checklist completion %, deadline proximity, risk level, and outstanding mandatory items. Explain the score briefly.]
+  1454→
+  1455→Keep it factual, specific, and actionable. Reference the tender by its reference number. Do not add markdown formatting."""
+  1456→
+  1457→
+  1458→def generate_readiness_report(tender_data: Dict[str, Any], extracted: Dict[str, Any], checklist: List[Dict[str, Any]], library_docs: List[Dict[str, Any]], company: Dict[str, Any]) -> str:
+  1459→    """
+  1460→    Generate the comprehensive Tender Readiness Report.
+  1461→    This is the 'most important requirement' — tells the user everything they need to know.
+  1462→    """
+  1463→    prompt = f"""Generate a READINESS REPORT for the following tender.
+  1464→
+  1465→TENDER DETAILS:
+  1466→{json.dumps(tender_data, indent=2, default=str)[:3000]}
+  1467→
+  1468→AI-EXTRACTED TENDER INFO:
+  1469→{json.dumps(extracted, indent=2, default=str)[:5000]}
+  1470→
+  1471→CHECKLIST ITEMS (with status):
+  1472→{json.dumps(checklist, indent=2, default=str)[:5000]}
+  1473→
+  1474→COMPLIANCE LIBRARY DOCUMENTS:
+  1475→{json.dumps(library_docs, indent=2, default=str)[:2000]}
+  1476→
+  1477→COMPANY PROFILE:
+  1478→{json.dumps(company, indent=2, default=str)[:1000]}
+  1479→
+  1480→Generate the full READINESS REPORT with all 7 sections as specified."""
+  1481→    try:
+  1482→        return _run_zai_chat(prompt, system=READINESS_SYSTEM, max_tokens=6000)
+  1483→    except RuntimeError as e:
+  1484→        return f"Readiness report generation failed: {e}"
+  1485→
+  1486→
+  1487→# ---- Smart document analysis ----
+  1488→
+  1489→SMART_DOCS_SYSTEM = """You are a South African tender submission analyst.
+  1490→Analyze the tender's AI-extracted information and determine which documents are required for the submission.
+  1491→Respond with ONLY a valid JSON array (no markdown, no code fences).
+  1492→
+  1493→Each element must follow this schema:
+  1494→{
+  1495→  "doc_type": string (must be one of: "cover_letter", "company_profile", "compliance_docs", "technical_proposal", "method_statement", "implementation_plan", "risk_assessment", "sops", "organogram", "pricing_schedule", "references", "signed_declarations", "appendices", "table_of_contents"),
+  1496→  "reason": string (1-2 sentences explaining WHY this document is needed for THIS specific tender),
+  1497→  "priority": "essential" | "recommended" | "optional"
+  1498→}
+  1499→
+  1500→Rules:
+  1501→- Include "cover_letter" and "table_of_contents" as essential for every tender.
+  1502→- Include "pricing_schedule" as essential for every tender (all tenders require pricing).
+  1503→- Include "signed_declarations" as essential for government tenders.
+  1504→- Include "compliance_docs" as essential if any compulsory documents are mentioned.
+  1505→- Include "technical_proposal" as essential if functionality requirements or evaluation criteria mention functionality.
+  1506→- Include "method_statement" as essential if the scope of work is detailed.
+  1507→- Include "implementation_plan" as essential for service contracts.
+  1508→- Include "risk_assessment" as recommended for security/service tenders.
+  1509→- Include "sops" as recommended for service tenders with operational requirements.
+  1510→- Include "organogram" as essential if personnel/guards are required.
+  1511→- Include "references" as essential if references are listed as compulsory documents.
+  1512→- Include "company_profile" as essential if company profile is listed as a compulsory document.
+  1513→- Include "appendices" as recommended if equipment, training, or technical specifications are mentioned.
+  1514→- Be specific to THIS tender — don't include documents that aren't relevant."""
+  1515→
+  1516→
+  1517→def analyze_required_documents(extracted: Dict[str, Any], tender: Dict[str, Any]) -> List[Dict[str, Any]]:
+  1518→    """Use AI to analyze the tender and determine which documents are required."""
+  1519→    if not extracted or extracted.get("_error"):
+  1520→        # Fallback: return all document types as recommended
+  1521→        return [
+  1522→            {"doc_type": dt, "reason": "Recommended for a complete tender submission", "priority": "recommended"}
+  1523→            for dt in ["cover_letter", "company_profile", "compliance_docs", "technical_proposal",
+  1524→                       "method_statement", "implementation_plan", "risk_assessment", "sops",
+  1525→                       "organogram", "pricing_schedule", "references", "signed_declarations",
+  1526→                       "appendices", "table_of_contents"]
+  1527→        ]
+  1528→
+  1529→    prompt = f"""Analyze this tender and determine which documents are required for the submission.
+  1530→
+  1531→TENDER DETAILS:
+  1532→- Reference: {tender.get('reference_number', 'N/A')}
+  1533→- Title: {tender.get('title', 'N/A')}
+  1534→- Client: {tender.get('client_company', 'N/A')}
+  1535→- Scope: {extracted.get('scope_of_work', 'N/A')}
+  1536→- Personnel: {extracted.get('number_of_personnel_guards', 'N/A')}
+  1537→- PSIRA grades: {extracted.get('required_psira_grades', [])}
+  1538→
+  1539→AI-EXTRACTED INFO:
+  1540→- Compulsory documents: {json.dumps(extracted.get('compulsory_documents', []), default=str)}
+  1541→- Mandatory requirements: {json.dumps(extracted.get('mandatory_requirements', []), default=str)}
+  1542→- Functionality requirements: {json.dumps(extracted.get('functionality_requirements', []), default=str)}
+  1543→- Evaluation criteria: {json.dumps(extracted.get('evaluation_criteria', []), default=str)}
+  1544→- Pricing requirements: {json.dumps(extracted.get('pricing_requirements', []), default=str)}
+  1545→- Submission requirements: {json.dumps(extracted.get('submission_requirements', []), default=str)}
+  1546→- Required equipment: {json.dumps(extracted.get('required_equipment', []), default=str)}
+  1547→- Disqualification risks: {json.dumps(extracted.get('disqualification_requirements', []), default=str)}
+  1548→
+  1549→Return ONLY the JSON array of required documents."""
+  1550→    try:
+  1551→        result = _run_zai_chat(prompt, system=SMART_DOCS_SYSTEM)
+  1552→        result = result.strip()
+  1553→        if result.startswith("```"):
+  1554→            result = result.split("\n", 1)[1] if "\n" in result else result[3:]
+  1555→            if result.endswith("```"):
+  1556→                result = result[:-3]
+  1557→            result = result.strip()
+  1558→        if result.startswith("json"):
+  1559→            result = result[4:].strip()
+  1560→        first = result.find("[")
+  1561→        last = result.rfind("]")
+  1562→        if first >= 0 and last > first:
+  1563→            result = result[first:last + 1]
+  1564→        items = json.loads(result)
+  1565→        if not isinstance(items, list):
+  1566→            return []
+  1567→        # Validate doc_types
+  1568→        valid_types = set(DOCUMENT_TYPE_INFO.keys())
+  1569→        valid_items = []
+  1570→        for item in items:
+  1571→            if isinstance(item, dict) and item.get("doc_type") in valid_types:
+  1572→                valid_items.append({
+  1573→                    "doc_type": item["doc_type"],
+  1574→                    "reason": str(item.get("reason", ""))[:500],
+  1575→                    "priority": item.get("priority", "recommended"),
+  1576→                })
+  1577→        return valid_items
+  1578→    except (json.JSONDecodeError, RuntimeError, Exception):
+  1579→        # Fallback: return all as recommended
+  1580→        return [
+  1581→            {"doc_type": dt, "reason": "Recommended for a complete tender submission", "priority": "recommended"}
+  1582→            for dt in ["cover_letter", "company_profile", "compliance_docs", "technical_proposal",
+  1583→                       "method_statement", "implementation_plan", "risk_assessment", "sops",
+  1584→                       "organogram", "pricing_schedule", "references", "signed_declarations",
+  1585→                       "appendices", "table_of_contents"]
+  1586→        ]
+  1587→

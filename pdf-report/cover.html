@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TM Flow - Technical Report Cover</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&family=Playfair+Display:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --c-bg:       #eff1f0;
+    --c-surface:  #e6e9e7;
+    --c-mid:      #3c6751;
+    --c-block:    #416252;
+    --c-accent:   #258c59;
+    --c-accent2:  #43a047;
+    --c-border:   #c3d6cd;
+    --c-icon:     #4b9f75;
+    --c-text:     #191c1b;
+    --c-muted:    #7d8782;
+  }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  @page{ size: 794px 1123px; margin:0; }
+  html, body{
+    margin:0; padding:0;
+    width:794px; height:1123px;
+    background: var(--c-bg);
+    font-family: 'Inter', sans-serif;
+    color: var(--c-text);
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .cover-page{
+    position: relative;
+    width:794px; height:1123px;
+    background: var(--c-bg);
+    border:none !important; outline:none !important; box-shadow:none !important;
+    overflow: hidden;
+  }
+
+  /* Layer 1 - Background grid */
+  .layer-bg{
+    position:absolute; inset:0; z-index:1;
+    overflow:hidden;
+  }
+  .grid{
+    position:absolute; inset:0;
+    background-image:
+      linear-gradient(to right, rgba(60,103,81,0.04) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(60,103,81,0.04) 1px, transparent 1px);
+    background-size: 50px 50px;
+  }
+  /* faint corner watermark wordmark */
+  .watermark{
+    position:absolute;
+    right: 40px; bottom: 70px;
+    font-family: 'Playfair Display', serif;
+    font-size: 220px; font-weight: 900;
+    color: var(--c-mid);
+    opacity: 0.04;
+    letter-spacing: -8px;
+    line-height: 0.85;
+  }
+
+  /* Layer 2 - Structure */
+  .layer-structure{
+    position:absolute; inset:0; z-index:2;
+  }
+  .anchor-line{
+    position:absolute;
+    left: 95px;            /* 0.12 * W */
+    top: 112px;            /* 0.10 * H */
+    bottom: 112px;         /* 0.10 * H */
+    width: 6px;
+    background: var(--c-mid);
+  }
+  /* small crop marks */
+  .crop-tl{ position:absolute; top:48px; left:48px; width:18px; height:18px;
+    border-top:1.5px solid var(--c-mid); border-left:1.5px solid var(--c-mid); }
+  .crop-tr{ position:absolute; top:48px; right:48px; width:18px; height:18px;
+    border-top:1.5px solid var(--c-mid); border-right:1.5px solid var(--c-mid); }
+  .crop-bl{ position:absolute; bottom:48px; left:48px; width:18px; height:18px;
+    border-bottom:1.5px solid var(--c-mid); border-left:1.5px solid var(--c-mid); }
+  .crop-br{ position:absolute; bottom:48px; right:48px; width:18px; height:18px;
+    border-bottom:1.5px solid var(--c-mid); border-right:1.5px solid var(--c-mid); }
+
+  /* Layer 3 - Content */
+  .layer-content{
+    position:absolute; inset:0; z-index:3;
+  }
+
+  /* Kicker */
+  .kicker{
+    position:absolute;
+    top: 168px;             /* 0.15 * H */
+    left: 150px;            /* >= 40px gap from anchor line */
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 4px;
+    color: var(--c-mid);
+    opacity: 0.85;
+    text-transform: uppercase;
+  }
+  .kicker .dot{
+    display:inline-block; width:6px; height:6px; border-radius:50%;
+    background: var(--c-accent); margin-right:10px; vertical-align: middle;
+    transform: translateY(-1px);
+  }
+
+  /* Hero title */
+  .hero{
+    position:absolute;
+    top: 240px;             /* a touch above 0.30*H for the brand block */
+    left: 150px;
+    width: 540px;
+  }
+  .brand{
+    font-family: 'Playfair Display', serif;
+    font-size: 92px;
+    font-weight: 900;
+    line-height: 0.98;
+    letter-spacing: -3px;
+    color: var(--c-mid);
+  }
+  .hero-sub{
+    margin-top: 18px;
+    font-family: 'Inter', sans-serif;
+    font-size: 22px;
+    font-weight: 400;
+    line-height: 1.35;
+    color: var(--c-text);
+    opacity: 0.78;
+    max-width: 480px;
+  }
+
+  /* divider */
+  .divider{
+    position:absolute;
+    top: 525px;
+    left: 150px;
+    width: 60px; height: 3px;
+    background: var(--c-accent);
+  }
+
+  /* Summary */
+  .summary{
+    position:absolute;
+    top: 590px;             /* >= 40px gap below divider */
+    left: 150px;
+    width: 470px;           /* W * 0.6 */
+    font-family: 'Inter', sans-serif;
+    font-size: 15.5px;
+    font-weight: 400;
+    line-height: 1.7;
+    color: var(--c-text);
+    opacity: 0.82;
+  }
+
+  /* Stat strip */
+  .stats{
+    position:absolute;
+    top: 790px;
+    left: 150px;
+    right: 95px;
+    display: flex;
+    gap: 36px;
+  }
+  .stat{ flex:1; }
+  .stat .num{
+    font-family: 'Playfair Display', serif;
+    font-size: 38px; font-weight: 900;
+    color: var(--c-mid);
+    line-height: 1;
+  }
+  .stat .lbl{
+    margin-top: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--c-muted);
+  }
+
+  /* Meta */
+  .meta{
+    position:absolute;
+    top: 935px;             /* below 0.82*H */
+    left: 150px;
+    right: 95px;
+    display:flex; justify-content: space-between; align-items: flex-end;
+    font-family: 'Inter', sans-serif;
+  }
+  .meta .block{ font-size: 13px; line-height: 1.5; }
+  .meta .lbl{
+    font-size: 10px; font-weight: 500;
+    letter-spacing: 2px; text-transform: uppercase;
+    color: var(--c-muted); margin-bottom: 4px;
+  }
+  .meta .val{
+    font-size: 14px; font-weight: 600; color: var(--c-text);
+  }
+
+  /* Footer band */
+  .footer-band{
+    position:absolute;
+    left: 95px; right: 95px; bottom: 60px;
+    border-top: 1px solid var(--c-border);
+    padding-top: 14px;
+    display:flex; justify-content: space-between; align-items:center;
+    font-size: 11px; letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--c-muted);
+  }
+  .footer-band .right{ color: var(--c-mid); font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="cover-page">
+
+    <!-- Layer 1 -->
+    <div class="layer-bg">
+      <div class="grid"></div>
+      <div class="watermark">TM</div>
+    </div>
+
+    <!-- Layer 2 -->
+    <div class="layer-structure">
+      <div class="anchor-line"></div>
+      <div class="crop-tl"></div><div class="crop-tr"></div>
+      <div class="crop-bl"></div><div class="crop-br"></div>
+    </div>
+
+    <!-- Layer 3 -->
+    <div class="layer-content">
+
+      <div class="kicker"><span class="dot"></span>Technical &amp; Product Report &nbsp;·&nbsp; 2025 Edition</div>
+
+      <div class="hero">
+        <div class="brand">TM Flow</div>
+        <div class="hero-sub">An AI-powered tender management platform built for the South African procurement market.</div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="summary">
+        This report documents the complete architecture, feature surface, technology stack,
+        and commercial positioning of TM Flow &mdash; a full-stack SaaS application that
+        automates tender discovery, document reading, compliance checking, pricing,
+        submission tracking, and AI-driven proposal generation for South African
+        tendering organisations.
+      </div>
+
+      <div class="stats">
+        <div class="stat"><div class="num">67</div><div class="lbl">API Endpoints</div></div>
+        <div class="stat"><div class="num">11</div><div class="lbl">Data Models</div></div>
+        <div class="stat"><div class="num">14</div><div class="lbl">AI Generators</div></div>
+        <div class="stat"><div class="num">10</div><div class="lbl">Dashboard Modules</div></div>
+      </div>
+
+      <div class="meta">
+        <div class="block">
+          <div class="lbl">Prepared For</div>
+          <div class="val">Product &amp; Engineering Review</div>
+        </div>
+        <div class="block" style="text-align:right;">
+          <div class="lbl">Document Version</div>
+          <div class="val">v1.0 &nbsp;·&nbsp; 2025</div>
+        </div>
+      </div>
+
+      <div class="footer-band">
+        <span>TM Flow &nbsp;·&nbsp; Tender Management System</span>
+        <span class="right">Confidential / Internal</span>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>

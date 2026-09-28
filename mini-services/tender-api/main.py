@@ -1285,7 +1285,18 @@ async def ai_read_document_and_create(
     # Build checklist from extracted compulsory documents
     _checklist_from_extracted(t.id, extracted, db)
 
-    # Generate and save AI summary
+    # Commit the tender immediately so the user sees it in their register
+    # without waiting for the AI summary (which can take 30-60s).
+    # The summary is generated best-effort below; if it fails or is slow,
+    # the tender is already saved and the user can trigger the summary
+    # later via /api/tenders/{id}/ai-summary.
+    t.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(t)
+
+    # Generate and save AI summary (best-effort, short timeout)
+    # This runs AFTER the tender is committed, so even if it fails the
+    # tender is fully created in the database.
     if extracted and not extracted.get("_error"):
         try:
             summary = ai_module.generate_tender_summary(
@@ -1296,12 +1307,13 @@ async def ai_read_document_and_create(
                 extracted
             )
             t.ai_summary = summary
-        except Exception:
-            pass
+            t.updated_at = datetime.utcnow()
+            db.commit()
+            db.refresh(t)
+        except Exception as e:
+            # Log but don't fail — the tender is already saved
+            print(f"[read-document-and-create] Summary generation failed for tender {t.id}: {e}", flush=True)
 
-    t.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(t)
     return _serialize_tender(t)
 
 

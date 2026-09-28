@@ -25,7 +25,9 @@ def _run_zai_chat(prompt: str, system: Optional[str] = None, max_tokens: int = 8
         cmd = [Z_AI_CLI, "chat", "--prompt", prompt, "--output", out_path]
         if system:
             cmd += ["--system", system]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        # 120s per call so two sequential AI calls (extraction + summary)
+        # fit within the 300s Next.js proxy timeout.
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if proc.returncode != 0:
             raise RuntimeError(f"z-ai chat failed: {proc.stderr[:500]}")
         with open(out_path, "r") as fp:

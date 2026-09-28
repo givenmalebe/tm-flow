@@ -1567,3 +1567,58 @@ Stage Summary:
 - Auth flow (register/login/me) verified end-to-end through both curl and browser
 - Existing tender data intact (NPO FUNDING APPLICATION tender visible in dashboard)
 - Frontend auto-proxy means the backend will restart on-demand even if the process dies
+
+---
+Task ID: FIX-502-1
+Agent: Main Orchestrator
+Task: Fix 502 Bad Gateway error on /api/ai/read-document-and-create endpoint
+
+Root Cause Analysis:
+- The read-document-and-create endpoint makes TWO sequential AI calls:
+  1. extract_tender_info() — z-ai CLI, timeout was 180s
+  2. generate_tender_summary() — z-ai CLI, timeout was 180s
+- Total worst case: 360s
+- But the Next.js proxy (src/app/api/[...path]/route.ts) had a 120s fetch timeout
+- When the two AI calls together exceeded 120s, the proxy aborted the request → 502 Bad Gateway
+- The tender was never committed to the DB because the summary generation (step 2) ran BEFORE the final db.commit()
+
+Fix Applied (3 changes):
+
+1. Next.js proxy timeout: 120s → 300s (5 minutes)
+   File: src/app/api/[...path]/route.ts
+   - Line 148: setTimeout(() => controller.abort(), 300000) — primary request
+   - Line 188: setTimeout(() => controller2.abort(), 300000) — retry request
+   - Now handles two sequential AI calls (max 120s each = 240s < 300s)
+
+2. z-ai CLI per-call timeout: 180s → 120s
+   File: mini-services/tender-api/ai_module.py
+   - Line 30: subprocess.run(cmd, ..., timeout=120)
+   - Two calls max = 240s, comfortably within the 300s proxy timeout
+
+3. Tender committed BEFORE summary generation (most important fix)
+   File: mini-services/tender-api/main.py, endpoint /api/ai/read-document-and-create
+   - OLD flow: extract AI → create tender → generate summary → commit (summary blocked the commit)
+   - NEW flow: extract AI → create tender → COMMIT → generate summary (best-effort) → commit again
+   - The tender is now saved to the database immediately after extraction
+   - The AI summary runs afterward; if it fails or is slow, the tender is already created
+   - Users can trigger the summary later via /api/tenders/{id}/ai-summary if needed
+   - Added error logging: print(f"[read-document-and-create] Summary generation failed...")
+
+4. Frontend UX improvement
+   File: src/components/dashboard/tabs/reader-tab.tsx
+   - Updated loading button text: "Creating…" → "Creating tender (AI extraction ~30-60s)…"
+   - Sets correct expectations about the wait time
+
+Verification:
+- Registered test user, uploaded sample tender document (TEST-TNDER-2026-001)
+- POST /api/ai/read-document-and-create returned HTTP 200 in 25.9 seconds
+- Tender created with all fields: reference, title, client, closing date, AI summary, checklist
+- dev.log confirms: "POST /api/ai/read-document-and-create?XTransformPort=8000 200 in 25.9s"
+- bun run lint: clean
+- Backend running on port 8000, supervised by supervisor-fixed.sh
+
+Stage Summary:
+- 502 Bad Gateway error is FIXED
+- Tender creation via AI Document Reader now works end-to-end
+- Response time: ~25s for a typical tender document
+- The tender appears in the register immediately, even if the AI summary is slow

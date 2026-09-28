@@ -143,7 +143,9 @@ async function handler(
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 120000); // 2 min for AI calls
+    // 5 min timeout — AI endpoints (read-document, generate, readiness-report)
+    // make multiple z-ai CLI calls that can each take up to 120s.
+    const timeout = setTimeout(() => controller.abort(), 300000);
     const response = await fetch(targetUrl, {
       method: req.method,
       headers,
@@ -183,7 +185,7 @@ async function handler(
     // Retry the request
     try {
       const controller2 = new AbortController();
-      const timeout2 = setTimeout(() => controller2.abort(), 120000);
+      const timeout2 = setTimeout(() => controller2.abort(), 300000);
       const response2 = await fetch(targetUrl, {
         method: req.method,
         headers,

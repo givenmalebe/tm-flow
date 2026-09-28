@@ -302,7 +302,7 @@ export function ReaderTab() {
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 <Button onClick={handleCreateTender} disabled={creating} className="flex-1 sm:flex-none">
                   {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                  {creating ? "Creating…" : "Create Tender from This"}
+                  {creating ? "Creating tender (AI extraction ~30-60s)…" : "Create Tender from This"}
                 </Button>
                 <Button onClick={handleReset} variant="outline">
                   <RefreshCw className="h-4 w-4" />
@@ -438,7 +438,7 @@ export function ReaderTab() {
               </div>
               <Button onClick={handleCreateTender} disabled={creating}>
                 {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                {creating ? "Creating tender…" : "Create Tender Now"}
+                {creating ? "Creating tender (AI extraction ~30-60s)…" : "Create Tender Now"}
               </Button>
             </CardContent>
           </Card>

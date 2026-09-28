@@ -1523,3 +1523,47 @@ Stage Summary:
 - Report PDF regenerated to 40 pages (was 39; +1 page from new section 14.3), 641 KB, deployed at /TM-Flow-Technical-Report.pdf
 - QA: 11/11 critical pdf_qa checks pass; only 11 minor em-dash warnings (unchanged)
 - Key change: tender caps removed from Business/Custom, Pro raised to 25, AI document generation is now the metered resource (Solo 3/mo, Pro 10/mo, Business 30/mo, Custom negotiable)
+
+---
+Task ID: BACKEND-1
+Agent: Main Orchestrator
+Task: Start the Python FastAPI backend service
+
+Work Log:
+- Checked for existing backend process — found PID 920 was unrelated (/app/.venv python, not tender-api)
+- Health check on port 8000 returned HTTP 000 (backend not running)
+- First start attempt with system python3 failed: ModuleNotFoundError: No module named 'sqlalchemy'
+- Checked /home/z/.venv — had fastapi, uvicorn, pdfplumber, openpyxl, bs4, requests, multipart but missing sqlalchemy, bcrypt, python-jose
+- Installed missing deps: pip install sqlalchemy python-jose bcrypt (all installed successfully)
+- Verified all deps: /home/z/.venv/bin/python imports sqlalchemy, fastapi, uvicorn, bcrypt, jose, pdfplumber, pypdf, openpyxl, bs4, requests, multipart
+- Wrote supervisor-fixed.sh using /home/z/.venv/bin/python (the original supervisor.sh used bare python3 which lacks deps)
+- Killed stale processes, started clean uvicorn instance on port 8000
+- Started supervisor-fixed.sh in background for auto-restart capability
+- Ran full smoke test suite:
+  - /api/health → 200 OK
+  - /docs (OpenAPI) → 200 OK
+  - /api/document-types → 200 with 14 document types
+  - /api/tenders (no auth) → 401 (correct)
+  - /api/reminders, /api/deadlines (no auth) → 401 (correct)
+- Tested auth flow through Next.js proxy:
+  - POST /api/auth/register → 200 with JWT
+  - GET /api/auth/me with token → 200 with user profile
+  - GET /api/tenders with token → 200 with tender list (NPO FUNDING tender present)
+  - GET /api/dashboard with token → 200 with KPIs (1 active, 1 closing this week, 15 docs missing)
+- Browser verification: logged in via the actual UI, app redirected to onboarding wizard ("Tell us about your company") confirming end-to-end auth works
+
+Architecture note:
+- The frontend does NOT rely on Caddy's XTransformPort routing for API calls
+- Instead, Next.js has a catch-all API proxy at src/app/api/[...path]/route.ts that:
+  1. Forwards all /api/* requests to http://127.0.0.1:8000/api/*
+  2. Strips the XTransformPort query param
+  3. Auto-starts the backend if it's not running (ensureBackend)
+  4. Retries once if the backend dies mid-request
+- So the request path is: Browser → Caddy (:81) → Next.js (:3000) → /api/[...path] proxy → Python backend (:8000)
+
+Stage Summary:
+- Backend running on port 8000 (PID 1576), supervised by supervisor-fixed.sh (PID 1453)
+- All 67 API endpoints operational
+- Auth flow (register/login/me) verified end-to-end through both curl and browser
+- Existing tender data intact (NPO FUNDING APPLICATION tender visible in dashboard)
+- Frontend auto-proxy means the backend will restart on-demand even if the process dies

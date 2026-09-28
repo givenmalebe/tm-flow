@@ -6,6 +6,7 @@ import os
 import json
 import shutil
 import uuid
+import threading
 from datetime import datetime, date, timedelta
 from typing import List, Optional, Any
 from pathlib import Path
@@ -18,7 +19,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, and_, desc, asc
 
 from database import (
-    Base, engine, get_db, init_db,
+    Base, engine, get_db, init_db, SessionLocal,
     User, Tender, TenderDocument, ChecklistItem, LibraryDocument,
     Briefing, PricingVersion, Submission, Communication, Addendum, ReminderSetting,
     CompanyProfile, GeneratedDocument
@@ -1287,32 +1288,43 @@ async def ai_read_document_and_create(
 
     # Commit the tender immediately so the user sees it in their register
     # without waiting for the AI summary (which can take 30-60s).
-    # The summary is generated best-effort below; if it fails or is slow,
-    # the tender is already saved and the user can trigger the summary
-    # later via /api/tenders/{id}/ai-summary.
     t.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(t)
 
-    # Generate and save AI summary (best-effort, short timeout)
-    # This runs AFTER the tender is committed, so even if it fails the
-    # tender is fully created in the database.
+    # Kick off the AI summary generation in a BACKGROUND THREAD.
+    # This uses its own DB session so it doesn't block the request.
+    # The response returns immediately with the tender data; the
+    # summary appears in the tender record a few seconds later
+    # (visible when the user opens the tender detail view).
     if extracted and not extracted.get("_error"):
-        try:
-            summary = ai_module.generate_tender_summary(
-                {"reference_number": t.reference_number, "title": t.title,
-                 "client_company": t.client_company, "closing_date": t.closing_date.isoformat() if t.closing_date else None,
-                 "contract_period": t.contract_period, "location_site": t.location_site,
-                 "scope_of_work": t.scope_of_work, "status": t.status},
-                extracted
-            )
-            t.ai_summary = summary
-            t.updated_at = datetime.utcnow()
-            db.commit()
-            db.refresh(t)
-        except Exception as e:
-            # Log but don't fail — the tender is already saved
-            print(f"[read-document-and-create] Summary generation failed for tender {t.id}: {e}", flush=True)
+        _tender_id = t.id
+        _extracted = dict(extracted)
+        _summary_input = {
+            "reference_number": t.reference_number,
+            "title": t.title,
+            "client_company": t.client_company,
+            "closing_date": t.closing_date.isoformat() if t.closing_date else None,
+            "contract_period": t.contract_period,
+            "location_site": t.location_site,
+            "scope_of_work": t.scope_of_work,
+            "status": t.status,
+        }
+        def _generate_summary_bg():
+            bg_db = SessionLocal()
+            try:
+                summary = ai_module.generate_tender_summary(_summary_input, _extracted)
+                tender = bg_db.query(Tender).filter(Tender.id == _tender_id).first()
+                if tender:
+                    tender.ai_summary = summary
+                    tender.updated_at = datetime.utcnow()
+                    bg_db.commit()
+                print(f"[bg-summary] Summary saved for tender {_tender_id}", flush=True)
+            except Exception as e:
+                print(f"[bg-summary] Failed for tender {_tender_id}: {e}", flush=True)
+            finally:
+                bg_db.close()
+        threading.Thread(target=_generate_summary_bg, daemon=True).start()
 
     return _serialize_tender(t)
 

@@ -1622,3 +1622,47 @@ Stage Summary:
 - Tender creation via AI Document Reader now works end-to-end
 - Response time: ~25s for a typical tender document
 - The tender appears in the register immediately, even if the AI summary is slow
+
+---
+Task ID: FIX-502-2
+Agent: Main Orchestrator
+Task: Fix persistent 502 error on /api/ai/read-document-and-create (tender creates but browser still gets 502)
+
+Root Cause:
+- Previous fix (FIX-502-1) moved the tender commit before the summary generation
+- But the summary generation was STILL SYNCHRONOUS — it ran before the HTTP response was sent
+- The full request took 25-30s (extraction + summary), and the Caddy gateway chain killed the connection before the response reached the browser
+- The tender was saved (commit #1), but the browser saw a 502 because the response never arrived
+
+Fix Applied:
+- Made the AI summary generation run in a BACKGROUND THREAD using Python's threading module
+- The endpoint now: extracts AI data → commits tender → returns HTTP 200 immediately → background thread generates summary separately
+- The background thread uses its own DB session (SessionLocal) so it doesn't interfere with the request session
+- The summary appears in the tender record ~30s later (visible when user opens tender detail)
+
+Code Changes:
+1. mini-services/tender-api/main.py:
+   - Added `import threading` and `SessionLocal` to imports
+   - Replaced synchronous summary generation with:
+     - Capture tender_id, extracted data, and summary input as closure variables
+     - Define _generate_summary_bg() function that opens its own DB session
+     - Start it via threading.Thread(target=_generate_summary_bg, daemon=True).start()
+     - Return _serialize_tender(t) immediately
+
+2. src/components/dashboard/tabs/reader-tab.tsx:
+   - Updated loading text to "AI extracting tender data (~20s)…"
+
+Verification:
+- Direct API test: POST returned 200 in 21s (down from 25-30s), ai_summary=null in response
+- Background thread: [bg-summary] Summary saved for tender 5 — confirmed in api.log
+- Summary present in DB: checked tender 5, ai_summary = 1342 chars (full tender summary)
+- Browser test: clicked "Create Tender from This", request completed in 19.9s, frontend auto-navigated to tender detail page showing "TEST-TNDER-2026-001"
+- No 502 error in browser
+- dev.log: "POST /api/ai/read-document-and-create?XTransformPort=8000 200 in 19.9s"
+
+Stage Summary:
+- 502 Bad Gateway error is FULLY FIXED
+- Tender creation via AI Document Reader: ~20s response time
+- Tender is committed immediately, summary generates in background (~30s)
+- User sees the new tender in the register instantly and can start working on it
+- The summary appears automatically when they refresh or open the tender detail

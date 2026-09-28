@@ -106,6 +106,15 @@ export function ReaderTab() {
     if (!file) return;
     setCreating(true);
     setError(null);
+    // Capture the current tenders list before creating, so we can detect
+    // if a new tender was created even when the API response fails (502).
+    let previousIds: Set<number> = new Set();
+    try {
+      const existing = await api.listTenders({ sort: "updated_at", order: "desc" });
+      previousIds = new Set((existing?.items || existing || []).map((t: any) => t.id));
+    } catch {
+      // ignore — best-effort capture
+    }
     try {
       const newTender = await api.readDocumentAndCreate(file);
       toast.success(`Tender "${newTender.reference_number}" created with AI extraction!`);
@@ -113,8 +122,38 @@ export function ReaderTab() {
       setTab("tenders");
       setTimeout(() => selectTender(newTender.id), 50);
     } catch (e: any) {
-      setError(e.message || "Failed to create tender. Please try again.");
-      toast.error(e.message || "Failed to create tender");
+      // The AI extraction takes ~15-20s. The Caddy gateway often times out
+      // and returns 502 to the browser before the backend finishes, BUT the
+      // tender is still being created (or already saved) in the database.
+      // Poll the tenders list a few times to check if a new tender appeared.
+      let created = false;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          // Wait before checking (give the backend time to finish committing)
+          await new Promise((r) => setTimeout(r, 3000));
+          const latest = await api.listTenders({ sort: "updated_at", order: "desc" });
+          const items = latest?.items || latest || [];
+          const newTender = items.find((t: any) => !previousIds.has(t.id));
+          if (newTender) {
+            // The tender WAS created — the 502 was just a gateway timeout.
+            toast.success(
+              `Tender "${newTender.reference_number || newTender.title}" created successfully! AI summary is generating in the background.`
+            );
+            refresh();
+            setTab("tenders");
+            setTimeout(() => selectTender(newTender.id), 50);
+            created = true;
+            break;
+          }
+        } catch {
+          // keep retrying
+        }
+      }
+      if (!created) {
+        // Genuinely failed — no new tender in the database after multiple checks
+        setError(e.message || "Failed to create tender. Please try again.");
+        toast.error(e.message || "Failed to create tender");
+      }
     } finally {
       setCreating(false);
     }
@@ -302,7 +341,7 @@ export function ReaderTab() {
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 <Button onClick={handleCreateTender} disabled={creating} className="flex-1 sm:flex-none">
                   {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                  {creating ? "AI extracting tender data (~20s)…" : "Create Tender from This"}
+                  {creating ? "Creating tender… (may take up to 30s)" : "Create Tender from This"}
                 </Button>
                 <Button onClick={handleReset} variant="outline">
                   <RefreshCw className="h-4 w-4" />
@@ -438,7 +477,7 @@ export function ReaderTab() {
               </div>
               <Button onClick={handleCreateTender} disabled={creating}>
                 {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                {creating ? "AI extracting tender data (~20s)…" : "Create Tender Now"}
+                {creating ? "Creating tender… (may take up to 30s)" : "Create Tender Now"}
               </Button>
             </CardContent>
           </Card>

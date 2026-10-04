@@ -480,25 +480,17 @@ function Hero({ onGetStarted }: LandingPageProps) {
       >
         <source src="/hero-video.mp4" type="video/mp4" />
       </video>
-      {/* Gradient overlay — darker at edges for text readability, video visible in center */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 z-0 bg-gradient-to-b from-background/60 via-transparent to-background/70"
-      />
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 z-0 bg-gradient-to-r from-background/50 via-transparent to-background/50"
-      />
 
-      {/* Content — centered over the video */}
-      <div className="relative z-10 mx-auto max-w-4xl px-4 py-20 sm:px-6 lg:px-8 text-center">
+      {/* Content card — semi-transparent panel for maximum text readability */}
+      <div className="relative z-10 mx-auto max-w-3xl px-4 py-20 sm:px-6 lg:px-8 w-full">
         <motion.div
           initial="hidden"
           animate="show"
           variants={stagger}
+          className="rounded-2xl bg-background/85 backdrop-blur-md border border-white/10 shadow-2xl p-8 sm:p-10 lg:p-12 text-center"
         >
           <motion.div variants={fadeUp} className="mb-6 flex justify-center">
-            <Badge variant="outline" className="gap-1.5 border-emerald-300 bg-background/80 backdrop-blur-sm text-emerald-700 px-4 py-1.5 text-sm">
+            <Badge variant="outline" className="gap-1.5 border-emerald-300 bg-emerald-50 text-emerald-700 px-4 py-1.5 text-sm">
               <Sparkles className="size-4" />
               Two portals. One platform.
             </Badge>
@@ -506,17 +498,17 @@ function Hero({ onGetStarted }: LandingPageProps) {
 
           <motion.h1
             variants={fadeUp}
-            className="text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl xl:text-7xl drop-shadow-lg"
+            className="text-4xl font-bold tracking-tight text-foreground sm:text-5xl lg:text-6xl"
           >
-            <span className="text-white">The tender management platform for{" "}</span>
-            <span className="bg-gradient-to-r from-emerald-300 via-emerald-400 to-teal-300 bg-clip-text text-transparent">
+            The tender management platform for{" "}
+            <span className="bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 bg-clip-text text-transparent">
               buyers &amp; bidders
             </span>
           </motion.h1>
 
           <motion.p
             variants={fadeUp}
-            className="mx-auto mt-6 max-w-2xl text-base text-white/90 sm:text-lg lg:text-xl drop-shadow-md"
+            className="mx-auto mt-6 max-w-2xl text-base text-muted-foreground sm:text-lg"
           >
             TM Flow connects organisations that issue tenders with companies that bid on them.
             Issuers create tenders with AI, publish them, and evaluate bids automatically.
@@ -534,7 +526,7 @@ function Hero({ onGetStarted }: LandingPageProps) {
             <Button
               size="lg"
               variant="outline"
-              className="h-12 px-8 text-base bg-background/80 backdrop-blur-sm border-white/30 text-foreground hover:bg-background/60"
+              className="h-12 px-8 text-base"
               onClick={() =>
                 document
                   .querySelector("#how-it-works")
@@ -547,14 +539,14 @@ function Hero({ onGetStarted }: LandingPageProps) {
 
           <motion.div
             variants={fadeUp}
-            className="mt-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-2"
+            className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2"
           >
             {TRUST_BADGES.map((b) => (
               <span
                 key={b}
-                className="inline-flex items-center gap-1.5 text-xs font-medium text-white/80 drop-shadow"
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
               >
-                <ShieldCheck className="size-3.5 text-emerald-400" />
+                <ShieldCheck className="size-3.5 text-emerald-600" />
                 {b}
               </span>
             ))}
@@ -569,10 +561,10 @@ function Hero({ onGetStarted }: LandingPageProps) {
         animate={{ y: [0, 8, 0] }}
         transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
       >
-        <div className="flex flex-col items-center gap-1 text-white/60">
-          <span className="text-[10px] uppercase tracking-widest">Scroll</span>
-          <div className="h-8 w-5 rounded-full border border-white/40 flex items-start justify-center p-1">
-            <div className="h-2 w-1 rounded-full bg-white/60" />
+        <div className="flex flex-col items-center gap-1 text-white/70">
+          <span className="text-[10px] uppercase tracking-widest drop-shadow">Scroll</span>
+          <div className="h-8 w-5 rounded-full border border-white/50 flex items-start justify-center p-1">
+            <div className="h-2 w-1 rounded-full bg-white/70" />
           </div>
         </div>
       </motion.div>

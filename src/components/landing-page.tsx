@@ -1163,7 +1163,7 @@ function Pricing({ onGetStarted }: LandingPageProps) {
       period: "/month",
       tagline: "For organisations issuing tenders regularly.",
       features: [
-        "Issue up to 10 tenders",
+        "Issue up to 100 tenders",
         "AI Tender Writer (5 generations / mo)",
         "Publish to public tender board",
         "Receive bids online",

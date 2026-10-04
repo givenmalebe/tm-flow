@@ -35,10 +35,14 @@ import {
   TrendingUp,
   Users,
   Building2,
+  Wand2,
+  Eye,
+  Plus,
+  Award,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   Accordion,
@@ -191,28 +195,36 @@ const REMINDERS = [
 
 const FAQS = [
   {
-    q: "What types of documents can the AI read?",
-    a: "TM Flow's AI engine reads PDF, DOCX, DOC and TXT files. For scanned PDFs (images), it uses vision-mode to OCR and extract the same structured fields. You can also paste raw tender text directly into the system.",
+    q: "What are the two portals?",
+    a: "TM Flow has two dedicated portals. The Issuer Portal (amber theme) is for organisations that issue tenders — create tenders with AI, publish them, receive bids, and evaluate them with AI. The Applicant Portal (emerald theme) is for companies that bid on tenders — discover tenders, prepare compliance documents, and submit bids online. When you register, you choose which type of account you want.",
+  },
+  {
+    q: "How does the AI Tender Writer work?",
+    a: "In the Issuer Portal, you describe what you need in plain language (e.g. 'Security guarding services for our head office, 24/7, 8 guards, 24-month contract'). The AI generates a complete tender specification with all required documents, evaluation criteria, mandatory requirements, briefing details, disqualification criteria, and a full tender document — ready to publish.",
+  },
+  {
+    q: "How do bidders submit their bids?",
+    a: "Bidders must register and sign in. They browse published tenders on the Tenders page or in the Discover tab, view the full tender details, download the PDF, add the tender to their Tenders tab for preparation, and submit their bid with company details, documents, and bid amount — all through the portal.",
+  },
+  {
+    q: "How does the AI evaluate bids?",
+    a: "When bids are submitted, the issuer can click 'AI Auto-Evaluate All'. The AI reads every bid's submitted documents, scores them on compliance, completeness, technical quality, and financial reasonableness. It auto-shortlists strong bids, rejects weak ones, and recommends the best-qualified winner — but the issuer always makes the final award decision.",
+  },
+  {
+    q: "Does the compliance check really work?",
+    a: "Yes. Before a bidder submits, the system checks their compliance library (uploaded CIPC, SARS, B-BBEE, COIDA, sector registration certificates, etc.) against the tender's required documents. It shows what's ready, what's missing, and what's expired — so bidders know exactly what they need to prepare before submitting.",
   },
   {
     q: "Is my data secure?",
-    a: "Yes. All data is stored in an encrypted SQLite database with JWT-based authentication and bcrypt password hashing. Documents are stored in a private uploads directory per tenant and never shared across accounts.",
+    a: "Yes. All data is stored in an encrypted database with JWT-based authentication and bcrypt password hashing. Each issuer company is a separate tenant — members must be approved by the admin. Documents are stored privately and never shared across accounts.",
   },
   {
-    q: "Can I track multiple tender teams?",
-    a: "Yes. The Solo plan manages 1 tender, Pro manages up to 25 tenders with 10 AI document generations per month, Business gives unlimited tenders with 30 AI generations per month, and Custom supports multi-user accounts with custom AI credits. You can organise tenders by team, region or client.",
-  },
-  {
-    q: "Does it work for PSIRA / security tenders specifically?",
-    a: "Absolutely. The extraction engine is tuned for the South African security industry — it pulls out PSIRA grades, guard counts, site locations, equipment lists and PSIRA compliance requirements automatically.",
-  },
-  {
-    q: "Can I import existing tenders?",
-    a: "Yes. You can import existing tenders by uploading their documents, pasting the tender text, or entering fields manually. The AI will then backfill the rest of the extraction for you.",
+    q: "Which industry sectors are supported?",
+    a: "TM Flow supports 23 South African industry sectors including Security (PSIRA), Construction (CIDB), IT, Health, Finance, Transport, Agriculture, Energy (NERSA), Education, Government, and more. Each sector has its own SETA and regulatory body, and the AI adapts its extraction and document generation accordingly.",
   },
   {
     q: "What happens to my data if I cancel?",
-    a: "You own your data. On cancellation you can export every tender, document, checklist and communication log as a structured JSON or CSV file. After a 30-day grace period, your data is permanently deleted.",
+    a: "You own your data. On cancellation you can export every tender, document, checklist and bid record. After a 30-day grace period, your data is permanently deleted.",
   },
 ];
 
@@ -546,7 +558,7 @@ function Hero({ onGetStarted }: LandingPageProps) {
             <motion.div variants={fadeUp} className="mb-5 flex justify-center lg:justify-start">
               <Badge variant="outline" className="gap-1.5 border-emerald-300 bg-emerald-50 text-emerald-700 px-3 py-1">
                 <Sparkles className="size-3.5" />
-                AI-powered tender management
+                Two portals. One platform.
               </Badge>
             </motion.div>
 
@@ -554,9 +566,9 @@ function Hero({ onGetStarted }: LandingPageProps) {
               variants={fadeUp}
               className="text-4xl font-bold tracking-tight text-foreground sm:text-5xl lg:text-6xl"
             >
-              Win more tenders with{" "}
+              The tender platform for{" "}
               <span className="bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 bg-clip-text text-transparent">
-                AI on your side
+                buyers &amp; bidders
               </span>
             </motion.h1>
 
@@ -564,10 +576,10 @@ function Hero({ onGetStarted }: LandingPageProps) {
               variants={fadeUp}
               className="mx-auto mt-6 max-w-xl text-base text-muted-foreground sm:text-lg lg:mx-0"
             >
-              TM Flow is the central system that takes you from tender
-              discovery to submission — reading documents, building checklists,
-              tracking deadlines and surfacing risks before they cost you the
-              bid.
+              TM Flow connects organisations that issue tenders with companies that bid on them.
+              Issuers create tenders with AI, publish them to the public board, and evaluate bids
+              automatically. Bidders discover tenders, prepare compliance documents, and submit
+              bids — all in one place.
             </motion.p>
 
             <motion.div
@@ -575,7 +587,7 @@ function Hero({ onGetStarted }: LandingPageProps) {
               className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center lg:justify-start"
             >
               <Button size="lg" onClick={onGetStarted} className="h-12 px-6 text-base">
-                Start free trial
+                Get Started
                 <ArrowRight className="size-4" />
               </Button>
               <Button
@@ -757,52 +769,102 @@ function HowItWorks() {
       <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
         <Reveal className="mx-auto max-w-2xl text-center">
           <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-700">
-            <TrendingUp className="size-3.5" /> Workflow
+            <TrendingUp className="size-3.5" /> Two Portals
           </Badge>
           <h2 className="mt-4 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-            From chaos to submission in 4 steps
+            How TM Flow works
           </h2>
           <p className="mt-3 text-muted-foreground">
-            TM Flow replaces your spreadsheets, sticky notes and shared
-            drives with a single, repeatable pipeline.
+            Whether you issue tenders or bid on them, TM Flow has a dedicated portal
+            with AI-powered tools for every step.
           </p>
         </Reveal>
 
-        <div className="relative mt-14">
-          {/* connecting line on desktop */}
-          <div
-            aria-hidden
-            className="absolute left-0 right-0 top-8 hidden h-0.5 bg-gradient-to-r from-emerald-200 via-emerald-400 to-teal-400 lg:block"
-          />
-          <motion.ol
-            initial="hidden"
-            whileInView="show"
-            viewport={{ once: true, amount: 0.2 }}
-            variants={stagger}
-            className="grid gap-10 lg:grid-cols-4"
-          >
-            {HOW_IT_WORKS.map((s) => {
-              const Icon = s.icon;
-              return (
-                <motion.li key={s.step} variants={fadeUp} whileHover={{ y: -4 }} className="relative text-center lg:text-left">
-                  <div className="flex flex-col items-center lg:items-start">
-                    <div className="relative z-10 flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20">
-                      <Icon className="size-7" />
-                      <span className="absolute -right-2 -top-2 flex size-7 items-center justify-center rounded-full bg-background text-xs font-bold text-emerald-600 shadow-md border border-emerald-200">
-                        {s.step}
-                      </span>
-                    </div>
-                    <h3 className="mt-4 text-lg font-semibold text-foreground">
-                      {s.title}
-                    </h3>
-                    <p className="mt-1 text-sm text-muted-foreground leading-relaxed">
-                      {s.desc}
-                    </p>
+        {/* Two columns: Issuer Portal vs Applicant Portal */}
+        <div className="mt-12 grid gap-8 lg:grid-cols-2">
+          {/* Issuer Portal Column */}
+          <Reveal>
+            <Card className="h-full border-amber-200/70 dark:border-amber-900/40 overflow-hidden">
+              <CardHeader className="bg-gradient-to-br from-amber-50 to-orange-50/60 dark:from-amber-950/30 dark:to-orange-950/20 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex size-10 items-center justify-center rounded-lg bg-amber-600 text-white shadow-sm">
+                    <Building2 className="size-5" />
                   </div>
-                </motion.li>
-              );
-            })}
-          </motion.ol>
+                  <div>
+                    <h3 className="text-lg font-bold text-foreground">Issuer Portal</h3>
+                    <p className="text-xs text-muted-foreground">For organisations that issue tenders</p>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-5 space-y-4">
+                {[
+                  { icon: Wand2, title: "Create tenders with AI", desc: "Describe what you need in plain language. AI generates a complete tender specification with all required documents, evaluation criteria, and compliance requirements." },
+                  { icon: Eye, title: "Publish to the public board", desc: "One click publishes your tender to the public Tenders page where registered bidders can view and download it as a PDF." },
+                  { icon: FileText, title: "Receive bids online", desc: "Bidders submit their proposals through the portal — company details, documents, and bid amount all captured digitally." },
+                  { icon: Sparkles, title: "AI evaluates all bids", desc: "The AI reads every bid's documents, scores them on compliance, technical quality, and completeness, and recommends the best-qualified winner." },
+                  { icon: Award, title: "Award with confidence", desc: "Review the AI's recommendation, override manually if needed, and award the tender to the most qualified bidder." },
+                ].map((s, i) => {
+                  const Icon = s.icon;
+                  return (
+                    <div key={i} className="flex items-start gap-3">
+                      <div className="flex size-9 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 shrink-0">
+                        <Icon className="size-4.5" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                          <span className="text-amber-600 text-xs">{i + 1}</span>
+                          {s.title}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{s.desc}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          </Reveal>
+
+          {/* Applicant Portal Column */}
+          <Reveal delay={0.15}>
+            <Card className="h-full border-emerald-200/70 dark:border-emerald-900/40 overflow-hidden">
+              <CardHeader className="bg-gradient-to-br from-emerald-50 to-teal-50/60 dark:from-emerald-950/30 dark:to-teal-950/20 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex size-10 items-center justify-center rounded-lg bg-emerald-600 text-white shadow-sm">
+                    <FileText className="size-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-foreground">Applicant Portal</h3>
+                    <p className="text-xs text-muted-foreground">For companies that bid on tenders</p>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-5 space-y-4">
+                {[
+                  { icon: Search, title: "Discover available tenders", desc: "Browse all published tenders from issuers across South Africa. Search by category, location, or company. Download the full tender as a PDF." },
+                  { icon: Plus, title: "Add to your Tenders tab", desc: "Found a tender you want to bid on? Add it to your Tenders tab with one click to start preparing your submission." },
+                  { icon: ClipboardCheck, title: "Prepare with AI checklist", desc: "AI generates a compliance checklist from the tender document. Upload your compliance docs to the library and track your preparation progress." },
+                  { icon: ShieldCheck, title: "Check compliance before submitting", desc: "Before you submit, the system checks your compliance library against the tender's required documents and shows your readiness." },
+                  { icon: Send, title: "Submit your bid", desc: "When you're ready, submit your bid with company details, bid amount, proposal, and all supporting documents — all through the portal." },
+                ].map((s, i) => {
+                  const Icon = s.icon;
+                  return (
+                    <div key={i} className="flex items-start gap-3">
+                      <div className="flex size-9 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 shrink-0">
+                        <Icon className="size-4.5" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                          <span className="text-emerald-600 text-xs">{i + 1}</span>
+                          {s.title}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{s.desc}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          </Reveal>
         </div>
       </div>
     </section>

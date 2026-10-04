@@ -1741,3 +1741,47 @@ Stage Summary:
 - Responsive: sidebar collapses to Sheet on mobile; grids reflow at sm/lg/xl breakpoints. Sticky header (amber-600) + sticky footer (mt-auto, min-h-screen flex flex-col root).
 - sonner toasts for all feedback, Loader2 spinners for all async ops, R X,XXX,XXX currency and DD MMM YYYY date formatting throughout.
 - No other files modified. No test files created.
+
+---
+Task ID: 5
+Agent: Main Orchestrator
+Task: Fix missing account-type selector in auth-page.tsx — issuer accounts couldn't be created
+
+Root Cause:
+- The auth-page.tsx signup form had NO account-type selector
+- The register() call only passed 4 args (email, name, password, company) — never passed account_type
+- So every new user defaulted to "applicant" and the Issuer Portal was unreachable
+- Additionally, the backend (uvicorn --reload) had NOT reloaded after the Pydantic schema changes
+  (adding account_type to UserCreate/UserOut), so /api/auth/register returned 500
+
+Fixes Applied:
+1. src/components/auth-page.tsx:
+   - Added Gavel + Hammer icons to imports
+   - Added `accountType` state (default "applicant")
+   - Added account-type selector UI at top of signup form: two cards (Bidder=emerald, Issuer=amber)
+     with icons, labels, descriptions, and selected-state checkmarks
+   - Passed `accountType` as 5th arg to register() call
+
+2. Backend restart:
+   - Killed stale uvicorn process (started before schema changes)
+   - Restarted with fresh process — schema changes now loaded
+   - Verified: POST /api/auth/register with account_type=issuer returns 200 with account_type in user object
+
+Verification (Agent Browser end-to-end):
+1. Opened landing page → clicked "Get Started"
+2. Signup form shows "Bidder" and "Issuer" selector cards ✓
+3. Clicked "Issuer" (amber highlight) ✓
+4. Filled form → submitted → redirected to Issuer Portal ✓
+5. Issuer Portal showed Company Setup screen (Create/Join) ✓
+6. Created "Browser Procurement Ltd" company → toast "Company created, you are now the admin" ✓
+7. Full 8-tab portal rendered: Overview, Tenders, AI Tender Writer, Bid Management,
+   Top Bidders, Bid Review, Members, Settings ✓
+8. AI Tender Writer tab shows prompt textarea + Generate Tender button ✓
+9. No console errors throughout ✓
+
+Stage Summary:
+- The issuer registration flow is now fully functional end-to-end
+- Users can choose Bidder or Issuer at signup
+- Issuer accounts route to the Issuer Portal with all 8 tabs
+- The demo issuer account (issuer@demo.co.za / password123) still works
+- A new test account (browserissuer@test.co.za) was created and verified in the browser

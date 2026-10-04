@@ -21,6 +21,8 @@ import {
   CalendarClock,
   Quote,
   AlertCircle,
+  Gavel,
+  Hammer,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -93,6 +95,7 @@ export function AuthPage({
   const [suConfirm, setSuConfirm] = useState("");
   const [suAgree, setSuAgree] = useState(false);
   const [suErrors, setSuErrors] = useState<SignUpErrors>({});
+  const [accountType, setAccountType] = useState<"applicant" | "issuer">("applicant");
 
   // Show / hide toggles
   const [showPassword, setShowPassword] = useState(false);
@@ -164,7 +167,8 @@ export function AuthPage({
         suEmail.trim(),
         suFullName.trim(),
         suPassword,
-        suCompany.trim() || undefined
+        suCompany.trim() || undefined,
+        accountType
       );
       toast.success("Account created. Welcome to TM Flow.");
       setLoading(false);
@@ -323,6 +327,58 @@ export function AuthPage({
                 {/* ---------------------------------------------------------------- Sign Up */}
                 <TabsContent value="signup" className="mt-4">
                   <form onSubmit={handleSignUp} className="space-y-4" noValidate>
+                    {/* Account-type selector */}
+                    <div className="space-y-2">
+                      <Label>I am registering as a…</Label>
+                      <div className="grid grid-cols-2 gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setAccountType("applicant")}
+                          className={`relative rounded-xl border p-3 text-left transition-all ${
+                            accountType === "applicant"
+                              ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-500/30 dark:bg-emerald-950/30"
+                              : "border-border hover:border-emerald-300 hover:bg-emerald-50/40 dark:hover:bg-emerald-950/10"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className={`flex size-8 items-center justify-center rounded-lg ${accountType === "applicant" ? "bg-emerald-600 text-white" : "bg-muted text-muted-foreground"}`}>
+                              <Hammer className="size-4" />
+                            </div>
+                            <span className="text-sm font-semibold">Bidder</span>
+                            {accountType === "applicant" && (
+                              <CheckCircle2 className="ml-auto size-4 text-emerald-600" />
+                            )}
+                          </div>
+                          <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">
+                            I find &amp; submit bids on tenders.
+                          </p>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setAccountType("issuer")}
+                          className={`relative rounded-xl border p-3 text-left transition-all ${
+                            accountType === "issuer"
+                              ? "border-amber-500 bg-amber-50 ring-2 ring-amber-500/30 dark:bg-amber-950/30"
+                              : "border-border hover:border-amber-300 hover:bg-amber-50/40 dark:hover:bg-amber-950/10"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className={`flex size-8 items-center justify-center rounded-lg ${accountType === "issuer" ? "bg-amber-600 text-white" : "bg-muted text-muted-foreground"}`}>
+                              <Gavel className="size-4" />
+                            </div>
+                            <span className="text-sm font-semibold">Issuer</span>
+                            {accountType === "issuer" && (
+                              <CheckCircle2 className="ml-auto size-4 text-amber-600" />
+                            )}
+                          </div>
+                          <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">
+                            I create &amp; publish tenders, evaluate bids.
+                          </p>
+                        </button>
+                      </div>
+                    </div>
+
                     <FieldWithError
                       label="Full name"
                       htmlFor="signup-name"

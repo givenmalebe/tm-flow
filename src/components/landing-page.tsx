@@ -468,153 +468,114 @@ function Hero({ onGetStarted }: LandingPageProps) {
   return (
     <section
       id="top"
-      className="relative isolate overflow-hidden border-b bg-background"
+      className="relative isolate overflow-hidden border-b bg-background min-h-[90vh] flex items-center"
     >
-      {/* Background video */}
+      {/* Background video — fully visible */}
       <video
         autoPlay
         loop
         muted
         playsInline
         className="absolute inset-0 z-0 h-full w-full object-cover"
-        style={{ filter: "brightness(0.35)" }}
       >
         <source src="/hero-video.mp4" type="video/mp4" />
       </video>
-      {/* Dark overlay for text readability */}
+      {/* Gradient overlay — darker at edges for text readability, video visible in center */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 z-0 bg-gradient-to-br from-background/80 via-background/60 to-background/80"
+        className="pointer-events-none absolute inset-0 z-0 bg-gradient-to-b from-background/60 via-transparent to-background/70"
       />
-      {/* emerald tint overlay */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 z-0"
-        style={{
-          background:
-            "linear-gradient(135deg, rgba(16,185,129,0.15) 0%, rgba(20,184,166,0.10) 50%, rgba(13,148,136,0.12) 100%)",
-        }}
-      />
-      {/* animated floating orbs */}
-      <motion.div
-        aria-hidden
-        className="pointer-events-none absolute -top-20 left-[10%] z-0 h-72 w-72 rounded-full bg-emerald-400/20 blur-3xl"
-        animate={{
-          x: [0, 40, 0],
-          y: [0, 30, 0],
-          scale: [1, 1.15, 1],
-          opacity: [0.3, 0.5, 0.3],
-        }}
-        transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <motion.div
-        aria-hidden
-        className="pointer-events-none absolute top-10 right-[15%] z-0 h-96 w-96 rounded-full bg-teal-400/15 blur-3xl"
-        animate={{
-          x: [0, -50, 0],
-          y: [0, 40, 0],
-          scale: [1, 1.2, 1],
-          opacity: [0.2, 0.4, 0.2],
-        }}
-        transition={{ duration: 10, repeat: Infinity, ease: "easeInOut", delay: 1 }}
-      />
-      <motion.div
-        aria-hidden
-        className="pointer-events-none absolute bottom-0 left-[40%] z-0 h-80 w-80 rounded-full bg-emerald-500/20 blur-3xl"
-        animate={{
-          x: [0, 30, -20, 0],
-          y: [0, -20, 10, 0],
-          scale: [1, 1.1, 0.95, 1],
-          opacity: [0.2, 0.4, 0.2],
-        }}
-        transition={{ duration: 14, repeat: Infinity, ease: "easeInOut", delay: 2 }}
+        className="pointer-events-none absolute inset-0 z-0 bg-gradient-to-r from-background/50 via-transparent to-background/50"
       />
 
-      <div className="relative z-10 mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-28">
-        <div className="grid items-center gap-12 lg:grid-cols-2">
-          {/* Copy */}
-          <motion.div
-            initial="hidden"
-            animate="show"
-            variants={stagger}
-            className="text-center lg:text-left"
+      {/* Content — centered over the video */}
+      <div className="relative z-10 mx-auto max-w-4xl px-4 py-20 sm:px-6 lg:px-8 text-center">
+        <motion.div
+          initial="hidden"
+          animate="show"
+          variants={stagger}
+        >
+          <motion.div variants={fadeUp} className="mb-6 flex justify-center">
+            <Badge variant="outline" className="gap-1.5 border-emerald-300 bg-background/80 backdrop-blur-sm text-emerald-700 px-4 py-1.5 text-sm">
+              <Sparkles className="size-4" />
+              Two portals. One platform.
+            </Badge>
+          </motion.div>
+
+          <motion.h1
+            variants={fadeUp}
+            className="text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl xl:text-7xl drop-shadow-lg"
           >
-            <motion.div variants={fadeUp} className="mb-5 flex justify-center lg:justify-start">
-              <Badge variant="outline" className="gap-1.5 border-emerald-300 bg-emerald-50 text-emerald-700 px-3 py-1">
-                <Sparkles className="size-3.5" />
-                Two portals. One platform.
-              </Badge>
-            </motion.div>
+            <span className="text-white">The tender management platform for{" "}</span>
+            <span className="bg-gradient-to-r from-emerald-300 via-emerald-400 to-teal-300 bg-clip-text text-transparent">
+              buyers &amp; bidders
+            </span>
+          </motion.h1>
 
-            <motion.h1
-              variants={fadeUp}
-              className="text-4xl font-bold tracking-tight text-foreground sm:text-5xl lg:text-6xl"
-            >
-              The tender management platform for{" "}
-              <span className="bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 bg-clip-text text-transparent">
-                buyers &amp; bidders
-              </span>
-            </motion.h1>
+          <motion.p
+            variants={fadeUp}
+            className="mx-auto mt-6 max-w-2xl text-base text-white/90 sm:text-lg lg:text-xl drop-shadow-md"
+          >
+            TM Flow connects organisations that issue tenders with companies that bid on them.
+            Issuers create tenders with AI, publish them, and evaluate bids automatically.
+            Bidders discover tenders, prepare compliance documents, and submit bids — all in one place.
+          </motion.p>
 
-            <motion.p
-              variants={fadeUp}
-              className="mx-auto mt-6 max-w-xl text-base text-muted-foreground sm:text-lg lg:mx-0"
+          <motion.div
+            variants={fadeUp}
+            className="mt-10 flex flex-col gap-3 sm:flex-row sm:justify-center"
+          >
+            <Button size="lg" onClick={onGetStarted} className="h-12 px-8 text-base bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-600/30">
+              Get Started
+              <ArrowRight className="size-4" />
+            </Button>
+            <Button
+              size="lg"
+              variant="outline"
+              className="h-12 px-8 text-base bg-background/80 backdrop-blur-sm border-white/30 text-foreground hover:bg-background/60"
+              onClick={() =>
+                document
+                  .querySelector("#how-it-works")
+                  ?.scrollIntoView({ behavior: "smooth" })
+              }
             >
-              TM Flow connects organisations that issue tenders with companies that bid on them.
-              Issuers create tenders with AI, publish them to the public board, and evaluate bids
-              automatically. Bidders discover tenders, prepare compliance documents, and submit
-              bids — all in one place.
-            </motion.p>
+              See how it works
+            </Button>
+          </motion.div>
 
-            <motion.div
-              variants={fadeUp}
-              className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center lg:justify-start"
-            >
-              <Button size="lg" onClick={onGetStarted} className="h-12 px-6 text-base">
-                Get Started
-                <ArrowRight className="size-4" />
-              </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                className="h-12 px-6 text-base"
-                onClick={() =>
-                  document
-                    .querySelector("#how-it-works")
-                    ?.scrollIntoView({ behavior: "smooth" })
-                }
+          <motion.div
+            variants={fadeUp}
+            className="mt-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-2"
+          >
+            {TRUST_BADGES.map((b) => (
+              <span
+                key={b}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-white/80 drop-shadow"
               >
-                See how it works
-              </Button>
-            </motion.div>
-
-            <motion.div
-              variants={fadeUp}
-              className="mt-8 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 lg:justify-start"
-            >
-              {TRUST_BADGES.map((b) => (
-                <span
-                  key={b}
-                  className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
-                >
-                  <ShieldCheck className="size-3.5 text-emerald-600" />
-                  {b}
-                </span>
-              ))}
-            </motion.div>
+                <ShieldCheck className="size-3.5 text-emerald-400" />
+                {b}
+              </span>
+            ))}
           </motion.div>
-
-          {/* Visual */}
-          <motion.div
-            initial="hidden"
-            animate="show"
-            variants={fadeIn}
-            className="relative"
-          >
-            <HeroMockup />
-          </motion.div>
-        </div>
+        </motion.div>
       </div>
+
+      {/* Scroll indicator */}
+      <motion.div
+        aria-hidden
+        className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10"
+        animate={{ y: [0, 8, 0] }}
+        transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+      >
+        <div className="flex flex-col items-center gap-1 text-white/60">
+          <span className="text-[10px] uppercase tracking-widest">Scroll</span>
+          <div className="h-8 w-5 rounded-full border border-white/40 flex items-start justify-center p-1">
+            <div className="h-2 w-1 rounded-full bg-white/60" />
+          </div>
+        </div>
+      </motion.div>
     </section>
   );
 }

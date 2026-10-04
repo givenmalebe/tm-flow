@@ -85,6 +85,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     full_name: str
     company_name: Optional[str] = None
+    account_type: Optional[str] = "applicant"  # applicant / issuer
     password: str = Field(min_length=6)
 
 
@@ -99,6 +100,7 @@ class UserOut(BaseModel):
     full_name: str
     company_name: Optional[str]
     role: str
+    account_type: str = "applicant"
     onboarding_completed: bool = False
     class Config:
         from_attributes = True
@@ -617,6 +619,7 @@ def register(payload: UserCreate, db: Session = Depends(get_db)):
         email=payload.email.lower(),
         full_name=payload.full_name,
         company_name=payload.company_name,
+        account_type=payload.account_type or "applicant",
         hashed_password=hash_password(payload.password),
     )
     db.add(user)
@@ -3606,6 +3609,942 @@ def bidder_search_companies(
         query = query.filter(BidderCompany.name.ilike(f"%{q}%"))
     companies = query.order_by(BidderCompany.name.asc()).limit(20).all()
     return {"items": [{"id": c.id, "name": c.name, "industry": c.industry} for c in companies]}
+
+
+# ============================================================
+# PUBLIC TENDER BOARD — browse published tenders (no auth)
+# ============================================================
+
+def _serialize_public_tender_list(t: IssuedTender, company: IssuerCompany, bid_count: int) -> dict:
+    return {
+        "id": t.id,
+        "reference_number": t.reference_number,
+        "title": t.title,
+        "description": (t.description or "")[:300],
+        "category": t.category,
+        "location": t.location,
+        "closing_date": t.closing_date.isoformat() if t.closing_date else None,
+        "budget": t.budget,
+        "contract_period": t.contract_period,
+        "status": t.status,
+        "company_name": company.name if company else None,
+        "company_industry": company.industry if company else None,
+        "company_description": (company.description or "")[:300] if company else None,
+        "bid_count": bid_count,
+    }
+
+
+def _serialize_public_tender_detail(t: IssuedTender, company: IssuerCompany, bid_count: int) -> dict:
+    return {
+        "id": t.id,
+        "reference_number": t.reference_number,
+        "title": t.title,
+        "description": t.description,
+        "scope_of_work": t.scope_of_work,
+        "category": t.category,
+        "location": t.location,
+        "issue_date": t.issue_date.isoformat() if t.issue_date else None,
+        "closing_date": t.closing_date.isoformat() if t.closing_date else None,
+        "closing_time": t.closing_time.isoformat() if t.closing_time else None,
+        "budget": t.budget,
+        "contract_period": t.contract_period,
+        "evaluation_criteria": t.evaluation_criteria,
+        "submission_method": t.submission_method,
+        "contact_person": t.contact_person,
+        "contact_email": t.contact_email,
+        "contact_phone": t.contact_phone,
+        "status": t.status,
+        "ai_generated_content": t.ai_generated_content,
+        "company_name": company.name if company else None,
+        "company_industry": company.industry if company else None,
+        "company_description": company.description if company else None,
+        "bid_count": bid_count,
+    }
+
+
+@app.get("/api/public/tenders")
+def public_list_tenders(
+    category: Optional[str] = None,
+    q: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """List all published tenders. No auth required."""
+    query = db.query(IssuedTender).filter(IssuedTender.is_published == True)
+    if category and category != "All":
+        query = query.filter(IssuedTender.category == category)
+    if q:
+        like = f"%{q}%"
+        query = query.filter(or_(
+            IssuedTender.title.ilike(like),
+            IssuedTender.reference_number.ilike(like),
+            IssuedTender.description.ilike(like),
+            IssuedTender.category.ilike(like),
+        ))
+    tenders = query.order_by(desc(IssuedTender.created_at)).all()
+    items = []
+    for t in tenders:
+        company = db.query(IssuerCompany).filter(IssuerCompany.id == t.company_id).first()
+        bid_count = db.query(Bid).filter(Bid.tender_id == t.id).count()
+        items.append(_serialize_public_tender_list(t, company, bid_count))
+    return {"items": items, "total": len(items)}
+
+
+@app.get("/api/public/categories")
+def public_list_categories(db: Session = Depends(get_db)):
+    """List distinct categories from published tenders."""
+    rows = db.query(IssuedTender.category).filter(
+        IssuedTender.is_published == True,
+        IssuedTender.category.isnot(None),
+    ).distinct().all()
+    cats = sorted([r[0] for r in rows if r[0]])
+    return {"items": cats}
+
+
+@app.get("/api/public/tenders/{tender_id}")
+def public_get_tender(tender_id: int, db: Session = Depends(get_db)):
+    """Get full details of a single published tender."""
+    t = db.query(IssuedTender).filter(
+        IssuedTender.id == tender_id,
+        IssuedTender.is_published == True,
+    ).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tender not found or not published.")
+    company = db.query(IssuerCompany).filter(IssuerCompany.id == t.company_id).first()
+    bid_count = db.query(Bid).filter(Bid.tender_id == t.id).count()
+    return _serialize_public_tender_detail(t, company, bid_count)
+
+
+@app.post("/api/public/tenders/{tender_id}/submit-bid")
+async def public_submit_bid(
+    tender_id: int,
+    bidder_company_name: str = Form(...),
+    bidder_contact_person: str = Form(...),
+    bidder_email: str = Form(""),
+    bidder_phone: str = Form(""),
+    bidder_bbbee_level: str = Form(""),
+    total_amount: float = Form(0),
+    proposal_summary: str = Form(""),
+    files: List[UploadFile] = File(default=[]),
+    db: Session = Depends(get_db),
+):
+    """Submit a bid for a published tender. Creates a Bid record + stores documents."""
+    t = db.query(IssuedTender).filter(
+        IssuedTender.id == tender_id,
+        IssuedTender.is_published == True,
+    ).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tender not found or not published.")
+    # Check closing date
+    if t.closing_date and t.closing_date < date.today():
+        raise HTTPException(status_code=400, detail="This tender has closed. Bids are no longer accepted.")
+
+    bid = Bid(
+        tender_id=tender_id,
+        bidder_company_name=bidder_company_name,
+        bidder_contact_person=bidder_contact_person,
+        bidder_email=bidder_email or None,
+        bidder_phone=bidder_phone or None,
+        bidder_bbbee_level=bidder_bbbee_level or None,
+        total_amount=total_amount,
+        proposal_summary=proposal_summary or None,
+        status="Pending",
+    )
+    db.add(bid)
+    db.flush()
+
+    # Save uploaded documents
+    for f in files:
+        if not f.filename:
+            continue
+        ext = os.path.splitext(f.filename)[1] or ""
+        safe_name = f"{uuid.uuid4().hex}{ext}"
+        file_path = os.path.join(UPLOAD_DIR, safe_name)
+        with open(file_path, "wb") as out:
+            out.write(await f.read())
+        db.add(BidDocument(
+            bid_id=bid.id,
+            doc_type=f.filename.rsplit(".", 1)[0][:200] if "." in f.filename else "document",
+            filename=safe_name,
+            original_filename=f.filename,
+            file_path=file_path,
+            file_type=f.content_type,
+            file_size=os.path.getsize(file_path),
+        ))
+
+    db.commit()
+    db.refresh(bid)
+    return {
+        "id": bid.id,
+        "tender_id": tender_id,
+        "status": bid.status,
+        "submitted_at": bid.submitted_at.isoformat() if bid.submitted_at else None,
+        "message": "Bid submitted successfully.",
+    }
+
+
+@app.post("/api/public/tenders/{tender_id}/compliance-check")
+def public_compliance_check(
+    tender_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Check the logged-in bidder's library against a tender's required documents.
+    Returns a list of required docs with matched/missing status."""
+    t = db.query(IssuedTender).filter(IssuedTender.id == tender_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tender not found.")
+    # Get the bidder's company + library docs
+    member = db.query(BidderMember).filter(
+        BidderMember.user_id == user.id,
+        BidderMember.status == "approved",
+    ).first()
+    company = None
+    library_docs = []
+    if member:
+        company = db.query(BidderCompany).filter(BidderCompany.id == member.company_id).first()
+        member_ids = _get_company_member_ids(db, member.company_id)
+        library_docs = db.query(LibraryDocument).filter(
+            LibraryDocument.created_by.in_(member_ids)
+        ).all()
+
+    # Required documents (from compulsory_documents list or default list)
+    required_raw = []
+    if t.ai_generated_content:
+        # Try to parse compulsory documents from the AI content heuristically
+        for line in t.ai_generated_content.split("\n"):
+            low = line.lower().strip()
+            if any(kw in low for kw in ["compulsory", "required document", "must submit"]):
+                continue
+    # Use a default South African compliance list
+    default_required = [
+        ("CIPC registration certificate", "CIPC"),
+        ("SARS tax clearance certificate", "SARS"),
+        ("B-BBEE certificate or affidavit", "B-BBEE"),
+        ("COIDA letter of good standing", "COIDA"),
+        ("Company profile", "Company profile"),
+        ("PSIRA certificate (if applicable)", "PSIRA"),
+        ("Recent financial statements", "Financial statements"),
+        ("References / past contracts", "References"),
+        ("Insurance documents", "Insurance documents"),
+        ("Signed declarations", "Standard declarations"),
+    ]
+    # Build compliance result
+    lib_by_cat = {}
+    for ld in library_docs:
+        lib_by_cat.setdefault(ld.category, []).append(ld)
+
+    results = []
+    matched_count = 0
+    for doc_name, cat in default_required:
+        matched = cat in lib_by_cat and len(lib_by_cat[cat]) > 0
+        if matched:
+            matched_count += 1
+        results.append({
+            "document": doc_name,
+            "category": cat,
+            "status": "matched" if matched else "missing",
+            "matched_count": len(lib_by_cat.get(cat, [])),
+        })
+    return {
+        "tender_id": tender_id,
+        "tender_title": t.title,
+        "company_name": company.name if company else (user.company_name or "Not set"),
+        "total_required": len(default_required),
+        "matched": matched_count,
+        "missing": len(default_required) - matched_count,
+        "compliance_percentage": round((matched_count / len(default_required)) * 100, 1) if default_required else 0,
+        "items": results,
+    }
+
+
+# ============================================================
+# ISSUER PORTAL — for tender-issuing organisations (auth required)
+# ============================================================
+
+def _get_issuer_membership(db: Session, user: User):
+    """Return (company, member) for the user's issuer company, or raise 403."""
+    member = db.query(CompanyMember).filter(
+        CompanyMember.user_id == user.id,
+        CompanyMember.status == "approved",
+    ).first()
+    if not member:
+        raise HTTPException(status_code=403, detail="You are not a member of any issuer company. Ask your company admin to approve your registration, or create/join a company.")
+    company = db.query(IssuerCompany).filter(IssuerCompany.id == member.company_id).first()
+    return company, member
+
+
+def _get_issuer_member_ids(db: Session, company_id: int):
+    members = db.query(CompanyMember).filter(
+        CompanyMember.company_id == company_id,
+        CompanyMember.status == "approved",
+    ).all()
+    return [m.user_id for m in members]
+
+
+def _serialize_issued_tender(t: IssuedTender, company: IssuerCompany, bid_count: int, db: Session) -> dict:
+    return {
+        "id": t.id,
+        "reference_number": t.reference_number,
+        "title": t.title,
+        "description": t.description,
+        "scope_of_work": t.scope_of_work,
+        "category": t.category,
+        "location": t.location,
+        "issue_date": t.issue_date.isoformat() if t.issue_date else None,
+        "closing_date": t.closing_date.isoformat() if t.closing_date else None,
+        "closing_time": t.closing_time.isoformat() if t.closing_time else None,
+        "budget": t.budget,
+        "contract_period": t.contract_period,
+        "evaluation_criteria": t.evaluation_criteria,
+        "submission_method": t.submission_method,
+        "contact_person": t.contact_person,
+        "contact_email": t.contact_email,
+        "contact_phone": t.contact_phone,
+        "status": t.status,
+        "is_published": t.is_published,
+        "ai_generated_content": t.ai_generated_content,
+        "notes": t.notes,
+        "company_name": company.name if company else None,
+        "bid_count": bid_count,
+        "created_at": t.created_at.isoformat() if t.created_at else None,
+    }
+
+
+def _serialize_bid(b: Bid, tender: Optional[IssuedTender], db: Session) -> dict:
+    docs = db.query(BidDocument).filter(BidDocument.bid_id == b.id).all()
+    return {
+        "id": b.id,
+        "tender_id": b.tender_id,
+        "tender_title": tender.title if tender else None,
+        "tender_reference": tender.reference_number if tender else None,
+        "bidder_company_name": b.bidder_company_name,
+        "bidder_contact_person": b.bidder_contact_person,
+        "bidder_email": b.bidder_email,
+        "bidder_phone": b.bidder_phone,
+        "bidder_bbbee_level": b.bidder_bbbee_level,
+        "total_amount": b.total_amount,
+        "proposal_summary": b.proposal_summary,
+        "technical_score": b.technical_score,
+        "financial_score": b.financial_score,
+        "status": b.status,
+        "submitted_at": b.submitted_at.isoformat() if b.submitted_at else None,
+        "reviewed_at": b.reviewed_at.isoformat() if b.reviewed_at else None,
+        "ai_review": b.ai_review,
+        "ai_reviewed_at": b.ai_reviewed_at.isoformat() if b.ai_reviewed_at else None,
+        "notes": b.notes,
+        "documents": [
+            {
+                "id": d.id,
+                "doc_type": d.doc_type,
+                "filename": d.original_filename,
+                "file_size": d.file_size,
+                "uploaded_at": d.uploaded_at.isoformat() if d.uploaded_at else None,
+            }
+            for d in docs
+        ],
+    }
+
+
+@app.post("/api/issuer/register-company")
+def issuer_register_company(
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Create a new issuer company. The registering user becomes the admin."""
+    if user.account_type != "issuer":
+        raise HTTPException(status_code=400, detail="Only issuer accounts can create issuer companies.")
+    existing = db.query(CompanyMember).filter(
+        CompanyMember.user_id == user.id,
+        CompanyMember.status == "approved",
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="You are already a member of an issuer company.")
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Company name is required.")
+    company = IssuerCompany(
+        name=name,
+        registration_number=payload.get("registration_number"),
+        description=payload.get("description"),
+        industry=payload.get("industry"),
+        address=payload.get("address"),
+        phone=payload.get("phone"),
+        email=payload.get("email"),
+        website=payload.get("website"),
+        created_by=user.id,
+    )
+    db.add(company)
+    db.flush()
+    member = CompanyMember(
+        company_id=company.id,
+        user_id=user.id,
+        role="admin",
+        status="approved",
+        job_title=payload.get("job_title", "Administrator"),
+        approved_at=datetime.utcnow(),
+    )
+    db.add(member)
+    if not user.company_name:
+        user.company_name = name
+    user.onboarding_completed = True
+    db.commit()
+    return {
+        "id": company.id,
+        "name": company.name,
+        "industry": company.industry,
+        "description": company.description,
+        "role": "admin",
+    }
+
+
+@app.post("/api/issuer/join-company")
+def issuer_join_company(
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Request to join an existing issuer company by name."""
+    if user.account_type != "issuer":
+        raise HTTPException(status_code=400, detail="Only issuer accounts can join issuer companies.")
+    company_name = (payload.get("company_name") or "").strip()
+    if not company_name:
+        raise HTTPException(status_code=400, detail="Company name is required.")
+    company = db.query(IssuerCompany).filter(IssuerCompany.name.ilike(company_name)).first()
+    if not company:
+        raise HTTPException(status_code=404, detail=f"No issuer company named '{company_name}' found. Ask your admin to confirm the exact name, or create a new company.")
+    existing = db.query(CompanyMember).filter(
+        CompanyMember.company_id == company.id,
+        CompanyMember.user_id == user.id,
+    ).first()
+    if existing:
+        return {"id": existing.id, "status": existing.status, "company_name": company.name,
+                "message": f"Your membership is already '{existing.status}'."}
+    member = CompanyMember(
+        company_id=company.id,
+        user_id=user.id,
+        role="member",
+        status="pending",
+        job_title=payload.get("job_title"),
+    )
+    db.add(member)
+    db.commit()
+    return {
+        "id": member.id,
+        "status": "pending",
+        "company_name": company.name,
+        "message": f"Join request submitted. An admin of {company.name} will approve your membership.",
+    }
+
+
+@app.get("/api/issuer/company")
+def issuer_get_company(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get the issuer company the current user belongs to (and membership info)."""
+    member = db.query(CompanyMember).filter(
+        CompanyMember.user_id == user.id,
+    ).first()
+    if not member:
+        return {"company": None, "member": None}
+    company = db.query(IssuerCompany).filter(IssuerCompany.id == member.company_id).first()
+    return {
+        "company": {
+            "id": company.id,
+            "name": company.name,
+            "registration_number": company.registration_number,
+            "description": company.description,
+            "industry": company.industry,
+            "address": company.address,
+            "phone": company.phone,
+            "email": company.email,
+            "website": company.website,
+            "logo_path": company.logo_path,
+        } if company else None,
+        "member": {
+            "id": member.id,
+            "role": member.role,
+            "status": member.status,
+            "job_title": member.job_title,
+        },
+    }
+
+
+@app.get("/api/issuer/members")
+def issuer_list_members(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List all members of the issuer company."""
+    company, member = _get_issuer_membership(db, user)
+    members = db.query(CompanyMember).filter(
+        CompanyMember.company_id == company.id,
+    ).order_by(CompanyMember.joined_at.desc()).all()
+    items = []
+    for m in members:
+        u = db.query(User).filter(User.id == m.user_id).first()
+        items.append({
+            "id": m.id,
+            "user_id": m.user_id,
+            "email": u.email if u else None,
+            "full_name": u.full_name if u else None,
+            "role": m.role,
+            "status": m.status,
+            "job_title": m.job_title,
+            "joined_at": m.joined_at.isoformat() if m.joined_at else None,
+            "approved_at": m.approved_at.isoformat() if m.approved_at else None,
+        })
+    return {"items": items}
+
+
+@app.put("/api/issuer/members/{member_id}")
+def issuer_update_member(
+    member_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Approve or reject a membership request (admin only)."""
+    company, member = _get_issuer_membership(db, user)
+    if member.role != "admin":
+        raise HTTPException(status_code=403, detail="Only company admins can approve members.")
+    target = db.query(CompanyMember).filter(
+        CompanyMember.id == member_id,
+        CompanyMember.company_id == company.id,
+    ).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Member not found.")
+    target.status = payload.get("status", target.status)
+    if payload.get("status") == "approved":
+        target.approved_at = datetime.utcnow()
+        u = db.query(User).filter(User.id == target.user_id).first()
+        if u:
+            u.onboarding_completed = True
+            if not u.company_name:
+                u.company_name = company.name
+    db.commit()
+    db.refresh(target)
+    u = db.query(User).filter(User.id == target.user_id).first()
+    return {
+        "id": target.id,
+        "email": u.email if u else None,
+        "full_name": u.full_name if u else None,
+        "role": target.role,
+        "status": target.status,
+    }
+
+
+@app.delete("/api/issuer/members/{member_id}")
+def issuer_remove_member(
+    member_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Remove a member from the issuer company (admin only)."""
+    company, member = _get_issuer_membership(db, user)
+    if member.role != "admin":
+        raise HTTPException(status_code=403, detail="Only company admins can remove members.")
+    target = db.query(CompanyMember).filter(
+        CompanyMember.id == member_id,
+        CompanyMember.company_id == company.id,
+    ).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Member not found.")
+    if target.role == "admin" and target.user_id == user.id:
+        raise HTTPException(status_code=400, detail="You cannot remove yourself.")
+    db.delete(target)
+    db.commit()
+    return {"deleted": True, "id": member_id}
+
+
+@app.get("/api/issuer/companies/search")
+def issuer_search_companies(
+    q: str = "",
+    db: Session = Depends(get_db),
+):
+    """Search for issuer companies by name."""
+    query = db.query(IssuerCompany)
+    if q:
+        query = query.filter(IssuerCompany.name.ilike(f"%{q}%"))
+    companies = query.order_by(IssuerCompany.name.asc()).limit(20).all()
+    return {"items": [{"id": c.id, "name": c.name, "industry": c.industry} for c in companies]}
+
+
+@app.get("/api/issuer/tenders")
+def issuer_list_tenders(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List all tenders issued by the issuer company."""
+    company, member = _get_issuer_membership(db, user)
+    tenders = db.query(IssuedTender).filter(
+        IssuedTender.company_id == company.id,
+    ).order_by(desc(IssuedTender.created_at)).all()
+    items = []
+    for t in tenders:
+        bid_count = db.query(Bid).filter(Bid.tender_id == t.id).count()
+        items.append(_serialize_issued_tender(t, company, bid_count, db))
+    return {"items": items, "total": len(items)}
+
+
+@app.post("/api/issuer/tenders")
+def issuer_create_tender(
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Create a new issued tender (draft by default)."""
+    company, member = _get_issuer_membership(db, user)
+    title = (payload.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title is required.")
+    # Generate a reference number if not provided
+    ref = payload.get("reference_number") or f"TMD-{company.id}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    t = IssuedTender(
+        company_id=company.id,
+        reference_number=ref,
+        title=title,
+        description=payload.get("description"),
+        scope_of_work=payload.get("scope_of_work"),
+        category=payload.get("category") or company.industry or "General",
+        location=payload.get("location"),
+        issue_date=_parse_date(payload.get("issue_date")),
+        closing_date=_parse_date(payload.get("closing_date")),
+        budget=payload.get("budget") or 0,
+        contract_period=payload.get("contract_period"),
+        evaluation_criteria=payload.get("evaluation_criteria"),
+        submission_method=payload.get("submission_method") or "Bids must be submitted online through the TM Flow portal by the closing date. No physical or email submissions will be accepted.",
+        contact_person=payload.get("contact_person"),
+        contact_email=payload.get("contact_email"),
+        contact_phone=payload.get("contact_phone"),
+        status=payload.get("status") or "Draft",
+        is_published=False,
+        ai_generated_content=payload.get("ai_generated_content"),
+        notes=payload.get("notes"),
+        created_by=user.id,
+    )
+    db.add(t)
+    db.commit()
+    db.refresh(t)
+    return _serialize_issued_tender(t, company, 0, db)
+
+
+@app.get("/api/issuer/tenders/{tender_id}")
+def issuer_get_tender(
+    tender_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get a single issued tender."""
+    company, member = _get_issuer_membership(db, user)
+    t = db.query(IssuedTender).filter(
+        IssuedTender.id == tender_id,
+        IssuedTender.company_id == company.id,
+    ).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tender not found.")
+    bid_count = db.query(Bid).filter(Bid.tender_id == t.id).count()
+    return _serialize_issued_tender(t, company, bid_count, db)
+
+
+@app.put("/api/issuer/tenders/{tender_id}")
+def issuer_update_tender(
+    tender_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Update an issued tender."""
+    company, member = _get_issuer_membership(db, user)
+    t = db.query(IssuedTender).filter(
+        IssuedTender.id == tender_id,
+        IssuedTender.company_id == company.id,
+    ).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tender not found.")
+    for field in ["title", "description", "scope_of_work", "category", "location",
+                  "contract_period", "evaluation_criteria", "submission_method",
+                  "contact_person", "contact_email", "contact_phone", "status",
+                  "ai_generated_content", "notes"]:
+        if field in payload:
+            setattr(t, field, payload[field])
+    if "reference_number" in payload and payload["reference_number"]:
+        t.reference_number = payload["reference_number"]
+    if "budget" in payload:
+        t.budget = payload["budget"]
+    if "issue_date" in payload:
+        t.issue_date = _parse_date(payload["issue_date"])
+    if "closing_date" in payload:
+        t.closing_date = _parse_date(payload["closing_date"])
+    db.commit()
+    db.refresh(t)
+    bid_count = db.query(Bid).filter(Bid.tender_id == t.id).count()
+    return _serialize_issued_tender(t, company, bid_count, db)
+
+
+@app.delete("/api/issuer/tenders/{tender_id}")
+def issuer_delete_tender(
+    tender_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Delete an issued tender."""
+    company, member = _get_issuer_membership(db, user)
+    t = db.query(IssuedTender).filter(
+        IssuedTender.id == tender_id,
+        IssuedTender.company_id == company.id,
+    ).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tender not found.")
+    db.delete(t)
+    db.commit()
+    return {"deleted": True, "id": tender_id}
+
+
+@app.post("/api/issuer/tenders/{tender_id}/publish")
+def issuer_publish_tender(
+    tender_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Publish a tender so it appears on the public board."""
+    company, member = _get_issuer_membership(db, user)
+    t = db.query(IssuedTender).filter(
+        IssuedTender.id == tender_id,
+        IssuedTender.company_id == company.id,
+    ).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tender not found.")
+    if not t.title or not t.description:
+        raise HTTPException(status_code=400, detail="Tender must have a title and description before publishing.")
+    t.is_published = True
+    t.status = "Open"
+    if not t.issue_date:
+        t.issue_date = date.today()
+    db.commit()
+    db.refresh(t)
+    bid_count = db.query(Bid).filter(Bid.tender_id == t.id).count()
+    return _serialize_issued_tender(t, company, bid_count, db)
+
+
+@app.post("/api/issuer/tenders/{tender_id}/unpublish")
+def issuer_unpublish_tender(
+    tender_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Unpublish a tender (remove from public board)."""
+    company, member = _get_issuer_membership(db, user)
+    t = db.query(IssuedTender).filter(
+        IssuedTender.id == tender_id,
+        IssuedTender.company_id == company.id,
+    ).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tender not found.")
+    t.is_published = False
+    t.status = "Draft"
+    db.commit()
+    db.refresh(t)
+    bid_count = db.query(Bid).filter(Bid.tender_id == t.id).count()
+    return _serialize_issued_tender(t, company, bid_count, db)
+
+
+@app.post("/api/issuer/tenders/ai-generate")
+def issuer_ai_generate_tender(
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """AI Tender Writer — generate a complete tender specification from a prompt."""
+    company, member = _get_issuer_membership(db, user)
+    prompt = (payload.get("prompt") or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="A prompt describing the tender is required.")
+    industry = payload.get("industry") or company.industry or "General"
+    result = ai_module.generate_tender_from_prompt(
+        prompt=prompt,
+        industry=industry,
+        company_name=company.name,
+    )
+    return result
+
+
+@app.get("/api/issuer/tenders/{tender_id}/bids")
+def issuer_list_tender_bids(
+    tender_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List all bids for a specific tender."""
+    company, member = _get_issuer_membership(db, user)
+    t = db.query(IssuedTender).filter(
+        IssuedTender.id == tender_id,
+        IssuedTender.company_id == company.id,
+    ).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tender not found.")
+    bids = db.query(Bid).filter(Bid.tender_id == tender_id).order_by(desc(Bid.submitted_at)).all()
+    return {"items": [_serialize_bid(b, t, db) for b in bids], "total": len(bids)}
+
+
+@app.get("/api/issuer/bids")
+def issuer_list_all_bids(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List all bids across all tenders issued by the company."""
+    company, member = _get_issuer_membership(db, user)
+    tender_ids = [t.id for t in db.query(IssuedTender).filter(IssuedTender.company_id == company.id).all()]
+    if not tender_ids:
+        return {"items": [], "total": 0}
+    bids = db.query(Bid).filter(Bid.tender_id.in_(tender_ids)).order_by(desc(Bid.submitted_at)).all()
+    items = []
+    for b in bids:
+        t = db.query(IssuedTender).filter(IssuedTender.id == b.tender_id).first()
+        items.append(_serialize_bid(b, t, db))
+    return {"items": items, "total": len(items)}
+
+
+@app.delete("/api/issuer/bids/{bid_id}")
+def issuer_delete_bid(
+    bid_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Delete a bid."""
+    company, member = _get_issuer_membership(db, user)
+    bid = db.query(Bid).filter(Bid.id == bid_id).first()
+    if not bid:
+        raise HTTPException(status_code=404, detail="Bid not found.")
+    t = db.query(IssuedTender).filter(IssuedTender.id == bid.tender_id).first()
+    if not t or t.company_id != company.id:
+        raise HTTPException(status_code=403, detail="You can only delete bids on your own tenders.")
+    db.delete(bid)
+    db.commit()
+    return {"deleted": True, "id": bid_id}
+
+
+@app.post("/api/issuer/bids/{bid_id}/ai-review")
+def issuer_ai_review_bid(
+    bid_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """AI Bid Review — analyse a bid against the tender requirements."""
+    company, member = _get_issuer_membership(db, user)
+    bid = db.query(Bid).filter(Bid.id == bid_id).first()
+    if not bid:
+        raise HTTPException(status_code=404, detail="Bid not found.")
+    t = db.query(IssuedTender).filter(IssuedTender.id == bid.tender_id).first()
+    if not t or t.company_id != company.id:
+        raise HTTPException(status_code=403, detail="You can only review bids on your own tenders.")
+    tender_data = {
+        "title": t.title,
+        "description": t.description,
+        "scope_of_work": t.scope_of_work,
+        "evaluation_criteria": t.evaluation_criteria,
+    }
+    bid_data = {
+        "bidder_company_name": bid.bidder_company_name,
+        "bidder_contact_person": bid.bidder_contact_person,
+        "bidder_bbbee_level": bid.bidder_bbbee_level,
+        "proposal_summary": bid.proposal_summary,
+        "total_amount": bid.total_amount,
+    }
+    review = ai_module.review_bid(bid_data, tender_data)
+    # Store the review text + scores
+    bid.ai_review = review.get("summary", "")
+    bid.ai_reviewed_at = datetime.utcnow()
+    bid.technical_score = review.get("technical_score", 0)
+    bid.financial_score = review.get("financial_score", 0)
+    bid.reviewed_at = datetime.utcnow()
+    bid.reviewed_by = user.id
+    if review.get("recommendation") == "Award":
+        bid.status = "Recommended"
+    elif review.get("recommendation") == "Do Not Award":
+        bid.status = "Not Recommended"
+    else:
+        bid.status = "Under Review"
+    db.commit()
+    db.refresh(bid)
+    return _serialize_bid(b, t, db)
+
+
+@app.post("/api/issuer/bids/{bid_id}/award")
+def issuer_award_bid(
+    bid_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Mark a bid as awarded (or revoke)."""
+    company, member = _get_issuer_membership(db, user)
+    bid = db.query(Bid).filter(Bid.id == bid_id).first()
+    if not bid:
+        raise HTTPException(status_code=404, detail="Bid not found.")
+    t = db.query(IssuedTender).filter(IssuedTender.id == bid.tender_id).first()
+    if not t or t.company_id != company.id:
+        raise HTTPException(status_code=403, detail="You can only award bids on your own tenders.")
+    awarded = payload.get("awarded", True)
+    if awarded:
+        # Mark this bid as Awarded and all others for this tender as Unsuccessful
+        other_bids = db.query(Bid).filter(
+            Bid.tender_id == bid.tender_id,
+            Bid.id != bid.id,
+        ).all()
+        for ob in other_bids:
+            ob.status = "Unsuccessful"
+        bid.status = "Awarded"
+        bid.reviewed_at = datetime.utcnow()
+        bid.reviewed_by = user.id
+        t.status = "Awarded"
+    else:
+        bid.status = "Under Review"
+        t.status = "Open"
+    db.commit()
+    db.refresh(bid)
+    return _serialize_bid(b, t, db)
+
+
+@app.get("/api/issuer/stats")
+def issuer_stats(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Overview stats for the issuer dashboard."""
+    company, member = _get_issuer_membership(db, user)
+    tenders = db.query(IssuedTender).filter(IssuedTender.company_id == company.id).all()
+    tender_ids = [t.id for t in tenders]
+    bids = db.query(Bid).filter(Bid.tender_id.in_(tender_ids)).all() if tender_ids else []
+    # Top bidders by number of bids
+    bidder_counts = {}
+    for b in bids:
+        bidder_counts[b.bidder_company_name] = bidder_counts.get(b.bidder_company_name, 0) + 1
+    top_bidders = sorted(bidder_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+    return {
+        "company_name": company.name,
+        "total_tenders": len(tenders),
+        "published_tenders": len([t for t in tenders if t.is_published]),
+        "draft_tenders": len([t for t in tenders if not t.is_published]),
+        "open_tenders": len([t for t in tenders if t.status == "Open"]),
+        "awarded_tenders": len([t for t in tenders if t.status == "Awarded"]),
+        "total_bids": len(bids),
+        "pending_bids": len([b for b in bids if b.status == "Pending"]),
+        "reviewed_bids": len([b for b in bids if b.status in ("Recommended", "Not Recommended", "Under Review", "Awarded", "Unsuccessful")]),
+        "awarded_bids": len([b for b in bids if b.status == "Awarded"]),
+        "top_bidders": [{"company_name": name, "bid_count": cnt} for name, cnt in top_bidders],
+        "member_count": db.query(CompanyMember).filter(CompanyMember.company_id == company.id).count(),
+    }
+
+
+def _parse_date(s):
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s[:10], "%Y-%m-%d").date()
+    except Exception:
+        return None
 
 
 if __name__ == "__main__":

@@ -81,10 +81,10 @@ async function request<T = any>(
 // Auth
 export const api = {
   // ---- Auth ----
-  async register(email: string, full_name: string, password: string, company_name?: string) {
+  async register(email: string, full_name: string, password: string, company_name?: string, account_type?: "applicant" | "issuer") {
     const data = await request<{ access_token: string; user: any }>("/auth/register", {
       method: "POST",
-      body: { email, full_name, password, company_name },
+      body: { email, full_name, password, company_name, account_type: account_type || "applicant" },
       skipAuth: true,
     });
     setToken(data.access_token);
@@ -726,5 +726,84 @@ export const bidderApi = {
   },
   async searchCompanies(q: string) {
     return request<{ items: any[] }>(`/bidder/companies/search?q=${encodeURIComponent(q)}`);
+  },
+};
+
+// ============================================================
+// ISSUER PORTAL — for tender-issuing organisations
+// ============================================================
+
+export const issuerApi = {
+  // ---- Company management ----
+  async registerCompany(payload: { name: string; registration_number?: string; description?: string; industry?: string; address?: string; phone?: string; email?: string; website?: string; job_title?: string }) {
+    return request<any>("/issuer/register-company", { method: "POST", body: payload });
+  },
+  async joinCompany(company_name: string, job_title?: string) {
+    return request<any>("/issuer/join-company", { method: "POST", body: { company_name, job_title } });
+  },
+  async getCompany() {
+    return request<{ company: any | null; member: any | null }>("/issuer/company");
+  },
+  async listMembers() {
+    return request<{ items: any[] }>("/issuer/members");
+  },
+  async updateMember(memberId: number, status: "approved" | "rejected") {
+    return request<any>(`/issuer/members/${memberId}`, { method: "PUT", body: { status } });
+  },
+  async removeMember(memberId: number) {
+    return request<any>(`/issuer/members/${memberId}`, { method: "DELETE" });
+  },
+  async searchCompanies(q: string) {
+    return request<{ items: any[] }>(`/issuer/companies/search?q=${encodeURIComponent(q)}`);
+  },
+
+  // ---- Tenders ----
+  async listTenders() {
+    return request<{ items: any[]; total: number }>("/issuer/tenders");
+  },
+  async getTender(id: number) {
+    return request<any>(`/issuer/tenders/${id}`);
+  },
+  async createTender(payload: any) {
+    return request<any>("/issuer/tenders", { method: "POST", body: payload });
+  },
+  async updateTender(id: number, payload: any) {
+    return request<any>(`/issuer/tenders/${id}`, { method: "PUT", body: payload });
+  },
+  async deleteTender(id: number) {
+    return request<{ deleted: boolean }>(`/issuer/tenders/${id}`, { method: "DELETE" });
+  },
+  async publishTender(id: number) {
+    return request<any>(`/issuer/tenders/${id}/publish`, { method: "POST" });
+  },
+  async unpublishTender(id: number) {
+    return request<any>(`/issuer/tenders/${id}/unpublish`, { method: "POST" });
+  },
+
+  // ---- AI Tender Writer ----
+  async aiGenerateTender(prompt: string, industry?: string) {
+    return request<any>("/issuer/tenders/ai-generate", { method: "POST", body: { prompt, industry } });
+  },
+
+  // ---- Bids ----
+  async listTenderBids(tenderId: number) {
+    return request<{ items: any[]; total: number }>(`/issuer/tenders/${tenderId}/bids`);
+  },
+  async listAllBids() {
+    return request<{ items: any[]; total: number }>("/issuer/bids");
+  },
+  async deleteBid(bidId: number) {
+    return request<{ deleted: boolean }>(`/issuer/bids/${bidId}`, { method: "DELETE" });
+  },
+  async aiReviewBid(bidId: number) {
+    return request<any>(`/issuer/bids/${bidId}/ai-review`, { method: "POST" });
+  },
+  async awardBid(bidId: number, awarded: boolean = true) {
+    return request<any>(`/issuer/bids/${bidId}/award`, { method: "POST", body: { awarded } });
+  },
+
+  // ---- Stats ----
+  async getStats() {
+    return request<any>("/issuer/stats");
   },
 };

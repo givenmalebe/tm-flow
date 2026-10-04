@@ -1711,3 +1711,33 @@ Stage Summary:
   because the tender was actually created — the 502 was just a gateway timeout
 - The user is always navigated to the newly created tender's detail page
 - Only genuine failures (no tender in DB after 12s of polling) show the error toast
+
+---
+Task ID: 4
+Agent: full-stack-developer
+Task: Rebuild full Issuer Portal (8 tabs)
+
+Work Log:
+- Read worklog.md, existing stub at src/components/issuer/issuer-portal.tsx, src/lib/api.ts (issuerApi surface), src/lib/auth-context.tsx (useAuth → {user, logout}), src/app/page.tsx (issuer accounts routed to <IssuerPortal/>), dashboard-shell.tsx + team-tab.tsx for layout/team-management patterns, and shadcn ui/ exports (button, card, dialog, sheet, select, badge, input, textarea, label, avatar, progress, separator, sonner/toaster)
+- Wrote a complete 1500+ line "use client" component named `IssuerPortal` (named export) at src/components/issuer/issuer-portal.tsx, fully replacing the stub. AMBER theme throughout (amber-600 primary, amber-700 hover, amber-50/amber-100 backgrounds, amber-900 headings, amber-100 borders). Sticky header + responsive sidebar (lg: vertical nav, mobile: Sheet from left) + sticky footer (mt-auto, root is min-h-screen flex flex-col).
+- Entry logic: on mount calls issuerApi.getCompany(); (a) company===null → CompanySetup screen with two cards "Create a Company" (full form: name, registration_number, description, industry select, address, phone, email, website, job_title → registerCompany) and "Join a Company" (debounced search via searchCompanies + select + job_title → joinCompany); (b) member.status!=="approved" → PendingApproval screen; (c) approved → full portal with 8 tabs.
+- Tab 1 Overview: getStats() → 9 stat cards (total/published/drafts/open/awarded tenders, total/pending/awarded bids, member count) in responsive grid + top-bidders leaderboard + quick-action cards that jump to other tabs.
+- Tab 2 Tenders: listTenders() with search; per-tender card with reference badge, publish/draft badge, category badge, awarded badge, location/closing/budget/bid-count meta, View-Edit / Publish-Unpublish / Delete actions; Create-Tender + Edit dialog with all required fields (title, description, scope_of_work, category select, location, closing_date, budget, contract_period, evaluation_criteria, contact_person/email/phone, ai_generated_content textarea) calling createTender/updateTender/deleteTender/publishTender/unpublishTender.
+- Tab 3 AI Tender Writer: prompt textarea + optional industry select → aiGenerateTender (with 20-30s loading spinner card); result rendered as an editable form (title, category, description, scope_of_work, location, contract_period, budget, evaluation_criteria, submission_method, compulsory_documents/mandatory_requirements/functionality_requirements as newline-separated textareas, full ai_generated_content textarea) → "Save as Tender" calls createTender. sonner toast for success/error.
+- Tab 4 Bid Management: listAllBids() with search; per-bid card with BidStatusBadge, B-BBEE level badge, tender reference badge, bidder company, contact info, submitted date, total amount (R-formatted); View (opens BidDetailDialog showing all fields + proposal_summary + ai_review + technical/financial score cards + documents list) and Delete (deleteBid) actions.
+- Tab 5 Top Bidders: getStats().top_bidders ranked leaderboard with podium badges (gold/silver/bronze) + B-BBEE levels; side panel lists all tenders with bid counts, clicking loads listTenderBids(tenderId) and shows the bids inline.
+- Tab 6 Bid Review: two-panel layout. Left: tenders list (clickable, amber highlight when active). Right: bids for selected tender via listTenderBids. Each bid has "AI Review" button (aiReviewBid, ~20-30s spinner, then displays ai_review + technical_score + financial_score cards), "Award" (awardBid(id,true)) and "Revoke Award" (awardBid(id,false)) buttons; a "Recommended Winner" card is auto-computed (highest combined score among reviewed bids) and shown prominently at top.
+- Tab 7 Members: listMembers(); pending members show Approve (updateMember→approved, emerald) + Reject (updateMember→rejected, rose) buttons; approved members show role + Remove button (removeMember) if current user is admin; current user marked "You" badge; info note "Team members who register with your company name will appear here as pending — approve them to grant access."
+- Tab 8 Settings: read-only display of company profile (name, registration_number, industry, address, phone, email, website, member_count, description) with icons, plus a note "Company settings editing coming soon" since no update-company endpoint exists.
+- Helpers: fmtRand (R + toLocaleString en-ZA), fmtDate (DD MMM YYYY uppercased), fmtDateTime, initials, toInputDate. SECTORS constant with the 23 SA industry sectors used by all category selects.
+- Reused components: Field, CenteredSpinner, EmptyState, QuickAction, DetailItem, ScoreCard (Progress with amber fill), BidStatusBadge, BidDetailDialog, SettingsItem. All loading states use Loader2 spinners; all async ops wrapped in try/catch with sonner toasts.
+- Ran `bun run lint` from /home/z/my-project → exit 0, no errors. Checked dev.log: previous "Module not found @/components/issuer/issuer-portal" errors (from when stub was missing) are gone; latest entries show "✓ Compiled in 833ms" cleanly.
+
+Stage Summary:
+- Deliverable: src/components/issuer/issuer-portal.tsx — complete `IssuerPortal` named export, "use client", ~1500 lines, AMBER theme, compiles cleanly, lint clean (exit 0).
+- 8 tabs fully implemented: Overview, Tenders, AI Tender Writer, Bid Management, Top Bidders, Bid Review, Members, Settings.
+- Entry flow handles no-company (Create/Join setup), pending approval, and full approved portal states.
+- All issuerApi methods wired: registerCompany, joinCompany, getCompany, listMembers, updateMember, removeMember, searchCompanies, listTenders, createTender, updateTender, deleteTender, publishTender, unpublishTender, aiGenerateTender, listTenderBids, listAllBids, deleteBid, aiReviewBid, awardBid, getStats.
+- Responsive: sidebar collapses to Sheet on mobile; grids reflow at sm/lg/xl breakpoints. Sticky header (amber-600) + sticky footer (mt-auto, min-h-screen flex flex-col root).
+- sonner toasts for all feedback, Loader2 spinners for all async ops, R X,XXX,XXX currency and DD MMM YYYY date formatting throughout.
+- No other files modified. No test files created.

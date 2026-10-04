@@ -16,6 +16,7 @@ interface AuthUser {
   full_name: string;
   company_name?: string;
   role: string;
+  account_type?: "applicant" | "issuer";
   onboarding_completed?: boolean;
 }
 
@@ -27,7 +28,8 @@ interface AuthContextValue {
     email: string,
     full_name: string,
     password: string,
-    company_name?: string
+    company_name?: string,
+    account_type?: "applicant" | "issuer"
   ) => Promise<void>;
   logout: () => void;
   refreshUser: () => Promise<void>;
@@ -69,9 +71,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     email: string,
     full_name: string,
     password: string,
-    company_name?: string
+    company_name?: string,
+    account_type?: "applicant" | "issuer"
   ) => {
-    const data = await api.register(email, full_name, password, company_name);
+    const data = await api.register(email, full_name, password, company_name, account_type);
     setUser(data.user);
   };
 

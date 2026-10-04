@@ -1586,3 +1586,178 @@ Return ONLY the JSON array of required documents."""
                        "organogram", "pricing_schedule", "references", "signed_declarations",
                        "appendices", "table_of_contents"]
         ]
+
+
+# ============================================================
+# ISSUER PORTAL AI FUNCTIONS
+# ============================================================
+
+def generate_tender_from_prompt(prompt: str, industry: str = "", company_name: str = "") -> Dict[str, Any]:
+    """AI Tender Writer — generate a complete tender specification from a natural-language prompt.
+
+    Used by issuers to create professional tender documents quickly.
+    Returns a dict with title, description, scope_of_work, evaluation_criteria,
+    submission_method, compulsory_documents, mandatory_requirements,
+    functionality_requirements, and ai_generated_content (the full document).
+    """
+    system = (
+        "You are a senior procurement specialist in South Africa who writes professional, "
+        "compliant tender specifications. You understand PFMA, PPPFA, B-BBEE, SARS, CIPC, "
+        "COIDA and sector-specific requirements (PSIRA, CIDB, SACPCMP, etc.). "
+        "You MUST respond with ONLY a valid JSON object (no markdown, no code fences)."
+    )
+    user_prompt = f"""Create a complete, professional tender specification based on this request:
+
+REQUEST: {prompt}
+INDUSTRY/SECTOR: {industry or "General"}
+ISSUING ORGANISATION: {company_name or "The organisation"}
+
+Respond with ONLY this JSON schema (fill all fields with rich, detailed, professional content tailored to South African procurement):
+
+{{
+  "title": "A clear, professional tender title",
+  "description": "A 2-3 paragraph overview of what is being procured and why",
+  "scope_of_work": "Detailed scope of work with numbered deliverables (at least 8-12 items)",
+  "category": "The industry sector",
+  "location": "Where the work will be performed",
+  "contract_period": "e.g. 24 months",
+  "budget": 0,
+  "evaluation_criteria": "Detailed evaluation criteria including compulsory requirements, functionality (with weights), pricing (80/20 or 90/10 principle), and B-BBEE preferences",
+  "submission_method": "Bids must be submitted online through the TM Flow portal by the closing date. No physical or email submissions will be accepted.",
+  "compulsory_documents": ["List 20-25 compulsory documents bidders must submit, e.g. CIPC registration certificate, SARS tax clearance, B-BBEE certificate, COIDA letter of good standing, company profile, etc."],
+  "mandatory_requirements": ["List 8-12 mandatory requirements bidders must meet to be considered"],
+  "functionality_requirements": ["List 6-10 functionality requirements with pass/fail criteria"],
+  "ai_generated_content": "The FULL tender document as formatted text (1200-2000 words) with sections: 1. Background, 2. Scope of Work, 3. Mandatory Requirements, 4. Compulsory Documents, 5. Functionality Requirements, 6. Evaluation Criteria, 7. Pricing, 8. B-BBEE, 9. Terms and Conditions, 10. Submission Instructions"
+}}
+
+Make the content specific, detailed, and immediately usable. Use South African context (Rand currency, SA legislation, etc.)."""
+
+    try:
+        result = _run_zai_chat(user_prompt, system=system, max_tokens=8000)
+        # Strip markdown fences if present
+        result = result.strip()
+        if result.startswith("```"):
+            result = result.split("\n", 1)[1] if "\n" in result else result[3:]
+        if result.endswith("```"):
+            result = result[:-3]
+        result = result.strip()
+        if result.startswith("json"):
+            result = result[4:].strip()
+        # Find the JSON object
+        first = result.find("{")
+        last = result.rfind("}")
+        if first >= 0 and last > first:
+            result = result[first:last + 1]
+        data = json.loads(result)
+        # Ensure required fields exist
+        data.setdefault("title", "Untitled Tender")
+        data.setdefault("description", "")
+        data.setdefault("scope_of_work", "")
+        data.setdefault("category", industry or "General")
+        data.setdefault("location", "South Africa")
+        data.setdefault("contract_period", "12 months")
+        data.setdefault("budget", 0)
+        data.setdefault("evaluation_criteria", "")
+        data.setdefault("submission_method", "Bids must be submitted online through the TM Flow portal by the closing date.")
+        data.setdefault("compulsory_documents", [])
+        data.setdefault("mandatory_requirements", [])
+        data.setdefault("functionality_requirements", [])
+        data.setdefault("ai_generated_content", data.get("description", ""))
+        return data
+    except Exception as e:
+        # Fallback with minimal data
+        return {
+            "title": prompt[:100] if prompt else "Untitled Tender",
+            "description": f"Tender generated from request: {prompt}",
+            "scope_of_work": "",
+            "category": industry or "General",
+            "location": "South Africa",
+            "contract_period": "12 months",
+            "budget": 0,
+            "evaluation_criteria": "",
+            "submission_method": "Bids must be submitted online through the TM Flow portal by the closing date.",
+            "compulsory_documents": [],
+            "mandatory_requirements": [],
+            "functionality_requirements": [],
+            "ai_generated_content": f"Tender generated from: {prompt}",
+            "_error": str(e),
+        }
+
+
+def review_bid(bid_data: Dict[str, Any], tender_data: Dict[str, Any]) -> Dict[str, Any]:
+    """AI Bid Review — analyse a submitted bid against the tender requirements.
+
+    Returns dict with review (text), technical_score, financial_score,
+    recommendation (award/do not award), and strengths/weaknesses lists.
+    """
+    system = (
+        "You are an expert procurement evaluation committee member in South Africa. "
+        "You evaluate bids objectively against tender requirements, considering compliance, "
+        "functionality, B-BBEE, and value for money. "
+        "You MUST respond with ONLY a valid JSON object (no markdown, no code fences)."
+    )
+    user_prompt = f"""Evaluate this bid against the tender requirements.
+
+TENDER:
+- Title: {tender_data.get('title', '')}
+- Description: {(tender_data.get('description') or '')[:800]}
+- Scope of Work: {(tender_data.get('scope_of_work') or '')[:800]}
+- Compulsory Documents Required: {json.dumps(tender_data.get('compulsory_documents', []))[:500]}
+- Mandatory Requirements: {json.dumps(tender_data.get('mandatory_requirements', []))[:500]}
+- Evaluation Criteria: {(tender_data.get('evaluation_criteria') or '')[:500]}
+
+BID:
+- Bidder Company: {bid_data.get('bidder_company_name', '')}
+- Bidder Contact: {bid_data.get('bidder_contact_person', '')}
+- B-BBEE Level: {bid_data.get('bidder_bbbee_level', 'Not specified')}
+- Proposal Summary: {(bid_data.get('proposal_summary') or '')[:1000]}
+- Total Bid Amount: R {bid_data.get('total_amount', 0):,.2f}
+
+Respond with ONLY this JSON:
+{{
+  "technical_score": 0-100,
+  "financial_score": 0-100,
+  "compliance_score": 0-100,
+  "recommendation": "Award" | "Shortlist" | "Do Not Award",
+  "strengths": ["list 3-5 key strengths"],
+  "weaknesses": ["list 3-5 weaknesses or risks"],
+  "summary": "A 2-3 paragraph narrative evaluation",
+  "conditions": ["any conditions or clarifications needed"]
+}}"""
+
+    try:
+        result = _run_zai_chat(user_prompt, system=system, max_tokens=4000)
+        result = result.strip()
+        if result.startswith("```"):
+            result = result.split("\n", 1)[1] if "\n" in result else result[3:]
+        if result.endswith("```"):
+            result = result[:-3]
+        result = result.strip()
+        if result.startswith("json"):
+            result = result[4:].strip()
+        first = result.find("{")
+        last = result.rfind("}")
+        if first >= 0 and last > first:
+            result = result[first:last + 1]
+        data = json.loads(result)
+        data.setdefault("technical_score", 0)
+        data.setdefault("financial_score", 0)
+        data.setdefault("compliance_score", 0)
+        data.setdefault("recommendation", "Shortlist")
+        data.setdefault("strengths", [])
+        data.setdefault("weaknesses", [])
+        data.setdefault("summary", "Review completed.")
+        data.setdefault("conditions", [])
+        return data
+    except Exception as e:
+        return {
+            "technical_score": 0,
+            "financial_score": 0,
+            "compliance_score": 0,
+            "recommendation": "Shortlist",
+            "strengths": [],
+            "weaknesses": [],
+            "summary": f"AI review could not be completed: {e}. Manual review required.",
+            "conditions": [],
+            "_error": str(e),
+        }

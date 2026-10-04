@@ -566,7 +566,7 @@ function Hero({ onGetStarted }: LandingPageProps) {
               variants={fadeUp}
               className="text-4xl font-bold tracking-tight text-foreground sm:text-5xl lg:text-6xl"
             >
-              The tender platform for{" "}
+              The tender management platform for{" "}
               <span className="bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 bg-clip-text text-transparent">
                 buyers &amp; bidders
               </span>

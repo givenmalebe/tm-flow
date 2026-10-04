@@ -1057,7 +1057,9 @@ function Testimonial() {
 /* -------------------------------------------------------------------------- */
 
 function Pricing({ onGetStarted }: LandingPageProps) {
-  const tiers = [
+  const [billingTab, setBillingTab] = React.useState<"applicants" | "issuers">("applicants");
+
+  const applicantTiers = [
     {
       name: "Solo",
       price: "R 0",
@@ -1072,7 +1074,7 @@ function Pricing({ onGetStarted }: LandingPageProps) {
         "Compliance document library",
         "Deadline reminders",
         "Submission tracking",
-        "Tender discovery & scraper",
+        "Tender discovery",
       ],
       cta: "Start free",
       highlighted: false,
@@ -1091,7 +1093,7 @@ function Pricing({ onGetStarted }: LandingPageProps) {
         "Compliance document library",
         "Deadline reminders",
         "Submission tracking",
-        "Tender discovery & scraper",
+        "Tender discovery",
         "Excel export",
       ],
       cta: "Get Pro",
@@ -1111,7 +1113,7 @@ function Pricing({ onGetStarted }: LandingPageProps) {
         "Compliance document library",
         "Deadline reminders",
         "Submission tracking",
-        "Tender discovery & scraper",
+        "Tender discovery",
         "Excel export",
       ],
       cta: "Get Business",
@@ -1137,34 +1139,148 @@ function Pricing({ onGetStarted }: LandingPageProps) {
     },
   ];
 
+  const issuerTiers = [
+    {
+      name: "Starter",
+      price: "R 0",
+      period: "/month",
+      tagline: "For issuing your first tender and receiving bids.",
+      features: [
+        "Issue 1 tender",
+        "AI Tender Writer (1 generation / mo)",
+        "Publish to public tender board",
+        "Receive bids online",
+        "View & download bids",
+        "Manual bid evaluation",
+        "1 team member",
+      ],
+      cta: "Start free",
+      highlighted: false,
+    },
+    {
+      name: "Professional",
+      price: "R 2,499",
+      period: "/month",
+      tagline: "For organisations issuing tenders regularly.",
+      features: [
+        "Issue up to 10 tenders",
+        "AI Tender Writer (5 generations / mo)",
+        "Publish to public tender board",
+        "Receive bids online",
+        "AI bid review & scoring",
+        "AI auto-evaluate all bids",
+        "Top bidders leaderboard",
+        "Up to 3 team members",
+      ],
+      cta: "Get Professional",
+      highlighted: true,
+    },
+    {
+      name: "Business",
+      price: "R 5,999",
+      period: "/month",
+      tagline: "Unlimited tenders with full AI evaluation.",
+      features: [
+        "Unlimited tenders",
+        "AI Tender Writer (20 generations / mo)",
+        "Publish to public tender board",
+        "Receive unlimited bids",
+        "AI bid review & scoring",
+        "AI auto-evaluate all bids",
+        "Top bidders leaderboard",
+        "Bid document AI analysis",
+        "Up to 10 team members",
+        "Excel export",
+      ],
+      cta: "Get Business",
+      highlighted: false,
+    },
+    {
+      name: "Enterprise",
+      price: "Custom",
+      period: "",
+      tagline: "For large organisations with custom needs.",
+      features: [
+        "Unlimited tenders",
+        "Custom AI Tender Writer credits",
+        "Multi-company tenant",
+        "Unlimited team members",
+        "API access",
+        "SSO & dedicated support",
+        "Custom evaluation criteria",
+        "White-label tender board",
+      ],
+      cta: "Contact us",
+      highlighted: false,
+    },
+  ];
+
+  const tiers = billingTab === "applicants" ? applicantTiers : issuerTiers;
+
   return (
-    <section id="pricing" className="relative isolate scroll-mt-20 overflow-hidden border-b bg-gradient-to-br from-slate-50 via-emerald-50/30 to-teal-50/20">
+    <section id="pricing" className="relative isolate scroll-mt-20 overflow-hidden border-b bg-gradient-to-br from-slate-50 via-emerald-50/30 to-amber-50/20">
       <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
         <Reveal className="mx-auto max-w-2xl text-center">
           <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-700">
             <Users className="size-3.5" /> Pricing
           </Badge>
           <h2 className="mt-4 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-            Simple pricing for serious tender teams
+            Pricing for both sides of the platform
           </h2>
           <p className="mt-3 text-muted-foreground">
-            From a single tender to your entire portfolio. Upgrade as you grow.
+            Whether you issue tenders or bid on them — pick the plan that fits your needs.
           </p>
         </Reveal>
 
-        <div className="mx-auto mt-12 grid max-w-6xl gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Tab toggle: Applicants vs Issuers */}
+        <Reveal className="mt-8 flex justify-center" delay={0.1}>
+          <div className="inline-flex rounded-lg border border-border bg-muted/50 p-1">
+            <button
+              onClick={() => setBillingTab("applicants")}
+              className={cn(
+                "rounded-md px-6 py-2 text-sm font-medium transition-all",
+                billingTab === "applicants"
+                  ? "bg-emerald-600 text-white shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <FileText className="size-4 inline mr-1.5" />
+              For Bidders
+            </button>
+            <button
+              onClick={() => setBillingTab("issuers")}
+              className={cn(
+                "rounded-md px-6 py-2 text-sm font-medium transition-all",
+                billingTab === "issuers"
+                  ? "bg-amber-600 text-white shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Building2 className="size-4 inline mr-1.5" />
+              For Issuers
+            </button>
+          </div>
+        </Reveal>
+
+        {/* Tier cards */}
+        <div className="mx-auto mt-10 grid max-w-6xl gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {tiers.map((t, i) => (
             <Reveal key={t.name} delay={i * 0.08}>
               <Card
                 className={cn(
                   "relative h-full py-6 transition-all hover:shadow-lg hover:-translate-y-1",
                   t.highlighted
-                    ? "border-emerald-400 shadow-lg ring-1 ring-emerald-200"
+                    ? billingTab === "applicants"
+                      ? "border-emerald-400 shadow-lg ring-1 ring-emerald-200"
+                      : "border-amber-400 shadow-lg ring-1 ring-amber-200"
                     : "hover:border-emerald-300"
                 )}
               >
                 {t.highlighted && (
-                  <Badge className="absolute -top-3 left-1/2 -translate-x-1/2 gap-1 px-3 py-1 shadow-sm">
+                  <Badge className={cn(
+                    "absolute -top-3 left-1/2 -translate-x-1/2 gap-1 px-3 py-1 shadow-sm",
+                    billingTab === "applicants" ? "bg-emerald-600" : "bg-amber-600"
+                  )}>
                     <Sparkles className="size-3" /> Most popular
                   </Badge>
                 )}
@@ -1200,7 +1316,10 @@ function Pricing({ onGetStarted }: LandingPageProps) {
                             : "text-muted-foreground"
                         )}
                       >
-                        <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" />
+                        <CheckCircle2 className={cn(
+                          "mt-0.5 size-4 shrink-0",
+                          billingTab === "applicants" ? "text-emerald-600" : "text-amber-600"
+                        )} />
                         <span>{f}</span>
                       </li>
                     ))}
@@ -1221,13 +1340,30 @@ function Pricing({ onGetStarted }: LandingPageProps) {
           ))}
         </div>
 
+        {/* Info note */}
         <Reveal className="mx-auto mt-10 max-w-3xl" delay={0.1}>
-          <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-5 text-center">
+          <div className={cn(
+            "rounded-xl border p-5 text-center",
+            billingTab === "applicants"
+              ? "border-emerald-100 bg-emerald-50/40"
+              : "border-amber-100 bg-amber-50/40"
+          )}>
             <p className="text-sm text-muted-foreground">
-              <span className="font-semibold text-emerald-700">Why we cap AI generations, not tenders.</span>{" "}
-              A company needs to apply for multiple tenders just to win one — so we never cap your active pipeline.
-              Instead, the metered resource is AI document generation, which carries real infrastructure cost.
-              Need more? Upgrade anytime or top up credits.
+              {billingTab === "applicants" ? (
+                <>
+                  <span className="font-semibold text-emerald-700">Why we cap AI generations, not tenders.</span>{" "}
+                  A company needs to apply for multiple tenders just to win one — so we never cap your active pipeline.
+                  Instead, the metered resource is AI document generation, which carries real infrastructure cost.
+                  Need more? Upgrade anytime or top up credits.
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold text-amber-700">AI Tender Writer & bid evaluation.</span>{" "}
+                  The AI reads every submitted bid's documents, scores them on compliance, technical quality,
+                  and completeness, and recommends the best-qualified winner. Upgrade to unlock more AI Tender Writer
+                  generations and advanced bid evaluation features.
+                </>
+              )}
             </p>
           </div>
         </Reveal>

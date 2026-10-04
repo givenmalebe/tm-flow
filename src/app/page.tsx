@@ -51,6 +51,7 @@ export default function Home() {
 
   return (
     <LandingPage
+      onViewTenders={() => setView("tenders")}
       onGetStarted={() => {
         setAuthMode("signup");
         setView("auth");

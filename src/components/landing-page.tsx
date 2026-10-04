@@ -61,6 +61,7 @@ import { cn } from "@/lib/utils";
 interface LandingPageProps {
   onGetStarted: () => void;
   onSignIn: () => void;
+  onViewTenders?: () => void;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -271,7 +272,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
-function NavBar({ onGetStarted, onSignIn }: LandingPageProps) {
+function NavBar({ onGetStarted, onSignIn, onViewTenders }: LandingPageProps) {
   const [scrolled, setScrolled] = React.useState(false);
   const [open, setOpen] = React.useState(false);
 
@@ -294,7 +295,16 @@ function NavBar({ onGetStarted, onSignIn }: LandingPageProps) {
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <Logo />
 
-        <div className="hidden md:flex items-center gap-8">
+        <div className="hidden md:flex items-center gap-6">
+          {onViewTenders && (
+            <button
+              onClick={onViewTenders}
+              className="text-sm font-semibold text-amber-700 hover:text-amber-800 dark:text-amber-500 dark:hover:text-amber-400 transition-colors flex items-center gap-1"
+            >
+              <FileText className="size-4" />
+              Tenders
+            </button>
+          )}
           <NavLinks />
         </div>
 
@@ -326,6 +336,15 @@ function NavBar({ onGetStarted, onSignIn }: LandingPageProps) {
                 </SheetClose>
               </div>
               <div className="flex flex-col gap-6 p-4">
+                {onViewTenders && (
+                  <button
+                    onClick={() => { setOpen(false); onViewTenders(); }}
+                    className="text-sm font-semibold text-amber-700 hover:text-amber-800 dark:text-amber-500 dark:hover:text-amber-400 transition-colors flex items-center gap-1.5"
+                  >
+                    <FileText className="size-4" />
+                    Tenders
+                  </button>
+                )}
                 <NavLinks onNavigate={() => setOpen(false)} />
                 <div className="flex flex-col gap-2">
                   <Button variant="outline" onClick={() => { setOpen(false); onSignIn(); }}>
@@ -1579,10 +1598,10 @@ function Footer() {
 /*  Page                                                                         */
 /* -------------------------------------------------------------------------- */
 
-export function LandingPage({ onGetStarted, onSignIn }: LandingPageProps) {
+export function LandingPage({ onGetStarted, onSignIn, onViewTenders }: LandingPageProps) {
   return (
     <div className="flex min-h-screen flex-col bg-background">
-      <NavBar onGetStarted={onGetStarted} onSignIn={onSignIn} />
+      <NavBar onGetStarted={onGetStarted} onSignIn={onSignIn} onViewTenders={onViewTenders} />
       <main className="flex-1">
         <Hero onGetStarted={onGetStarted} onSignIn={onSignIn} />
         <StatsBar />

@@ -22,7 +22,9 @@ from database import (
     Base, engine, get_db, init_db, SessionLocal,
     User, Tender, TenderDocument, ChecklistItem, LibraryDocument,
     Briefing, PricingVersion, Submission, Communication, Addendum, ReminderSetting,
-    CompanyProfile, GeneratedDocument
+    CompanyProfile, GeneratedDocument,
+    IssuerCompany, CompanyMember, IssuedTender, Bid, BidDocument,
+    BidderCompany, BidderMember
 )
 from auth import (
     hash_password, verify_password, create_access_token, get_current_user
@@ -722,6 +724,17 @@ def list_tenders(
     user: User = Depends(get_current_user),
 ):
     q = db.query(Tender)
+    # Company-aware: show tenders from all members of the same bidder company
+    bidder_member = db.query(BidderMember).filter(
+        BidderMember.user_id == user.id,
+        BidderMember.status == "approved"
+    ).first()
+    if bidder_member:
+        member_ids = _get_company_member_ids(db, bidder_member.company_id)
+        q = q.filter(Tender.created_by.in_(member_ids))
+    else:
+        # No company membership — show only own tenders
+        q = q.filter(Tender.created_by == user.id)
     # Text search across multiple fields
     if search:
         like = f"%{search}%"
@@ -1395,6 +1408,16 @@ def list_library(
     user: User = Depends(get_current_user),
 ):
     q = db.query(LibraryDocument)
+    # Company-aware: show library docs from all members of the same bidder company
+    bidder_member = db.query(BidderMember).filter(
+        BidderMember.user_id == user.id,
+        BidderMember.status == "approved"
+    ).first()
+    if bidder_member:
+        member_ids = _get_company_member_ids(db, bidder_member.company_id)
+        q = q.filter(LibraryDocument.created_by.in_(member_ids))
+    else:
+        q = q.filter(LibraryDocument.created_by == user.id)
     if category:
         q = q.filter(LibraryDocument.category == category)
     if search:
@@ -3350,6 +3373,239 @@ def get_deadlines(db: Session = Depends(get_db), user: User = Depends(get_curren
 @app.get("/api/health")
 def health():
     return {"status": "ok", "service": "tenderflow-api", "version": "1.0.0"}
+
+
+# ============================================================
+# BIDDER COMPANY — team management for applicants
+# ============================================================
+
+def _get_bidder_membership(db: Session, user: User):
+    """Return (company, member) for the user's bidder company, or raise 403."""
+    member = db.query(BidderMember).filter(
+        BidderMember.user_id == user.id,
+        BidderMember.status == "approved"
+    ).first()
+    if not member:
+        raise HTTPException(status_code=403, detail="You are not a member of any bidder company. Ask your company admin to approve your registration.")
+    company = db.query(BidderCompany).filter(BidderCompany.id == member.company_id).first()
+    return company, member
+
+
+def _get_company_member_ids(db: Session, company_id: int):
+    """Get all approved member user_ids for a bidder company."""
+    members = db.query(BidderMember).filter(
+        BidderMember.company_id == company_id,
+        BidderMember.status == "approved"
+    ).all()
+    return [m.user_id for m in members]
+
+
+@app.post("/api/bidder/register-company")
+def bidder_register_company(
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Create a new bidder company. The registering user becomes the admin."""
+    if user.account_type == "issuer":
+        raise HTTPException(status_code=400, detail="Issuer accounts cannot create bidder companies.")
+    existing = db.query(BidderMember).filter(
+        BidderMember.user_id == user.id,
+        BidderMember.status == "approved"
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="You are already a member of a bidder company.")
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Company name is required")
+    company = BidderCompany(
+        name=name,
+        description=payload.get("description"),
+        industry=payload.get("industry"),
+        phone=payload.get("phone"),
+        email=payload.get("email"),
+        created_by=user.id,
+    )
+    db.add(company)
+    db.commit()
+    db.refresh(company)
+    member = BidderMember(
+        company_id=company.id,
+        user_id=user.id,
+        role="admin",
+        status="approved",
+        approved_at=datetime.utcnow(),
+    )
+    db.add(member)
+    user.onboarding_completed = True
+    if not user.company_name:
+        user.company_name = company.name
+    db.commit()
+    db.refresh(company)
+    return {
+        "id": company.id,
+        "name": company.name,
+        "description": company.description,
+        "industry": company.industry,
+        "member_count": 1,
+    }
+
+
+@app.post("/api/bidder/join-company")
+def bidder_join_company(
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Request to join an existing bidder company by name."""
+    company_name = (payload.get("company_name") or "").strip()
+    if not company_name:
+        raise HTTPException(status_code=400, detail="company_name is required")
+    company = db.query(BidderCompany).filter(
+        BidderCompany.name.ilike(f"%{company_name}%")
+    ).first()
+    if not company:
+        raise HTTPException(status_code=404, detail=f"No bidder company found matching '{company_name}'.")
+    existing = db.query(BidderMember).filter(
+        BidderMember.company_id == company.id,
+        BidderMember.user_id == user.id
+    ).first()
+    if existing:
+        return {"message": f"Already requested to join {company.name}", "status": existing.status}
+    member = BidderMember(
+        company_id=company.id,
+        user_id=user.id,
+        role="member",
+        status="pending",
+        job_title=payload.get("job_title"),
+    )
+    db.add(member)
+    db.commit()
+    db.refresh(member)
+    return {"message": f"Join request submitted for {company.name}. An admin must approve your access.", "status": "pending"}
+
+
+@app.get("/api/bidder/company")
+def bidder_get_company(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get the bidder company the current user belongs to."""
+    company, member = _get_bidder_membership(db, user)
+    member_count = db.query(BidderMember).filter(
+        BidderMember.company_id == company.id,
+        BidderMember.status == "approved"
+    ).count()
+    return {
+        "id": company.id,
+        "name": company.name,
+        "description": company.description,
+        "industry": company.industry,
+        "phone": company.phone,
+        "email": company.email,
+        "member_count": member_count,
+        "your_role": member.role,
+    }
+
+
+@app.get("/api/bidder/members")
+def bidder_list_members(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List all members (and pending requests) for the bidder company."""
+    company, member = _get_bidder_membership(db, user)
+    members = db.query(BidderMember).filter(
+        BidderMember.company_id == company.id
+    ).order_by(BidderMember.joined_at.desc()).all()
+    result = []
+    for m in members:
+        u = db.query(User).filter(User.id == m.user_id).first()
+        result.append({
+            "id": m.id,
+            "user_id": m.user_id,
+            "email": u.email if u else None,
+            "full_name": u.full_name if u else None,
+            "role": m.role,
+            "status": m.status,
+            "job_title": m.job_title,
+            "joined_at": m.joined_at.isoformat() if m.joined_at else None,
+            "approved_at": m.approved_at.isoformat() if m.approved_at else None,
+        })
+    return {"items": result}
+
+
+@app.put("/api/bidder/members/{member_id}")
+def bidder_update_member(
+    member_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Approve or reject a pending member (admin only)."""
+    company, member = _get_bidder_membership(db, user)
+    if member.role != "admin":
+        raise HTTPException(status_code=403, detail="Only company admins can approve members.")
+    target = db.query(BidderMember).filter(
+        BidderMember.id == member_id,
+        BidderMember.company_id == company.id
+    ).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Member not found")
+    target.status = payload.get("status", target.status)
+    if payload.get("status") == "approved":
+        target.approved_at = datetime.utcnow()
+        u = db.query(User).filter(User.id == target.user_id).first()
+        if u:
+            u.onboarding_completed = True
+            if not u.company_name:
+                u.company_name = company.name
+    db.commit()
+    db.refresh(target)
+    u = db.query(User).filter(User.id == target.user_id).first()
+    return {
+        "id": target.id,
+        "email": u.email if u else None,
+        "full_name": u.full_name if u else None,
+        "role": target.role,
+        "status": target.status,
+    }
+
+
+@app.delete("/api/bidder/members/{member_id}")
+def bidder_remove_member(
+    member_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Remove a member from the bidder company (admin only)."""
+    company, member = _get_bidder_membership(db, user)
+    if member.role != "admin":
+        raise HTTPException(status_code=403, detail="Only company admins can remove members.")
+    target = db.query(BidderMember).filter(
+        BidderMember.id == member_id,
+        BidderMember.company_id == company.id
+    ).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Member not found")
+    if target.role == "admin" and target.user_id == user.id:
+        raise HTTPException(status_code=400, detail="You cannot remove yourself.")
+    db.delete(target)
+    db.commit()
+    return {"deleted": True, "id": member_id}
+
+
+@app.get("/api/bidder/companies/search")
+def bidder_search_companies(
+    q: str = "",
+    db: Session = Depends(get_db),
+):
+    """Search for bidder companies by name (for the join flow)."""
+    query = db.query(BidderCompany)
+    if q:
+        query = query.filter(BidderCompany.name.ilike(f"%{q}%"))
+    companies = query.order_by(BidderCompany.name.asc()).limit(20).all()
+    return {"items": [{"id": c.id, "name": c.name, "industry": c.industry} for c in companies]}
 
 
 if __name__ == "__main__":

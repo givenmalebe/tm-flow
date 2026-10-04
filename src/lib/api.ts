@@ -670,3 +670,61 @@ export const CHECKLIST_STATUSES = [
   "Expired",
   "Not Applicable",
 ];
+
+// ============================================================
+// PUBLIC TENDER BOARD — for applicants to browse and bid
+// ============================================================
+
+export const publicApi = {
+  async listTenders(params: { category?: string; q?: string } = {}) {
+    const qs = new URLSearchParams();
+    if (params.category) qs.append("category", params.category);
+    if (params.q) qs.append("q", params.q);
+    const q = qs.toString();
+    return request<{ items: any[]; total: number }>(`/public/tenders${q ? "?" + q : ""}`, { skipAuth: true });
+  },
+  async getTender(id: number) {
+    return request<any>(`/public/tenders/${id}`, { skipAuth: true });
+  },
+  async submitBid(tenderId: number, formData: FormData) {
+    return request<any>(`/public/tenders/${tenderId}/submit-bid`, {
+      method: "POST",
+      body: formData,
+      isForm: true,
+    });
+  },
+  async listCategories() {
+    return request<{ items: string[] }>(`/public/categories`, { skipAuth: true });
+  },
+  async complianceCheck(tenderId: number) {
+    return request<any>(`/public/tenders/${tenderId}/compliance-check`, { method: "POST" });
+  },
+};
+
+// ============================================================
+// BIDDER COMPANY — team management for applicants
+// ============================================================
+
+export const bidderApi = {
+  async registerCompany(payload: { name: string; description?: string; industry?: string; phone?: string; email?: string }) {
+    return request<any>("/bidder/register-company", { method: "POST", body: payload });
+  },
+  async joinCompany(company_name: string, job_title?: string) {
+    return request<any>("/bidder/join-company", { method: "POST", body: { company_name, job_title } });
+  },
+  async getCompany() {
+    return request<any>("/bidder/company");
+  },
+  async listMembers() {
+    return request<{ items: any[] }>("/bidder/members");
+  },
+  async updateMember(memberId: number, status: "approved" | "rejected") {
+    return request<any>(`/bidder/members/${memberId}`, { method: "PUT", body: { status } });
+  },
+  async removeMember(memberId: number) {
+    return request<any>(`/bidder/members/${memberId}`, { method: "DELETE" });
+  },
+  async searchCompanies(q: string) {
+    return request<{ items: any[] }>(`/bidder/companies/search?q=${encodeURIComponent(q)}`);
+  },
+};

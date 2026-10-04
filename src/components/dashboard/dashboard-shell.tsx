@@ -22,6 +22,7 @@ import {
   FileSignature,
   CalendarClock,
   ClipboardCheck,
+  Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +54,7 @@ import { DiscoverTab } from "./tabs/discover-tab";
 import { ReaderTab } from "./tabs/reader-tab";
 import { LibraryTab } from "./tabs/library-tab";
 import { CompanyTab } from "./tabs/company-tab";
+import { TeamTab } from "./tabs/team-tab";
 import { DeadlinesTab } from "./tabs/deadlines-tab";
 import { BriefingsTab } from "./tabs/briefings-tab";
 import { PricingTab } from "./tabs/pricing-tab";
@@ -78,6 +80,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "deadlines", label: "Deadlines", icon: CalendarClock, description: "Track & remind" },
   { id: "library", label: "Compliance Library", icon: FolderCheck, description: "Company documents" },
   { id: "company", label: "Company Profile", icon: Building, description: "Branding & letterhead" },
+  { id: "team", label: "Team", icon: Users, description: "Manage team members" },
   { id: "submissions", label: "Submissions", icon: Send, description: "Submitted tenders" },
   { id: "assistant", label: "AI Assistant", icon: Bot, description: "Ask about tenders" },
 ];
@@ -351,6 +354,7 @@ export function DashboardShell() {
             {activeTab === "deadlines" && <DeadlinesTab />}
             {activeTab === "library" && <LibraryTab />}
             {activeTab === "company" && <CompanyTab />}
+            {activeTab === "team" && <TeamTab />}
             {activeTab === "submissions" && <SubmissionsTab />}
             {activeTab === "assistant" && <AssistantTab />}
           </div>

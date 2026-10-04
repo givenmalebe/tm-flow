@@ -47,6 +47,7 @@ class User(Base):
     company_name = Column(String(255), nullable=True)
     hashed_password = Column(String(255), nullable=False)
     role = Column(String(50), default="admin")  # admin / user
+    account_type = Column(String(50), default="applicant")  # applicant / issuer
     onboarding_completed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -279,6 +280,147 @@ class GeneratedDocument(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     tender = relationship("Tender", back_populates="generated_documents")
 
+
+# ============================================================
+# ISSUER PORTAL MODELS — for tender-issuing organisations
+# ============================================================
+
+class IssuerCompany(Base):
+    """A company that issues tenders (the buyer/procurement side). Multi-tenant root."""
+    __tablename__ = "issuer_companies"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(500), nullable=False, index=True)
+    registration_number = Column(String(100), nullable=True)
+    description = Column(Text, nullable=True)
+    industry = Column(String(255), nullable=True)
+    address = Column(Text, nullable=True)
+    phone = Column(String(100), nullable=True)
+    email = Column(String(255), nullable=True)
+    website = Column(String(255), nullable=True)
+    logo_path = Column(String(1000), nullable=True)
+    primary_color = Column(String(20), default="#0f766e")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    members = relationship("CompanyMember", back_populates="company", cascade="all, delete-orphan")
+    tenders = relationship("IssuedTender", back_populates="company", cascade="all, delete-orphan")
+
+
+class CompanyMember(Base):
+    """Users belonging to an issuer company (multi-tenant membership with approval)."""
+    __tablename__ = "company_members"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("issuer_companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    role = Column(String(50), default="member")
+    status = Column(String(50), default="pending")
+    job_title = Column(String(255), nullable=True)
+    joined_at = Column(DateTime, default=datetime.utcnow)
+    approved_at = Column(DateTime, nullable=True)
+    company = relationship("IssuerCompany", back_populates="members")
+
+
+class IssuedTender(Base):
+    """A tender published by an issuer company for bidding."""
+    __tablename__ = "issued_tenders"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("issuer_companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    reference_number = Column(String(255), nullable=False)
+    title = Column(String(500), nullable=False)
+    description = Column(Text, nullable=True)
+    scope_of_work = Column(Text, nullable=True)
+    category = Column(String(255), nullable=True)
+    location = Column(String(500), nullable=True)
+    issue_date = Column(Date, nullable=True)
+    closing_date = Column(Date, nullable=True)
+    closing_time = Column(Time, nullable=True)
+    budget = Column(Float, nullable=True)
+    contract_period = Column(String(255), nullable=True)
+    evaluation_criteria = Column(Text, nullable=True)
+    submission_method = Column(String(500), nullable=True)
+    contact_person = Column(String(255), nullable=True)
+    contact_email = Column(String(255), nullable=True)
+    contact_phone = Column(String(100), nullable=True)
+    status = Column(String(50), default="Open", index=True)
+    is_published = Column(Boolean, default=False, index=True)
+    ai_generated_content = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    company = relationship("IssuerCompany", back_populates="tenders")
+    bids = relationship("Bid", back_populates="tender", cascade="all, delete-orphan")
+
+
+class Bid(Base):
+    """A bid submitted by a bidder company for an issued tender."""
+    __tablename__ = "bids"
+    id = Column(Integer, primary_key=True, index=True)
+    tender_id = Column(Integer, ForeignKey("issued_tenders.id", ondelete="CASCADE"), nullable=False, index=True)
+    bidder_company_name = Column(String(500), nullable=False)
+    bidder_email = Column(String(255), nullable=True)
+    bidder_contact_person = Column(String(255), nullable=True)
+    bidder_phone = Column(String(100), nullable=True)
+    bidder_bbbee_level = Column(String(50), nullable=True)
+    total_amount = Column(Float, nullable=False)
+    proposal_summary = Column(Text, nullable=True)
+    technical_score = Column(Float, nullable=True)
+    financial_score = Column(Float, nullable=True)
+    status = Column(String(50), default="Pending", index=True)
+    submitted_at = Column(DateTime, default=datetime.utcnow)
+    reviewed_at = Column(DateTime, nullable=True)
+    reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    notes = Column(Text, nullable=True)
+    ai_review = Column(Text, nullable=True)
+    ai_reviewed_at = Column(DateTime, nullable=True)
+    tender = relationship("IssuedTender", back_populates="bids")
+    documents = relationship("BidDocument", back_populates="bid", cascade="all, delete-orphan")
+
+
+class BidDocument(Base):
+    """Documents submitted as part of a bid."""
+    __tablename__ = "bid_documents"
+    id = Column(Integer, primary_key=True, index=True)
+    bid_id = Column(Integer, ForeignKey("bids.id", ondelete="CASCADE"), nullable=False, index=True)
+    doc_type = Column(String(255), nullable=True)
+    filename = Column(String(500), nullable=False)
+    original_filename = Column(String(500), nullable=False)
+    file_path = Column(String(1000), nullable=False)
+    file_type = Column(String(100), nullable=True)
+    file_size = Column(Integer, nullable=True)
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    bid = relationship("Bid", back_populates="documents")
+
+
+# ============================================================
+# BIDDER COMPANY MODELS — for applicant team management
+# ============================================================
+
+class BidderCompany(Base):
+    """A company that bids on tenders (the applicant side). Multi-tenant root for bidders."""
+    __tablename__ = "bidder_companies"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(500), nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    industry = Column(String(255), nullable=True)
+    phone = Column(String(100), nullable=True)
+    email = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    members = relationship("BidderMember", back_populates="company", cascade="all, delete-orphan")
+
+
+class BidderMember(Base):
+    """Users belonging to a bidder company (with admin approval workflow)."""
+    __tablename__ = "bidder_members"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("bidder_companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    role = Column(String(50), default="member")  # admin / member
+    status = Column(String(50), default="pending")  # pending / approved / rejected
+    job_title = Column(String(255), nullable=True)
+    joined_at = Column(DateTime, default=datetime.utcnow)
+    approved_at = Column(DateTime, nullable=True)
+    company = relationship("BidderCompany", back_populates="members")
 
 
 def init_db():

@@ -470,37 +470,51 @@ function Hero({ onGetStarted }: LandingPageProps) {
       id="top"
       className="relative isolate overflow-hidden border-b bg-background"
     >
-      {/* animated gradient mesh background */}
+      {/* Background video */}
+      <video
+        autoPlay
+        loop
+        muted
+        playsInline
+        className="absolute inset-0 z-0 h-full w-full object-cover"
+        style={{ filter: "brightness(0.35)" }}
+      >
+        <source src="/hero-video.mp4" type="video/mp4" />
+      </video>
+      {/* Dark overlay for text readability */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 z-0 bg-gradient-to-br from-background/80 via-background/60 to-background/80"
+      />
+      {/* emerald tint overlay */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 z-0"
         style={{
           background:
-            "linear-gradient(135deg, rgba(16,185,129,0.12) 0%, rgba(20,184,166,0.10) 25%, rgba(16,185,129,0.06) 50%, rgba(13,148,136,0.10) 75%, rgba(16,185,129,0.08) 100%)",
-          backgroundSize: "400% 400%",
-          animation: "tf-hero-gradient 12s ease infinite",
+            "linear-gradient(135deg, rgba(16,185,129,0.15) 0%, rgba(20,184,166,0.10) 50%, rgba(13,148,136,0.12) 100%)",
         }}
       />
       {/* animated floating orbs */}
       <motion.div
         aria-hidden
-        className="pointer-events-none absolute -top-20 left-[10%] z-0 h-72 w-72 rounded-full bg-emerald-400/30 blur-3xl"
+        className="pointer-events-none absolute -top-20 left-[10%] z-0 h-72 w-72 rounded-full bg-emerald-400/20 blur-3xl"
         animate={{
           x: [0, 40, 0],
           y: [0, 30, 0],
           scale: [1, 1.15, 1],
-          opacity: [0.4, 0.6, 0.4],
+          opacity: [0.3, 0.5, 0.3],
         }}
         transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
       />
       <motion.div
         aria-hidden
-        className="pointer-events-none absolute top-10 right-[15%] z-0 h-96 w-96 rounded-full bg-teal-400/25 blur-3xl"
+        className="pointer-events-none absolute top-10 right-[15%] z-0 h-96 w-96 rounded-full bg-teal-400/15 blur-3xl"
         animate={{
           x: [0, -50, 0],
           y: [0, 40, 0],
           scale: [1, 1.2, 1],
-          opacity: [0.3, 0.5, 0.3],
+          opacity: [0.2, 0.4, 0.2],
         }}
         transition={{ duration: 10, repeat: Infinity, ease: "easeInOut", delay: 1 }}
       />
@@ -515,36 +529,6 @@ function Hero({ onGetStarted }: LandingPageProps) {
         }}
         transition={{ duration: 14, repeat: Infinity, ease: "easeInOut", delay: 2 }}
       />
-      {/* dot grid overlay */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 z-0 opacity-40"
-        style={{
-          backgroundImage:
-            "radial-gradient(circle at 1px 1px, rgba(16,185,129,0.25) 1px, transparent 0)",
-          backgroundSize: "24px 24px",
-          maskImage:
-            "radial-gradient(ellipse 80% 60% at 50% 0%, #000 40%, transparent 100%)",
-          WebkitMaskImage:
-            "radial-gradient(ellipse 80% 60% at 50% 0%, #000 40%, transparent 100%)",
-        }}
-      />
-      {/* animated sweeping light beam */}
-      <motion.div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
-      >
-        <motion.div
-          className="absolute top-0 -left-1/2 h-full w-1/2"
-          style={{
-            background:
-              "linear-gradient(90deg, transparent 0%, rgba(16,185,129,0.08) 45%, rgba(20,184,166,0.15) 50%, rgba(16,185,129,0.08) 55%, transparent 100%)",
-            filter: "blur(12px)",
-          }}
-          animate={{ x: ["0%", "300%"] }}
-          transition={{ duration: 8, repeat: Infinity, ease: "easeInOut", repeatDelay: 3 }}
-        />
-      </motion.div>
 
       <div className="relative z-10 mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-28">
         <div className="grid items-center gap-12 lg:grid-cols-2">

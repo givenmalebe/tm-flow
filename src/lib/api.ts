@@ -574,6 +574,20 @@ export const api = {
     });
   },
 
+  async updateGeneratedDocument(tenderId: number, docId: number, payload: { title?: string; content?: string }) {
+    return request<any>(`/tenders/${tenderId}/documents/generated/${docId}`, {
+      method: "PUT",
+      body: payload,
+    });
+  },
+
+  async generateDocumentByPrompt(tenderId: number, prompt: string, title?: string) {
+    return request<any>(`/tenders/${tenderId}/documents/generate-by-prompt`, {
+      method: "POST",
+      body: { prompt, title },
+    });
+  },
+
   async listDocumentTypes() {
     return request<{ types: any[] }>(`/document-types`);
   },

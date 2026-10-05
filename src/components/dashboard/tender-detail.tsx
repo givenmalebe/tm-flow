@@ -2498,6 +2498,9 @@ function ChangeList({ title, items, color }: { title: string; items: string[]; c
 // ============== AI Section ==============
 function AISection({ tender, onChanged }: { tender: any; onChanged: () => void }) {
   const [generatingSummary, setGeneratingSummary] = useState(false);
+  const [prompt, setPrompt] = useState("");
+  const [docTitle, setDocTitle] = useState("");
+  const [generatingDoc, setGeneratingDoc] = useState(false);
 
   const handleGenerateSummary = async () => {
     setGeneratingSummary(true);
@@ -2513,10 +2516,114 @@ function AISection({ tender, onChanged }: { tender: any; onChanged: () => void }
     }
   };
 
+  const handleGenerateDocument = async () => {
+    if (!prompt.trim()) {
+      toast.error("Please enter a prompt describing what document you need");
+      return;
+    }
+    setGeneratingDoc(true);
+    toast.info("AI is generating your document…", {
+      description: "This uses full tender context — may take 20-30 seconds.",
+    });
+    try {
+      const result = await api.generateDocumentByPrompt(tender.id, prompt.trim(), docTitle.trim() || undefined);
+      toast.success("Document generated!", {
+        description: "Find it in the Documents tab to view, edit, or download.",
+      });
+      setPrompt("");
+      setDocTitle("");
+      onChanged();
+    } catch (e: any) {
+      toast.error("Generation failed", { description: e.message });
+    } finally {
+      setGeneratingDoc(false);
+    }
+  };
+
   const extracted = tender.ai_extracted_info;
+  const hasContext = !!extracted || !!tender.ai_summary || (tender.checklist_items?.length || 0) > 0;
 
   return (
     <div className="space-y-4">
+      {/* AI Document Generator (prompt-based) */}
+      <Card className="border-violet-200 dark:border-violet-800">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-violet-600" />
+            AI Document Generator
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Describe any document you need and the AI will generate it with full knowledge of this tender, your company, checklist progress, and uploaded documents.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {/* Context indicator */}
+          <div className="flex flex-wrap gap-2 text-[11px]">
+            <Badge variant="outline" className={cn("border-violet-200", hasContext ? "bg-violet-50 text-violet-700 dark:bg-violet-950/30 dark:text-violet-400" : "bg-muted")}>
+              {extracted ? "✓ AI extraction" : "No AI extraction"}
+            </Badge>
+            <Badge variant="outline" className={cn("border-violet-200", tender.ai_summary ? "bg-violet-50 text-violet-700 dark:bg-violet-950/30 dark:text-violet-400" : "bg-muted")}>
+              {tender.ai_summary ? "✓ AI summary" : "No summary"}
+            </Badge>
+            <Badge variant="outline" className={cn("border-violet-200", (tender.checklist_items?.length || 0) > 0 ? "bg-violet-50 text-violet-700 dark:bg-violet-950/30 dark:text-violet-400" : "bg-muted")}>
+              {tender.checklist_items?.length || 0} checklist items
+            </Badge>
+            <Badge variant="outline" className={cn("border-violet-200", (tender.generated_documents?.length || 0) > 0 ? "bg-violet-50 text-violet-700 dark:bg-violet-950/30 dark:text-violet-400" : "bg-muted")}>
+              {tender.generated_documents?.length || 0} generated docs
+            </Badge>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">Document title (optional)</Label>
+            <Input
+              value={docTitle}
+              onChange={(e) => setDocTitle(e.target.value)}
+              placeholder="e.g. Method Statement, Cover Letter, Risk Assessment…"
+              className="h-8 text-sm"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">What document do you need?</Label>
+            <Textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              rows={3}
+              placeholder="e.g. Write a detailed method statement for providing security guarding services, including deployment plan, supervision structure, and incident response procedures."
+              className="text-sm"
+            />
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              "Cover letter for this tender submission",
+              "Method statement with deployment plan",
+              "Risk assessment with mitigation strategies",
+              "Implementation plan with timeline",
+              "Technical proposal addressing evaluation criteria",
+              "Company profile highlighting relevant experience",
+            ].map((s) => (
+              <button
+                key={s}
+                onClick={() => setPrompt(s)}
+                className="text-[11px] px-2 py-1 rounded-md border border-violet-200 text-violet-700 hover:bg-violet-50 dark:hover:bg-violet-950/30 transition-colors"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+          <Button
+            onClick={handleGenerateDocument}
+            disabled={generatingDoc || !prompt.trim()}
+            className="w-full bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white"
+          >
+            {generatingDoc ? (
+              <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating (20-30s)…</>
+            ) : (
+              <><Sparkles className="h-4 w-4 mr-2" /> Generate Document</>
+            )}
+          </Button>
+        </CardContent>
+      </Card>
+
       {/* AI Extracted Info */}
       <Card>
         <CardHeader className="pb-3">
@@ -2785,6 +2892,10 @@ function GeneratedDocumentsSection({ tender, onChanged }: { tender: any; onChang
   const [smartDocs, setSmartDocs] = useState<any[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzed, setAnalyzed] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editContent, setEditContent] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
 
   useEffect(() => {
     setGenerated(tender.generated_documents || []);
@@ -2874,6 +2985,38 @@ function GeneratedDocumentsSection({ tender, onChanged }: { tender: any; onChang
       toast.error(e.message || "Analysis failed");
     } finally {
       setAnalyzing(false);
+    }
+  };
+
+  const handleStartEdit = () => {
+    if (viewing) {
+      setEditTitle(viewing.title || "");
+      setEditContent(viewing.content || "");
+      setEditing(true);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditing(false);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!viewing) return;
+    setSavingEdit(true);
+    try {
+      const updated = await api.updateGeneratedDocument(tender.id, viewing.id, {
+        title: editTitle,
+        content: editContent,
+      });
+      setGenerated((arr) => arr.map((d) => d.id === viewing.id ? { ...d, title: editTitle, content: editContent } : d));
+      setViewing({ ...viewing, title: editTitle, content: editContent });
+      setEditing(false);
+      toast.success("Document saved");
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || "Save failed");
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -3019,31 +3162,71 @@ function GeneratedDocumentsSection({ tender, onChanged }: { tender: any; onChang
       )}
 
       {/* Document viewer dialog */}
-      <Dialog open={!!viewing} onOpenChange={(o) => !o && setViewing(null)}>
+      <Dialog open={!!viewing} onOpenChange={(o) => { if (!o) { setViewing(null); setEditing(false); } }}>
         <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileSignature className="h-5 w-5 text-primary" />
-              {viewing?.title}
+              {editing ? (
+                <Input
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  className="h-8 text-base font-semibold"
+                />
+              ) : (
+                viewing?.title
+              )}
             </DialogTitle>
           </DialogHeader>
           <div className="flex items-center gap-2 pb-2 border-b">
-            <Button variant="outline" size="sm" onClick={handleCopy}>
-              {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
-              {copied ? "Copied" : "Copy"}
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleDownload}>
-              <Download className="h-3.5 w-3.5" />
-              Download
-            </Button>
-            <Badge variant="outline" className="text-xs ml-auto">
-              {Math.round((viewing?.content?.length || 0) / 1000)}K chars
-            </Badge>
+            {editing ? (
+              <>
+                <Button size="sm" onClick={handleSaveEdit} disabled={savingEdit} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                  {savingEdit ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                  {savingEdit ? "Saving…" : "Save"}
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleCancelEdit} disabled={savingEdit}>
+                  <X className="h-3.5 w-3.5" />
+                  Cancel
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="outline" size="sm" onClick={handleStartEdit}>
+                  <Pencil className="h-3.5 w-3.5" />
+                  Edit
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleCopy}>
+                  {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copied ? "Copied" : "Copy"}
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleDownload}>
+                  <Download className="h-3.5 w-3.5" />
+                  Download
+                </Button>
+                <Button variant="outline" size="sm" className="text-rose-600 hover:bg-rose-50" onClick={() => { if (viewing) handleDelete(viewing.id); }}>
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete
+                </Button>
+                <Badge variant="outline" className="text-xs ml-auto">
+                  {Math.round((viewing?.content?.length || 0) / 1000)}K chars
+                </Badge>
+              </>
+            )}
           </div>
           <div className="flex-1 overflow-y-auto scrollbar-thin">
-            <pre className="text-xs whitespace-pre-wrap font-mono bg-muted/30 rounded-lg p-4">
-              {viewing?.content}
-            </pre>
+            {editing ? (
+              <Textarea
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+                className="w-full h-[60vh] text-xs font-mono resize-none"
+                placeholder="Edit document content…"
+              />
+            ) : (
+              <pre className="text-xs whitespace-pre-wrap font-mono bg-muted/30 rounded-lg p-4">
+                {viewing?.content}
+              </pre>
+            )}
           </div>
         </DialogContent>
       </Dialog>

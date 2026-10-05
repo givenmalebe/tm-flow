@@ -2859,6 +2859,122 @@ def delete_generated_document(tender_id: int, doc_id: int, db: Session = Depends
     return {"deleted": True}
 
 
+@app.put("/api/tenders/{tender_id}/documents/generated/{doc_id}")
+def update_generated_document(
+    tender_id: int,
+    doc_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Edit a generated document (title + content)."""
+    doc = db.query(GeneratedDocument).filter(
+        GeneratedDocument.id == doc_id,
+        GeneratedDocument.tender_id == tender_id,
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if "title" in payload:
+        doc.title = payload["title"]
+    if "content" in payload:
+        doc.content = payload["content"]
+    if "doc_type" in payload:
+        doc.doc_type = payload["doc_type"]
+    doc.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(doc)
+    return {
+        "id": doc.id, "doc_type": doc.doc_type, "title": doc.title,
+        "content": doc.content,
+        "created_at": doc.created_at.isoformat() if doc.created_at else None,
+        "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+    }
+
+
+@app.post("/api/tenders/{tender_id}/documents/generate-by-prompt")
+def generate_document_by_prompt_endpoint(
+    tender_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Generate any document via a natural-language prompt. The AI has full context
+    of the tender, extracted info, company profile, checklist, and existing documents."""
+    prompt = (payload.get("prompt") or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="A prompt is required.")
+    custom_title = (payload.get("title") or "").strip() or "Custom Document"
+
+    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not tender:
+        raise HTTPException(status_code=404, detail="Tender not found")
+
+    # Get company profile
+    profile = db.query(CompanyProfile).filter(CompanyProfile.user_id == user.id).first()
+    company = {
+        "company_name": profile.company_name if profile else (user.company_name or user.full_name),
+        "registration_number": profile.registration_number if profile else None,
+        "bbbbee_level": profile.bbbbee_level if profile else None,
+        "email": profile.email if profile else user.email,
+        "phone": profile.phone if profile else None,
+    }
+
+    tender_data = {
+        "reference_number": tender.reference_number,
+        "title": tender.title,
+        "client_company": tender.client_company,
+        "location_site": tender.location_site,
+        "contract_period": tender.contract_period,
+        "scope_of_work": tender.scope_of_work,
+        "description": tender.description,
+        "estimated_value": tender.estimated_value,
+        "submission_method": tender.submission_method,
+    }
+    extracted = tender.ai_extracted_info or {}
+
+    # Gather all context: checklist, generated docs, library docs
+    checklist_items = [
+        {"name": c.name, "status": c.status, "category": c.category}
+        for c in db.query(ChecklistItem).filter(ChecklistItem.tender_id == tender_id).all()
+    ]
+    generated_docs = [
+        {"doc_type": g.doc_type, "title": g.title}
+        for g in db.query(GeneratedDocument).filter(GeneratedDocument.tender_id == tender_id).all()
+    ]
+    library_docs = [
+        {"name": l.name, "category": l.category}
+        for l in db.query(LibraryDocument).filter(LibraryDocument.created_by == user.id).all()
+    ]
+
+    content = ai_module.generate_document_by_prompt(
+        prompt=prompt,
+        tender=tender_data,
+        extracted=extracted,
+        company=company,
+        checklist_items=checklist_items,
+        generated_docs=generated_docs,
+        library_docs=library_docs,
+        ai_summary=tender.ai_summary or "",
+    )
+
+    # Save as a custom document (doc_type = "custom")
+    new_doc = GeneratedDocument(
+        tender_id=tender_id,
+        doc_type="custom",
+        title=f"{custom_title} — {tender.reference_number}",
+        content=content,
+    )
+    db.add(new_doc)
+    db.commit()
+    db.refresh(new_doc)
+    return {
+        "id": new_doc.id, "doc_type": new_doc.doc_type, "title": new_doc.title,
+        "content": new_doc.content,
+        "created_at": new_doc.created_at.isoformat() if new_doc.created_at else None,
+        "updated_at": new_doc.updated_at.isoformat() if new_doc.updated_at else None,
+    }
+
+
 @app.get("/api/document-types")
 def list_document_types():
     """List all available AI document types that can be generated."""

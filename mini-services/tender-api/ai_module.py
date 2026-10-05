@@ -1828,3 +1828,90 @@ Respond with ONLY this JSON:
             "key_info": "",
             "reason": f"AI verification unavailable: {e}. Document accepted pending manual review.",
         }
+
+
+def generate_document_by_prompt(
+    prompt: str,
+    tender: Dict[str, Any],
+    extracted: Dict[str, Any],
+    company: Dict[str, Any],
+    checklist_items: List[Dict[str, Any]] = None,
+    generated_docs: List[Dict[str, Any]] = None,
+    library_docs: List[Dict[str, Any]] = None,
+    ai_summary: str = "",
+) -> str:
+    """Generate any document the user wants via a natural-language prompt.
+    The AI has full context of the tender, extracted info, company profile,
+    checklist items, previously generated documents, and library documents."""
+    system = (
+        "You are a professional tender bid writer for South African procurement. "
+        "You generate any document the user needs for their tender submission. "
+        "You have deep knowledge of PFMA, PPPFA, B-BBEE, SARS, CIPC, COIDA, PSIRA, CIDB, "
+        "and sector-specific requirements. You write professional, compliant, detailed documents."
+    )
+
+    # Build a rich context string from all available data
+    context_parts = []
+    context_parts.append(f"TENDER:\n  Reference: {tender.get('reference_number','')}\n  Title: {tender.get('title','')}\n  Client: {tender.get('client_company','')}\n  Location: {tender.get('location_site','')}\n  Contract Period: {tender.get('contract_period','')}\n  Estimated Value: R {tender.get('estimated_value',0):,.2f}" if tender.get('estimated_value') else f"  Estimated Value: Not specified")
+    if tender.get('scope_of_work'):
+        context_parts.append(f"  Scope of Work: {tender['scope_of_work'][:800]}")
+    if tender.get('description'):
+        context_parts.append(f"  Description: {tender['description'][:500]}")
+    if tender.get('submission_method'):
+        context_parts.append(f"  Submission Method: {tender['submission_method']}")
+    if ai_summary:
+        context_parts.append(f"  AI Summary: {ai_summary[:500]}")
+
+    if extracted and not extracted.get('_error'):
+        ex_parts = []
+        if extracted.get('scope_of_work'): ex_parts.append(f"Scope: {extracted['scope_of_work'][:400]}")
+        if extracted.get('mandatory_requirements'): ex_parts.append(f"Mandatory: {json.dumps(extracted['mandatory_requirements'][:5])}")
+        if extracted.get('functionality_requirements'): ex_parts.append(f"Functionality: {json.dumps(extracted['functionality_requirements'][:5])}")
+        if extracted.get('evaluation_criteria'): ex_parts.append(f"Evaluation: {json.dumps(extracted['evaluation_criteria'][:5])}")
+        if extracted.get('compulsory_documents'): ex_parts.append(f"Compulsory Docs: {json.dumps(extracted['compulsory_documents'][:8])}")
+        if ex_parts:
+            context_parts.append("AI EXTRACTED INFO:\n  " + "\n  ".join(ex_parts))
+
+    if company:
+        co_parts = []
+        if company.get('company_name'): co_parts.append(f"Name: {company['company_name']}")
+        if company.get('registration_number'): co_parts.append(f"Reg: {company['registration_number']}")
+        if company.get('bbbbee_level'): co_parts.append(f"B-BBEE: {company['bbbbee_level']}")
+        if company.get('email'): co_parts.append(f"Email: {company['email']}")
+        if company.get('phone'): co_parts.append(f"Phone: {company['phone']}")
+        if co_parts:
+            context_parts.append("COMPANY:\n  " + "\n  ".join(co_parts))
+
+    if checklist_items:
+        cl_complete = [c for c in checklist_items if c.get('status') == 'Complete']
+        cl_outstanding = [c for c in checklist_items if c.get('status') == 'Outstanding']
+        context_parts.append(f"CHECKLIST: {len(cl_complete)} complete, {len(cl_outstanding)} outstanding of {len(checklist_items)} items")
+        if cl_complete:
+            context_parts.append(f"  Completed items: {', '.join(c.get('name','') for c in cl_complete[:8])}")
+
+    if generated_docs:
+        context_parts.append(f"EXISTING GENERATED DOCUMENTS: {', '.join(d.get('doc_type','') for d in generated_docs)}")
+
+    if library_docs:
+        lib_names = [d.get('name','') for d in library_docs[:10]]
+        context_parts.append(f"LIBRARY DOCUMENTS: {', '.join(lib_names)}")
+
+    context = "\n\n".join(context_parts)
+
+    user_prompt = f"""{context}
+
+USER REQUEST: {prompt}
+
+Generate a complete, professional document based on the user's request. The document should be:
+- Specific to this tender and company
+- Professional and compliant with South African procurement standards
+- Detailed and immediately usable
+- Formatted with clear sections, headings, and structure
+
+Write the full document now:"""
+
+    try:
+        result = _run_zai_chat(user_prompt, system=system, max_tokens=6000)
+        return result.strip()
+    except Exception as e:
+        return f"Error generating document: {e}\n\nPlease try again."

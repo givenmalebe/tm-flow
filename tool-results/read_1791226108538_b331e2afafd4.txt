@@ -1,0 +1,942 @@
+     1→"use client";
+     2→
+     3→import { useEffect, useState, useCallback } from "react";
+     4→import {
+     5→  Radar,
+     6→  Search,
+     7→  Loader2,
+     8→  MapPin,
+     9→  Building2,
+    10→  CalendarClock,
+    11→  FileText,
+    12→  Plus,
+    13→  CheckCircle2,
+    14→  TrendingUp,
+    15→  Eye,
+    16→  Download,
+    17→  X,
+    18→  ShieldCheck,
+    19→  AlertTriangle,
+    20→  Send,
+    21→  Clock,
+    22→  Inbox,
+    23→  Filter,
+    24→} from "lucide-react";
+    25→import { Button } from "@/components/ui/button";
+    26→import { Input } from "@/components/ui/input";
+    27→import { Textarea } from "@/components/ui/textarea";
+    28→import { Label } from "@/components/ui/label";
+    29→import {
+    30→  Card,
+    31→  CardContent,
+    32→  CardHeader,
+    33→  CardTitle,
+    34→  CardDescription,
+    35→} from "@/components/ui/card";
+    36→import { Badge } from "@/components/ui/badge";
+    37→import {
+    38→  Select,
+    39→  SelectContent,
+    40→  SelectItem,
+    41→  SelectTrigger,
+    42→  SelectValue,
+    43→} from "@/components/ui/select";
+    44→import {
+    45→  Dialog,
+    46→  DialogContent,
+    47→  DialogHeader,
+    48→  DialogTitle,
+    49→  DialogDescription,
+    50→} from "@/components/ui/dialog";
+    51→import { Alert, AlertDescription } from "@/components/ui/alert";
+    52→import { Progress } from "@/components/ui/progress";
+    53→import { publicApi, api } from "@/lib/api";
+    54→import { useDashboardStore, formatDate, daysUntil, deadlineColor } from "@/lib/dashboard-store";
+    55→import { toast } from "sonner";
+    56→import { cn } from "@/lib/utils";
+    57→
+    58→/* ------------------------------------------------------------------ */
+    59→/*  Types                                                             */
+    60→/* ------------------------------------------------------------------ */
+    61→
+    62→interface PublicTender {
+    63→  id: number;
+    64→  reference_number: string;
+    65→  title: string;
+    66→  description: string;
+    67→  category: string;
+    68→  location: string;
+    69→  closing_date: string | null;
+    70→  budget: number;
+    71→  contract_period: string;
+    72→  status: string;
+    73→  company_name: string;
+    74→  company_industry: string;
+    75→  company_description: string;
+    76→  bid_count: number;
+    77→}
+    78→
+    79→interface FullTender extends PublicTender {
+    80→  scope_of_work: string;
+    81→  evaluation_criteria: string;
+    82→  submission_method: string;
+    83→  contact_person: string;
+    84→  contact_email: string;
+    85→  contact_phone: string;
+    86→  ai_generated_content: string;
+    87→}
+    88→
+    89→interface ComplianceResult {
+    90→  tender_id: number;
+    91→  tender_title: string;
+    92→  company_name: string;
+    93→  total_required: number;
+    94→  matched: number;
+    95→  missing: number;
+    96→  compliance_percentage: number;
+    97→  items: { document: string; category: string; status: string; matched_count: number }[];
+    98→}
+    99→
+   100→/* ------------------------------------------------------------------ */
+   101→/*  localStorage helpers for "My Tenders" + progress                  */
+   102→/* ------------------------------------------------------------------ */
+   103→
+   104→const MY_TENDERS_KEY = "tmflow_my_tenders";
+   105→
+   106→function getMyTenders(): Record<number, number> {
+   107→  if (typeof window === "undefined") return {};
+   108→  try {
+   109→    const raw = localStorage.getItem(MY_TENDERS_KEY);
+   110→    return raw ? JSON.parse(raw) : {};
+   111→  } catch {
+   112→    return {};
+   113→  }
+   114→}
+   115→
+   116→function saveMyTender(tenderId: number) {
+   117→  const map = getMyTenders();
+   118→  map[tenderId] = 0;
+   119→  localStorage.setItem(MY_TENDERS_KEY, JSON.stringify(map));
+   120→}
+   121→
+   122→function removeMyTender(tenderId: number) {
+   123→  const map = getMyTenders();
+   124→  delete map[tenderId];
+   125→  localStorage.setItem(MY_TENDERS_KEY, JSON.stringify(map));
+   126→}
+   127→
+   128→function setMyTenderProgress(tenderId: number, progress: number) {
+   129→  const map = getMyTenders();
+   130→  map[tenderId] = progress;
+   131→  localStorage.setItem(MY_TENDERS_KEY, JSON.stringify(map));
+   132→}
+   133→
+   134→/* ------------------------------------------------------------------ */
+   135→/*  Component                                                         */
+   136→/* ------------------------------------------------------------------ */
+   137→
+   138→export function DiscoverTab() {
+   139→  const { setTab, selectTender } = useDashboardStore();
+   140→  const [tenders, setTenders] = useState<PublicTender[]>([]);
+   141→  const [loading, setLoading] = useState(true);
+   142→  const [error, setError] = useState<string | null>(null);
+   143→  const [search, setSearch] = useState("");
+   144→  const [category, setCategory] = useState("All");
+   145→  const [categories, setCategories] = useState<string[]>([]);
+   146→  const [myTenders, setMyTenders] = useState<Record<number, number>>({});
+   147→  const [selectedTender, setSelectedTender] = useState<PublicTender | null>(null);
+   148→  const [fullTender, setFullTender] = useState<FullTender | null>(null);
+   149→  const [loadingDetail, setLoadingDetail] = useState(false);
+   150→  const [showSubmit, setShowSubmit] = useState(false);
+   151→  const [compliance, setCompliance] = useState<ComplianceResult | null>(null);
+   152→  const [checkingCompliance, setCheckingCompliance] = useState(false);
+   153→
+   154→  /* ---- Load published tenders + categories ---- */
+   155→  const fetchTenders = useCallback(async () => {
+   156→    setLoading(true);
+   157→    setError(null);
+   158→    try {
+   159→      const [tenderData, catData] = await Promise.all([
+   160→        publicApi.listTenders({}),
+   161→        publicApi.listCategories(),
+   162→      ]);
+   163→      setTenders(tenderData.items || []);
+   164→      setCategories(catData.items || []);
+   165→    } catch (e: any) {
+   166→      setError(e.message || "Failed to load tenders");
+   167→    } finally {
+   168→      setLoading(false);
+   169→    }
+   170→  }, []);
+   171→
+   172→  useEffect(() => {
+   173→    fetchTenders();
+   174→    setMyTenders(getMyTenders());
+   175→  }, [fetchTenders]);
+   176→
+   177→  /* ---- Filter ---- */
+   178→  const filtered = tenders.filter((t) => {
+   179→    if (category !== "All" && t.category !== category) return false;
+   180→    if (!search.trim()) return true;
+   181→    const q = search.toLowerCase();
+   182→    return (
+   183→      t.title?.toLowerCase().includes(q) ||
+   184→      t.reference_number?.toLowerCase().includes(q) ||
+   185→      t.company_name?.toLowerCase().includes(q) ||
+   186→      t.category?.toLowerCase().includes(q) ||
+   187→      t.location?.toLowerCase().includes(q)
+   188→    );
+   189→  });
+   190→
+   191→  /* ---- View detail ---- */
+   192→  const openDetail = async (t: PublicTender) => {
+   193→    setSelectedTender(t);
+   194→    setFullTender(null);
+   195→    setLoadingDetail(true);
+   196→    try {
+   197→      const full = await publicApi.getTender(t.id);
+   198→      setFullTender(full);
+   199→    } catch (e: any) {
+   200→      toast.error("Failed to load tender details", { description: e.message });
+   201→    } finally {
+   202→      setLoadingDetail(false);
+   203→    }
+   204→  };
+   205→
+   206→  /* ---- Add / Remove from My Tenders ---- */
+   207→  const handleAddToMyTenders = (t: PublicTender) => {
+   208→    saveMyTender(t.id);
+   209→    setMyTenders(getMyTenders());
+   210→    toast.success("Tender added to your list", {
+   211→      description: "Track preparation progress in the Tenders tab.",
+   212→    });
+   213→  };
+   214→
+   215→  const handleRemoveFromMyTenders = (t: PublicTender) => {
+   216→    removeMyTender(t.id);
+   217→    setMyTenders(getMyTenders());
+   218→    toast.success("Tender removed from your list");
+   219→  };
+   220→
+   221→  /* ---- Compliance check ---- */
+   222→  const handleComplianceCheck = async (t: PublicTender) => {
+   223→    setCheckingCompliance(true);
+   224→    setCompliance(null);
+   225→    try {
+   226→      const result = await publicApi.complianceCheck(t.id);
+   227→      setCompliance(result);
+   228→    } catch (e: any) {
+   229→      toast.error("Compliance check failed", { description: e.message });
+   230→    } finally {
+   231→      setCheckingCompliance(false);
+   232→    }
+   233→  };
+   234→
+   235→  /* ---- Download PDF ---- */
+   236→  const downloadPDF = async (t: PublicTender) => {
+   237→    try {
+   238→      const full = await publicApi.getTender(t.id);
+   239→      const { jsPDF } = await import("jspdf");
+   240→      const doc = new jsPDF();
+   241→      const pw = doc.internal.pageSize.getWidth();
+   242→      const ph = doc.internal.pageSize.getHeight();
+   243→      const m = 18;
+   244→      const cw = pw - m * 2;
+   245→      let y = 0;
+   246→
+   247→      // Header
+   248→      doc.setFillColor(15, 118, 110); doc.rect(0, 0, pw, 28, "F");
+   249→      doc.setFillColor(217, 119, 6); doc.rect(0, 28, pw, 2, "F");
+   250→      doc.setTextColor(255, 255, 255); doc.setFontSize(14); doc.setFont("helvetica", "bold");
+   251→      doc.text("TM FLOW", m, 13);
+   252→      doc.setFontSize(8); doc.text("TENDER NOTICE", m, 19);
+   253→      doc.setFontSize(8); doc.setFont("helvetica", "bold");
+   254→      doc.text("TENDER NOTICE", pw - m, 13, { align: "right" });
+   255→
+   256→      y = 40;
+   257→      doc.setFontSize(9); doc.setFont("helvetica", "normal"); doc.setTextColor(115, 115, 115);
+   258→      doc.text(`Reference: ${full.reference_number || "N/A"}`, m, y); y += 5;
+   259→      doc.setFontSize(16); doc.setFont("helvetica", "bold"); doc.setTextColor(24, 24, 27);
+   260→      const tLines = doc.splitTextToSize(full.title || "Untitled Tender", cw);
+   261→      doc.text(tLines, m, y); y += tLines.length * 8 + 4;
+   262→      doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor(115, 115, 115);
+   263→      doc.text(`Issued by: ${full.company_name || "—"}`, m, y); y += 10;
+   264→
+   265→      // Sections
+   266→      const sections: [string, string][] = [
+   267→        ["DESCRIPTION", full.description || ""],
+   268→        ["SCOPE OF WORK", full.scope_of_work || ""],
+   269→        ["EVALUATION CRITERIA", full.evaluation_criteria || ""],
+   270→        ["SUBMISSION METHOD", full.submission_method || ""],
+   271→        ["FULL TENDER DOCUMENT", full.ai_generated_content || ""],
+   272→      ];
+   273→      for (const [label, text] of sections) {
+   274→        if (!text) continue;
+   275→        if (y > ph - 40) { doc.addPage(); y = m; }
+   276→        doc.setFillColor(217, 119, 6); doc.roundedRect(m, y, 3, 5, 1, 1, "F");
+   277→        doc.setFontSize(9); doc.setFont("helvetica", "bold"); doc.setTextColor(24, 24, 27);
+   278→        doc.text(label, m + 6, y + 4);
+   279→        doc.setDrawColor(228, 228, 231); doc.line(m, y + 7, pw - m, y + 7);
+   280→        y += 12;
+   281→        doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setTextColor(51, 51, 51);
+   282→        const lines = doc.splitTextToSize(text, cw);
+   283→        lines.forEach((line: string) => {
+   284→          if (y > ph - 20) { doc.addPage(); y = m; }
+   285→          doc.text(line, m, y); y += 4.5;
+   286→        });
+   287→        y += 5;
+   288→      }
+   289→
+   290→      // Footer
+   291→      const pc = doc.getNumberOfPages();
+   292→      for (let i = 1; i <= pc; i++) {
+   293→        doc.setPage(i);
+   294→        doc.setDrawColor(228, 228, 231); doc.line(m, ph - 14, pw - m, ph - 14);
+   295→        doc.setFontSize(6); doc.setTextColor(150, 150, 150);
+   296→        doc.text(`TM Flow | ${full.reference_number || ""} | Page ${i} of ${pc}`, m, ph - 8);
+   297→      }
+   298→      doc.save(`${full.reference_number || "tender"}.pdf`);
+   299→      toast.success("PDF downloaded");
+   300→    } catch (e: any) {
+   301→      toast.error("PDF download failed", { description: e.message });
+   302→    }
+   303→  };
+   304→
+   305→  /* ---- Stats ---- */
+   306→  const totalTenders = tenders.length;
+   307→  const addedCount = Object.keys(myTenders).length;
+   308→  const companies = new Set(tenders.map((t) => t.company_name)).size;
+   309→
+   310→  /* ------------------------------------------------------------------ */
+   311→  /*  Render                                                            */
+   312→  /* ------------------------------------------------------------------ */
+   313→
+   314→  return (
+   315→    <div className="space-y-6">
+   316→      {/* Header */}
+   317→      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+   318→        <div>
+   319→          <h1 className="text-2xl font-bold flex items-center gap-2">
+   320→            <Radar className="h-6 w-6 text-primary" />
+   321→            Discover Tenders
+   322→          </h1>
+   323→          <p className="text-sm text-muted-foreground mt-1">
+   324→            Browse live tender opportunities published on the TM Flow platform.
+   325→          </p>
+   326→        </div>
+   327→      </div>
+   328→
+   329→      {/* Stats */}
+   330→      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+   331→        <Card>
+   332→          <CardContent className="p-4 flex items-center gap-3">
+   333→            <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+   334→              <Inbox className="h-5 w-5 text-primary" />
+   335→            </div>
+   336→            <div>
+   337→              <div className="text-2xl font-bold">{totalTenders}</div>
+   338→              <div className="text-xs text-muted-foreground">Tenders Available</div>
+   339→            </div>
+   340→          </CardContent>
+   341→        </Card>
+   342→        <Card>
+   343→          <CardContent className="p-4 flex items-center gap-3">
+   344→            <div className="h-10 w-10 rounded-lg bg-amber-100 flex items-center justify-center">
+   345→              <Building2 className="h-5 w-5 text-amber-600" />
+   346→            </div>
+   347→            <div>
+   348→              <div className="text-2xl font-bold">{companies}</div>
+   349→              <div className="text-xs text-muted-foreground">Issuing Organisations</div>
+   350→            </div>
+   351→          </CardContent>
+   352→        </Card>
+   353→        <Card>
+   354→          <CardContent className="p-4 flex items-center gap-3">
+   355→            <div className="h-10 w-10 rounded-lg bg-emerald-100 flex items-center justify-center">
+   356→              <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+   357→            </div>
+   358→            <div>
+   359→              <div className="text-2xl font-bold">{addedCount}</div>
+   360→              <div className="text-xs text-muted-foreground">Added to My Tenders</div>
+   361→            </div>
+   362→          </CardContent>
+   363→        </Card>
+   364→      </div>
+   365→
+   366→      {/* Search + filter */}
+   367→      <Card>
+   368→        <CardContent className="p-4 space-y-3">
+   369→          <div className="flex flex-col sm:flex-row gap-3">
+   370→            <div className="relative flex-1">
+   371→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+   372→              <Input
+   373→                placeholder="Search by title, reference, company, category, location…"
+   374→                value={search}
+   375→                onChange={(e) => setSearch(e.target.value)}
+   376→                className="pl-9"
+   377→              />
+   378→            </div>
+   379→            <Select value={category} onValueChange={setCategory}>
+   380→              <SelectTrigger className="w-full sm:w-56">
+   381→                <Filter className="h-4 w-4 mr-2 text-muted-foreground" />
+   382→                <SelectValue placeholder="All categories" />
+   383→              </SelectTrigger>
+   384→              <SelectContent>
+   385→                <SelectItem value="All">All categories</SelectItem>
+   386→                {categories.map((c) => (
+   387→                  <SelectItem key={c} value={c}>{c}</SelectItem>
+   388→                ))}
+   389→              </SelectContent>
+   390→            </Select>
+   391→          </div>
+   392→        </CardContent>
+   393→      </Card>
+   394→
+   395→      {/* Error */}
+   396→      {error && (
+   397→        <Alert variant="destructive">
+   398→          <AlertTriangle className="h-4 w-4" />
+   399→          <AlertDescription>{error}</AlertDescription>
+   400→        </Alert>
+   401→      )}
+   402→
+   403→      {/* Tenders grid */}
+   404→      {loading ? (
+   405→        <div className="flex flex-col items-center justify-center py-16">
+   406→          <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
+   407→          <p className="text-sm text-muted-foreground">Loading published tenders…</p>
+   408→        </div>
+   409→      ) : filtered.length === 0 ? (
+   410→        <Card>
+   411→          <CardContent className="p-12 text-center">
+   412→            <FileText className="h-16 w-16 text-muted-foreground/30 mx-auto mb-4" />
+   413→            <h3 className="text-lg font-semibold mb-1">
+   414→              {totalTenders === 0 ? "No tenders published yet" : "No results found"}
+   415→            </h3>
+   416→            <p className="text-sm text-muted-foreground max-w-md mx-auto">
+   417→              {totalTenders === 0
+   418→                ? "Check back soon for new opportunities from issuing organisations."
+   419→                : "Try a different search term or category filter."}
+   420→            </p>
+   421→            {search && (
+   422→              <Button variant="outline" className="mt-4" onClick={() => { setSearch(""); setCategory("All"); }}>
+   423→                Clear filters
+   424→              </Button>
+   425→            )}
+   426→          </CardContent>
+   427→        </Card>
+   428→      ) : (
+   429→        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+   430→          {filtered.map((t) => {
+   431→            const days = daysUntil(t.closing_date);
+   432→            const isAdded = myTenders[t.id] !== undefined;
+   433→            const progress = myTenders[t.id] ?? 0;
+   434→            return (
+   435→              <Card
+   436→                key={t.id}
+   437→                className={cn(
+   438→                  "flex flex-col transition-all hover:shadow-lg",
+   439→                  isAdded ? "border-emerald-300 ring-1 ring-emerald-200" : "hover:border-primary/30"
+   440→                )}
+   441→              >
+   442→                <CardContent className="p-5 flex flex-col flex-1">
+   443→                  {/* Top row */}
+   444→                  <div className="flex items-start justify-between gap-2 mb-2">
+   445→                    <span className="text-[10px] font-mono text-muted-foreground">
+   446→                      {t.reference_number}
+   447→                    </span>
+   448→                    {t.category && (
+   449→                      <Badge variant="outline" className="text-[9px] h-5 px-1.5 bg-primary/5 text-primary border-primary/20 shrink-0">
+   450→                        {t.category}
+   451→                      </Badge>
+   452→                    )}
+   453→                  </div>
+   454→
+   455→                  {/* Title */}
+   456→                  <h3 className="text-sm font-semibold line-clamp-2 mb-1">{t.title}</h3>
+   457→                  <p className="text-xs text-muted-foreground mb-3 flex items-center gap-1">
+   458→                    <Building2 className="h-3 w-3" />
+   459→                    {t.company_name}
+   460→                  </p>
+   461→
+   462→                  {/* Meta */}
+   463→                  <div className="space-y-1.5 text-xs text-muted-foreground flex-1">
+   464→                    <div className="flex items-center gap-1.5">
+   465→                      <MapPin className="h-3 w-3 shrink-0" />
+   466→                      <span className="truncate">{t.location || "Location not specified"}</span>
+   467→                    </div>
+   468→                    <div className="flex items-center gap-1.5">
+   469→                      <CalendarClock className="h-3 w-3 shrink-0" />
+   470→                      <span>Closes {formatDate(t.closing_date)}</span>
+   471→                      {days !== null && days >= 0 && (
+   472→                        <Badge
+   473→                          variant="outline"
+   474→                          className={cn(
+   475→                            "text-[9px] h-4 px-1 ml-auto",
+   476→                            days <= 7
+   477→                              ? "bg-rose-50 text-rose-700 border-rose-200"
+   478→                              : days <= 30
+   479→                              ? "bg-amber-50 text-amber-700 border-amber-200"
+   480→                              : "bg-emerald-50 text-emerald-700 border-emerald-200"
+   481→                          )}
+   482→                        >
+   483→                          {days}d left
+   484→                        </Badge>
+   485→                      )}
+   486→                    </div>
+   487→                    <div className="flex items-center gap-1.5">
+   488→                      <FileText className="h-3 w-3 shrink-0" />
+   489→                      <span>{t.bid_count || 0} bids submitted</span>
+   490→                    </div>
+   491→                    {t.budget > 0 && (
+   492→                      <div className="flex items-center gap-1.5">
+   493→                        <TrendingUp className="h-3 w-3 shrink-0" />
+   494→                        <span className="font-medium text-foreground">
+   495→                          Est. R {t.budget.toLocaleString("en-ZA")}
+   496→                        </span>
+   497→                      </div>
+   498→                    )}
+   499→                  </div>
+   500→
+   501→                  {/* Added status + progress */}
+   502→                  {isAdded && (
+   503→                    <div className="mt-3 p-2 rounded-md bg-emerald-50 border border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-800">
+   504→                      <div className="flex items-center justify-between text-[11px] mb-1">
+   505→                        <span className="flex items-center gap-1 font-medium text-emerald-700 dark:text-emerald-400">
+   506→                          <CheckCircle2 className="h-3 w-3" />
+   507→                          Tender Added
+   508→                        </span>
+   509→                        <span className="text-emerald-700 dark:text-emerald-400 font-semibold">{progress}%</span>
+   510→                      </div>
+   511→                      <Progress value={progress} className="h-1.5 bg-emerald-100" />
+   512→                    </div>
+   513→                  )}
+   514→
+   515→                  {/* Actions */}
+   516→                  <div className="flex gap-2 mt-4">
+   517→                    <Button
+   518→                      size="sm"
+   519→                      variant="outline"
+   520→                      className="flex-1 text-xs"
+   521→                      onClick={() => openDetail(t)}
+   522→                    >
+   523→                      <Eye className="h-3.5 w-3.5 mr-1" />
+   524→                      View
+   525→                    </Button>
+   526→                    <Button
+   527→                      size="sm"
+   528→                      variant="outline"
+   529→                      className="text-xs"
+   530→                      onClick={() => downloadPDF(t)}
+   531→                    >
+   532→                      <Download className="h-3.5 w-3.5" />
+   533→                    </Button>
+   534→                    {isAdded ? (
+   535→                      <Button
+   536→                        size="sm"
+   537→                        variant="outline"
+   538→                        className="text-xs text-rose-600 border-rose-200 hover:bg-rose-50"
+   539→                        onClick={() => handleRemoveFromMyTenders(t)}
+   540→                      >
+   541→                        <X className="h-3.5 w-3.5 mr-1" />
+   542→                        Remove
+   543→                      </Button>
+   544→                    ) : (
+   545→                      <Button
+   546→                        size="sm"
+   547→                        className="flex-1 text-xs"
+   548→                        onClick={() => handleAddToMyTenders(t)}
+   549→                      >
+   550→                        <Plus className="h-3.5 w-3.5 mr-1" />
+   551→                        Add to My Tenders
+   552→                      </Button>
+   553→                    )}
+   554→                  </div>
+   555→                </CardContent>
+   556→              </Card>
+   557→            );
+   558→          })}
+   559→        </div>
+   560→      )}
+   561→
+   562→      {/* Detail dialog */}
+   563→      <Dialog open={!!selectedTender} onOpenChange={(o) => { if (!o) { setSelectedTender(null); setFullTender(null); setCompliance(null); } }}>
+   564→        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+   565→          {loadingDetail ? (
+   566→            <div className="p-12 flex flex-col items-center">
+   567→              <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
+   568→              <p className="text-sm text-muted-foreground">Loading tender details…</p>
+   569→            </div>
+   570→          ) : selectedTender && (
+   571→            <>
+   572→              <DialogHeader>
+   573→                <div className="flex items-start justify-between gap-3">
+   574→                  <div className="flex-1 min-w-0">
+   575→                    <div className="flex flex-wrap items-center gap-2 mb-2">
+   576→                      <span className="text-[10px] font-mono text-muted-foreground px-2 py-0.5 rounded bg-muted">
+   577→                        {selectedTender.reference_number}
+   578→                      </span>
+   579→                      {selectedTender.category && (
+   580→                        <Badge variant="outline" className="text-[9px] h-5 px-1.5 bg-primary/5 text-primary border-primary/20">
+   581→                          {selectedTender.category}
+   582→                        </Badge>
+   583→                      )}
+   584→                      <Badge variant="outline" className="text-[9px] h-5 px-1.5 bg-amber-50 text-amber-700 border-amber-200">
+   585→                        {selectedTender.bid_count || 0} bids
+   586→                      </Badge>
+   587→                    </div>
+   588→                    <DialogTitle className="text-xl">{selectedTender.title}</DialogTitle>
+   589→                    <DialogDescription className="mt-1">
+   590→                      Issued by <span className="font-medium text-foreground">{selectedTender.company_name}</span>
+   591→                      {selectedTender.company_industry ? ` · ${selectedTender.company_industry}` : ""}
+   592→                    </DialogDescription>
+   593→                  </div>
+   594→                </div>
+   595→              </DialogHeader>
+   596→
+   597→              {/* Key details grid */}
+   598→              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 py-2">
+   599→                <div className="rounded-md border p-3">
+   600→                  <div className="text-[10px] uppercase text-muted-foreground flex items-center gap-1">
+   601→                    <Building2 className="h-3 w-3" /> Category
+   602→                  </div>
+   603→                  <div className="text-sm font-medium mt-1">{selectedTender.category || "—"}</div>
+   604→                </div>
+   605→                <div className="rounded-md border p-3">
+   606→                  <div className="text-[10px] uppercase text-muted-foreground flex items-center gap-1">
+   607→                    <TrendingUp className="h-3 w-3" /> Budget
+   608→                  </div>
+   609→                  <div className="text-sm font-bold mt-1 text-amber-700">
+   610→                    {selectedTender.budget ? `R ${selectedTender.budget.toLocaleString("en-ZA")}` : "—"}
+   611→                  </div>
+   612→                </div>
+   613→                <div className="rounded-md border p-3">
+   614→                  <div className="text-[10px] uppercase text-muted-foreground flex items-center gap-1">
+   615→                    <CalendarClock className="h-3 w-3" /> Closing
+   616→                  </div>
+   617→                  <div className="text-sm font-medium mt-1">{formatDate(selectedTender.closing_date)}</div>
+   618→                </div>
+   619→                <div className="rounded-md border p-3">
+   620→                  <div className="text-[10px] uppercase text-muted-foreground flex items-center gap-1">
+   621→                    <MapPin className="h-3 w-3" /> Location
+   622→                  </div>
+   623→                  <div className="text-sm font-medium mt-1 line-clamp-2">{selectedTender.location || "—"}</div>
+   624→                </div>
+   625→              </div>
+   626→
+   627→              {/* Description */}
+   628→              {(fullTender?.description || selectedTender.description) && (
+   629→                <div>
+   630→                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5 font-medium">Description</div>
+   631→                  <p className="text-sm whitespace-pre-wrap leading-relaxed">{fullTender?.description || selectedTender.description}</p>
+   632→                </div>
+   633→              )}
+   634→
+   635→              {fullTender?.scope_of_work && (
+   636→                <div>
+   637→                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5 font-medium">Scope of Work</div>
+   638→                  <p className="text-sm whitespace-pre-wrap leading-relaxed">{fullTender.scope_of_work}</p>
+   639→                </div>
+   640→              )}
+   641→
+   642→              {fullTender?.evaluation_criteria && (
+   643→                <div>
+   644→                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5 font-medium">Evaluation Criteria</div>
+   645→                  <p className="text-sm whitespace-pre-wrap leading-relaxed">{fullTender.evaluation_criteria}</p>
+   646→                </div>
+   647→              )}
+   648→
+   649→              {(fullTender?.submission_method || selectedTender.submission_method) && (
+   650→                <div>
+   651→                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5 font-medium">Submission Method</div>
+   652→                  <p className="text-sm whitespace-pre-wrap leading-relaxed">{fullTender?.submission_method || selectedTender.submission_method}</p>
+   653→                </div>
+   654→              )}
+   655→
+   656→              {fullTender?.ai_generated_content && (
+   657→                <div>
+   658→                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5 font-medium flex items-center gap-1">
+   659→                    <FileText className="h-3 w-3" /> Full Tender Document
+   660→                  </div>
+   661→                  <div className="rounded-md border border-border bg-muted/30 p-4 max-h-[300px] overflow-y-auto">
+   662→                    <pre className="text-xs whitespace-pre-wrap font-sans leading-relaxed">{fullTender.ai_generated_content}</pre>
+   663→                  </div>
+   664→                </div>
+   665→              )}
+   666→
+   667→              {/* Contact */}
+   668→              {(fullTender?.contact_person || fullTender?.contact_email || fullTender?.contact_phone) && (
+   669→                <div className="rounded-md border border-border p-4 bg-muted/20">
+   670→                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2 font-medium">Contact Details</div>
+   671→                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+   672→                    {fullTender?.contact_person && (
+   673→                      <div><span className="text-[10px] text-muted-foreground">Person</span><div className="font-medium">{fullTender.contact_person}</div></div>
+   674→                    )}
+   675→                    {fullTender?.contact_email && (
+   676→                      <div><span className="text-[10px] text-muted-foreground">Email</span><div className="font-medium">{fullTender.contact_email}</div></div>
+   677→                    )}
+   678→                    {fullTender?.contact_phone && (
+   679→                      <div><span className="text-[10px] text-muted-foreground">Phone</span><div className="font-medium">{fullTender.contact_phone}</div></div>
+   680→                    )}
+   681→                  </div>
+   682→                </div>
+   683→              )}
+   684→
+   685→              {/* Compliance check */}
+   686→              {compliance && (
+   687→                <div className="rounded-md border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 dark:border-emerald-800 p-4">
+   688→                  <div className="flex items-center justify-between mb-2">
+   689→                    <div className="text-[11px] uppercase tracking-wide font-medium text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
+   690→                      <ShieldCheck className="h-3.5 w-3.5" /> Compliance Check
+   691→                    </div>
+   692→                    <Badge className={cn(
+   693→                      "text-xs",
+   694→                      compliance.compliance_percentage >= 80
+   695→                        ? "bg-emerald-600"
+   696→                        : compliance.compliance_percentage >= 50
+   697→                        ? "bg-amber-600"
+   698→                        : "bg-rose-600"
+   699→                    )}>
+   700→                      {compliance.compliance_percentage}% compliant
+   701→                    </Badge>
+   702→                  </div>
+   703→                  <p className="text-xs text-muted-foreground mb-3">
+   704→                    {compliance.matched} of {compliance.total_required} required documents matched in your Compliance Library.
+   705→                  </p>
+   706→                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+   707→                    {compliance.items.map((item, i) => (
+   708→                      <div key={i} className="flex items-center gap-2 text-xs">
+   709→                        {item.status === "matched" ? (
+   710→                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+   711→                        ) : (
+   712→                          <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+   713→                        )}
+   714→                        <span className={item.status === "matched" ? "text-foreground" : "text-muted-foreground"}>
+   715→                          {item.document}
+   716→                        </span>
+   717→                        <Badge variant="outline" className="text-[9px] h-4 px-1 ml-auto">
+   718→                          {item.status === "matched" ? "Ready" : "Missing"}
+   719→                        </Badge>
+   720→                      </div>
+   721→                    ))}
+   722→                  </div>
+   723→                </div>
+   724→              )}
+   725→
+   726→              {/* Actions */}
+   727→              <div className="flex flex-wrap gap-2 pt-2 border-t">
+   728→                <Button size="sm" variant="outline" onClick={() => downloadPDF(selectedTender)}>
+   729→                  <Download className="h-4 w-4 mr-1.5" /> Download PDF
+   730→                </Button>
+   731→                <Button
+   732→                  size="sm"
+   733→                  variant="outline"
+   734→                  onClick={() => handleComplianceCheck(selectedTender)}
+   735→                  disabled={checkingCompliance}
+   736→                >
+   737→                  {checkingCompliance ? (
+   738→                    <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+   739→                  ) : (
+   740→                    <ShieldCheck className="h-4 w-4 mr-1.5" />
+   741→                  )}
+   742→                  Check Compliance
+   743→                </Button>
+   744→                {myTenders[selectedTender.id] !== undefined ? (
+   745→                  <>
+   746→                    <Button
+   747→                      size="sm"
+   748→                      variant="outline"
+   749→                      className="text-rose-600 border-rose-200 hover:bg-rose-50"
+   750→                      onClick={() => handleRemoveFromMyTenders(selectedTender)}
+   751→                    >
+   752→                      <X className="h-4 w-4 mr-1.5" /> Remove from My Tenders
+   753→                    </Button>
+   754→                    <Button
+   755→                      size="sm"
+   756→                      className="ml-auto"
+   757→                      onClick={() => setShowSubmit(true)}
+   758→                    >
+   759→                      <Send className="h-4 w-4 mr-1.5" /> Submit Bid
+   760→                    </Button>
+   761→                  </>
+   762→                ) : (
+   763→                  <Button
+   764→                    size="sm"
+   765→                    className="ml-auto"
+   766→                    onClick={() => handleAddToMyTenders(selectedTender)}
+   767→                  >
+   768→                    <Plus className="h-4 w-4 mr-1.5" /> Add to My Tenders
+   769→                  </Button>
+   770→                )}
+   771→              </div>
+   772→            </>
+   773→          )}
+   774→        </DialogContent>
+   775→      </Dialog>
+   776→
+   777→      {/* Submit Bid dialog */}
+   778→      <SubmitBidDialog
+   779→        tender={selectedTender}
+   780→        open={showSubmit}
+   781→        onOpenChange={setShowSubmit}
+   782→        onSubmitted={() => {
+   783→          if (selectedTender) {
+   784→            setMyTenderProgress(selectedTender.id, 100);
+   785→            setMyTenders(getMyTenders());
+   786→          }
+   787→          setShowSubmit(false);
+   788→        }}
+   789→      />
+   790→    </div>
+   791→  );
+   792→}
+   793→
+   794→/* ------------------------------------------------------------------ */
+   795→/*  Submit Bid Dialog                                                 */
+   796→/* ------------------------------------------------------------------ */
+   797→
+   798→function SubmitBidDialog({
+   799→  tender,
+   800→  open,
+   801→  onOpenChange,
+   802→  onSubmitted,
+   803→}: {
+   804→  tender: PublicTender | null;
+   805→  open: boolean;
+   806→  onOpenChange: (o: boolean) => void;
+   807→  onSubmitted: () => void;
+   808→}) {
+   809→  const [companyName, setCompanyName] = useState("");
+   810→  const [contactPerson, setContactPerson] = useState("");
+   811→  const [email, setEmail] = useState("");
+   812→  const [phone, setPhone] = useState("");
+   813→  const [bbbeeLevel, setBbbeeLevel] = useState("");
+   814→  const [amount, setAmount] = useState("");
+   815→  const [summary, setSummary] = useState("");
+   816→  const [files, setFiles] = useState<File[]>([]);
+   817→  const [submitting, setSubmitting] = useState(false);
+   818→
+   819→  useEffect(() => {
+   820→    if (open && tender) {
+   821→      // Pre-fill from logged-in user if possible
+   822→      try {
+   823→        const raw = localStorage.getItem("tenderflow_user");
+   824→        if (raw) {
+   825→          const u = JSON.parse(raw);
+   826→          setContactPerson(u.full_name || "");
+   827→          setCompanyName(u.company_name || "");
+   828→          setEmail(u.email || "");
+   829→        }
+   830→      } catch {}
+   831→    }
+   832→  }, [open, tender]);
+   833→
+   834→  const handleSubmit = async (e: React.FormEvent) => {
+   835→    e.preventDefault();
+   836→    if (!tender) return;
+   837→    if (!companyName.trim() || !contactPerson.trim()) {
+   838→      toast.error("Company name and contact person are required");
+   839→      return;
+   840→    }
+   841→    setSubmitting(true);
+   842→    try {
+   843→      const form = new FormData();
+   844→      form.append("bidder_company_name", companyName.trim());
+   845→      form.append("bidder_contact_person", contactPerson.trim());
+   846→      form.append("bidder_email", email.trim());
+   847→      form.append("bidder_phone", phone.trim());
+   848→      form.append("bidder_bbbee_level", bbbeeLevel);
+   849→      form.append("total_amount", amount || "0");
+   850→      form.append("proposal_summary", summary.trim());
+   851→      files.forEach((f) => form.append("files", f));
+   852→      await publicApi.submitBid(tender.id, form);
+   853→      toast.success("Bid submitted successfully!", {
+   854→        description: "The issuer will review your bid.",
+   855→      });
+   856→      onSubmitted();
+   857→    } catch (err: any) {
+   858→      toast.error("Failed to submit bid", { description: err.message });
+   859→    } finally {
+   860→      setSubmitting(false);
+   861→    }
+   862→  };
+   863→
+   864→  return (
+   865→    <Dialog open={open} onOpenChange={onOpenChange}>
+   866→      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+   867→        <DialogHeader>
+   868→          <DialogTitle>Submit Bid</DialogTitle>
+   869→          <DialogDescription>
+   870→            {tender?.title} · {tender?.reference_number}
+   871→          </DialogDescription>
+   872→        </DialogHeader>
+   873→        <form onSubmit={handleSubmit} className="space-y-4">
+   874→          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+   875→            <div className="space-y-1.5">
+   876→              <Label htmlFor="bid-company">Company Name *</Label>
+   877→              <Input id="bid-company" value={companyName} onChange={(e) => setCompanyName(e.target.value)} required />
+   878→            </div>
+   879→            <div className="space-y-1.5">
+   880→              <Label htmlFor="bid-contact">Contact Person *</Label>
+   881→              <Input id="bid-contact" value={contactPerson} onChange={(e) => setContactPerson(e.target.value)} required />
+   882→            </div>
+   883→            <div className="space-y-1.5">
+   884→              <Label htmlFor="bid-email">Email</Label>
+   885→              <Input id="bid-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+   886→            </div>
+   887→            <div className="space-y-1.5">
+   888→              <Label htmlFor="bid-phone">Phone</Label>
+   889→              <Input id="bid-phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
+   890→            </div>
+   891→            <div className="space-y-1.5">
+   892→              <Label htmlFor="bid-bbbee">B-BBEE Level</Label>
+   893→              <Select value={bbbeeLevel} onValueChange={setBbbeeLevel}>
+   894→                <SelectTrigger id="bid-bbbee"><SelectValue placeholder="Select level" /></SelectTrigger>
+   895→                <SelectContent>
+   896→                  {["Level 1", "Level 2", "Level 3", "Level 4", "Level 5", "Level 6", "Level 7", "Level 8", "Non-compliant"].map((l) => (
+   897→                    <SelectItem key={l} value={l}>{l}</SelectItem>
+   898→                  ))}
+   899→                </SelectContent>
+   900→              </Select>
+   901→            </div>
+   902→            <div className="space-y-1.5">
+   903→              <Label htmlFor="bid-amount">Bid Amount (R)</Label>
+   904→              <Input id="bid-amount" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" />
+   905→            </div>
+   906→          </div>
+   907→          <div className="space-y-1.5">
+   908→            <Label htmlFor="bid-summary">Proposal Summary</Label>
+   909→            <Textarea
+   910→              id="bid-summary"
+   911→              rows={4}
+   912→              value={summary}
+   913→              onChange={(e) => setSummary(e.target.value)}
+   914→              placeholder="Briefly describe your approach, experience, and value proposition…"
+   915→            />
+   916→          </div>
+   917→          <div className="space-y-1.5">
+   918→            <Label htmlFor="bid-files">Supporting Documents</Label>
+   919→            <Input
+   920→              id="bid-files"
+   921→              type="file"
+   922→              multiple
+   923→              onChange={(e) => setFiles(Array.from(e.target.files || []))}
+   924→            />
+   925→            <p className="text-xs text-muted-foreground">
+   926→              Upload any supporting documents (company profile, B-BBEE certificate, references, etc.)
+   927→            </p>
+   928→          </div>
+   929→          <div className="flex justify-end gap-2 pt-2 border-t">
+   930→            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+   931→            <Button type="submit" disabled={submitting}>
+   932→              {submitting ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Send className="h-4 w-4 mr-1.5" />}
+   933→              {submitting ? "Submitting…" : "Submit Bid"}
+   934→            </Button>
+   935→          </div>
+   936→        </form>
+   937→      </DialogContent>
+   938→    </Dialog>
+   939→  );
+   940→}
+
+[showing lines 1-940 of 941; use offset=941 with limit to continue reading]

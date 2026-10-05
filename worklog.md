@@ -1785,3 +1785,62 @@ Stage Summary:
 - Issuer accounts route to the Issuer Portal with all 8 tabs
 - The demo issuer account (issuer@demo.co.za / password123) still works
 - A new test account (browserissuer@test.co.za) was created and verified in the browser
+
+---
+Task ID: RESTYLE-1
+Agent: frontend-styling-expert
+Task: Restyle Issuer Portal + Discover Tenders tab
+
+Work Log:
+- Read worklog.md to understand prior work (8-tab Issuer Portal + Discover Tenders tab already functional)
+- Read full discover-tab.tsx (940 lines) and issuer-portal.tsx (3,036 lines) to map current styling
+- Verified tailwind.config.ts (Tailwind v3, default spacing scale, darkMode: class) before editing
+- Issuer Portal — PortalShell:
+  • Header: flat bg-amber-600 → `bg-gradient-to-r from-amber-600 via-amber-600 to-orange-600` with `border-b border-amber-700/20` and `shadow-md shadow-amber-900/5`
+  • Logo: wrapped Building2 in frosted `bg-white/15 backdrop-blur-sm rounded-lg p-1.5` badge
+  • Company name subtitle text shifted to `text-amber-100/80`
+  • Sign Out button: frosted glass `bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-sm`
+  • Sidebar nav: rounded-lg → rounded-xl, gap-1 → gap-0.5, added "MENU" section label
+  • Active item: `bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md shadow-amber-500/30` + left white accent bar + `bg-white/20 rounded-md p-1` icon container
+  • Inactive: `text-amber-900/70 hover:bg-amber-50 hover:text-amber-900`
+  • Footer: `bg-white` → `bg-gradient-to-b from-white to-amber-50/30`
+- Issuer Portal — All 8 tabs:
+  • Overview: stat cards use `bg-gradient-to-br from-white to-amber-50/30`, icon container `h-11 w-11 rounded-xl`, added accent dot via toneDot map; leaderboard & quick-action cards get `border-amber-100/80 shadow-sm hover:shadow-md` + `border-b border-amber-50` header separator; ranking circles use amber/orange/slate gradients; QuickAction button icon container uses amber gradient
+  • Tenders: tender cards get `border-l-4 border-l-emerald-400` (published) / `border-l-amber-400` (draft) + `hover:-translate-y-0.5 hover:shadow-lg transition-all`; Published badge `bg-emerald-100 text-emerald-700 border border-emerald-200`, Draft badge `bg-amber-100 text-amber-700 border border-amber-200`, Awarded badge amber gradient; Create Tender / Save Changes buttons amber gradient; outline buttons `border-amber-200 text-amber-700 hover:bg-amber-50 hover:border-amber-300`
+  • AI Tender Writer: prompt card `bg-gradient-to-br from-amber-50 to-orange-50/50 border-amber-200 shadow-sm` with gradient Sparkles icon container; Generate button amber gradient + `animate-pulse` when enabled; result card `shadow-lg` with emerald checkmark badge instead of FileText icon
+  • Bid Management: cards `border-amber-100/80 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all`; outline buttons use new amber outline style
+  • Top Bidders: leaderboard & bids-per-tender cards get `border-amber-100/80 shadow-sm hover:shadow-md`, `border-b border-amber-50` header separators, gradient ranking circles; selected tender button uses amber gradient
+  • Bid Review: left panel `bg-amber-50/20` with `border-b border-amber-100/80` header, selected tender uses amber gradient; right panel cards `bg-white shadow-sm hover:shadow-md`; Recommended Winner card `bg-gradient-to-br from-emerald-50 to-amber-50 border-2 border-emerald-300 shadow-md` with trophy icon in emerald gradient circle; technical/financial scores shown as `h-12 w-12 rounded-full bg-gradient-to-br from-amber-500 to-orange-500 text-white` circles; Award button amber gradient
+  • BidStatusBadge: Awarded now uses amber gradient; Pending uses `bg-amber-100 text-amber-800 border border-amber-200`
+  • ScoreCard: rebuilt as horizontal card with `h-14 w-14 rounded-full bg-gradient-to-br from-amber-500 to-orange-500 text-white` score circle + gradient progress bar
+  • Members: cards amber/80 shadow hover lift; Admin badge uses amber gradient; Approve button emerald gradient; info banner `bg-gradient-to-br from-amber-50/70 to-transparent`
+  • Settings: Company Profile card `border-amber-100/80 shadow-sm hover:shadow-md` with `border-b border-amber-50`; SettingsItem cards use `bg-gradient-to-br from-white to-amber-50/30` + shadow hover; heads-up banner `bg-gradient-to-br from-amber-50 to-orange-50/40`
+  • EmptyState: icon container upgraded to `bg-amber-50 rounded-full p-4 w-20 h-20 mx-auto border border-amber-100` with `text-amber-300` icon
+  • CompanySetup + footer also restyled to match new gradient header & footer treatment
+- Discover Tab (emerald theme):
+  • Header: Radar icon moved into `bg-gradient-to-br from-emerald-500 to-teal-600 text-white p-2.5 rounded-xl shadow-md shadow-emerald-500/30` circle
+  • Stats cards: `bg-gradient-to-br from-white to-emerald-50/30`, icon containers `h-11 w-11 rounded-xl bg-emerald-100 text-emerald-700` (amber accent kept for "Issuing Organisations" card for visual variety)
+  • Search/filter card: `shadow-sm border-emerald-100/50`; search input + select trigger get `focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400`
+  • Tender cards: `hover:-translate-y-0.5 hover:shadow-lg hover:border-emerald-300 transition-all duration-200`; added status cards already get `border-emerald-300 ring-1 ring-emerald-200 shadow-emerald-500/10`
+  • Reference number badge: `font-mono text-[10px] text-muted-foreground bg-muted/50 px-2 py-0.5 rounded`
+  • Category badge: `bg-emerald-50 text-emerald-700 border-emerald-200`
+  • "days left" badge: kept color logic, upgraded from `h-4` to `h-5` with better padding
+  • Budget: `font-bold text-emerald-700` + `text-emerald-600` TrendingUp icon
+  • "Add to My Tenders" button: `bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-sm shadow-emerald-500/30`
+  • Added progress bar: `bg-gradient-to-r from-emerald-400 to-teal-500` via `[&>div]:` selector
+  • Empty state: emerald-tinted circle with `text-emerald-300` icon
+  • Detail dialog: key-details cells `bg-gradient-to-br from-muted/30 to-transparent border-emerald-100/60`; section labels `text-emerald-700` with `h-3 w-0.5 rounded-full bg-emerald-500` accent bar; full tender document section `border-emerald-100 bg-emerald-50/20`; contact section emerald gradient panel
+  • Submit Bid dialog: all Labels `text-emerald-900 font-medium`; all inputs/textarea/select get `focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400`; Submit Bid button uses emerald gradient + shadow; Cancel button emerald outline style
+- Ran `bun run lint` from project root → exit code 0, no errors
+- Ran `bunx eslint` directly on both modified files → exit code 0
+- Confirmed pre-existing TS errors in discover-tab.tsx (lines 665, 671 — `selectedTender.submission_method`) are NOT introduced by this task — verified via `git stash` comparison that they existed at lines 649/652 in the pre-edit version
+
+Stage Summary:
+- Issuer Portal (amber theme) and Discover Tenders tab (emerald theme) fully restyled with premium SaaS aesthetic
+- Both files preserve 100% of original functionality — no state logic, API calls, imports, or component structure changed
+- Only Tailwind class adjustments, gradient backgrounds, shadow tiers, hover lifts, rounded-xl corners, and frosted-glass effects added
+- Sticky footer + min-h-screen flex layout preserved (`mt-auto` + `min-h-screen flex flex-col`)
+- All `cn()` conditional-class usages preserved
+- No new dependencies added; `CheckCircle2` icon reused for AI Tender Writer success badge (already imported)
+- Lint passes clean on both files (exit 0)
+- No new TypeScript errors introduced (2 pre-existing TS errors in discover-tab.tsx predate this task)

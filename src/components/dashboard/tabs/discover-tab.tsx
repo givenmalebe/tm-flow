@@ -315,23 +315,25 @@ export function DiscoverTab() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Radar className="h-6 w-6 text-primary" />
-            Discover Tenders
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Browse live tender opportunities published on the TM Flow platform.
-          </p>
+        <div className="flex items-center gap-3">
+          <div className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white p-2.5 rounded-xl shadow-md shadow-emerald-500/30">
+            <Radar className="h-6 w-6" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold">Discover Tenders</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Browse live tender opportunities published on the TM Flow platform.
+            </p>
+          </div>
         </div>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Card>
+        <Card className="border-emerald-100/50 shadow-sm hover:shadow-md transition-shadow bg-gradient-to-br from-white to-emerald-50/30">
           <CardContent className="p-4 flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-              <Inbox className="h-5 w-5 text-primary" />
+            <div className="h-11 w-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+              <Inbox className="h-5 w-5" />
             </div>
             <div>
               <div className="text-2xl font-bold">{totalTenders}</div>
@@ -339,10 +341,10 @@ export function DiscoverTab() {
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="border-emerald-100/50 shadow-sm hover:shadow-md transition-shadow bg-gradient-to-br from-white to-emerald-50/30">
           <CardContent className="p-4 flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-amber-100 flex items-center justify-center">
-              <Building2 className="h-5 w-5 text-amber-600" />
+            <div className="h-11 w-11 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center">
+              <Building2 className="h-5 w-5" />
             </div>
             <div>
               <div className="text-2xl font-bold">{companies}</div>
@@ -350,10 +352,10 @@ export function DiscoverTab() {
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="border-emerald-100/50 shadow-sm hover:shadow-md transition-shadow bg-gradient-to-br from-white to-emerald-50/30">
           <CardContent className="p-4 flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-emerald-100 flex items-center justify-center">
-              <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+            <div className="h-11 w-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+              <CheckCircle2 className="h-5 w-5" />
             </div>
             <div>
               <div className="text-2xl font-bold">{addedCount}</div>
@@ -364,7 +366,7 @@ export function DiscoverTab() {
       </div>
 
       {/* Search + filter */}
-      <Card>
+      <Card className="shadow-sm border-emerald-100/50">
         <CardContent className="p-4 space-y-3">
           <div className="flex flex-col sm:flex-row gap-3">
             <div className="relative flex-1">
@@ -373,11 +375,11 @@ export function DiscoverTab() {
                 placeholder="Search by title, reference, company, category, location…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
+                className="pl-9 focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400"
               />
             </div>
             <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger className="w-full sm:w-56">
+              <SelectTrigger className="w-full sm:w-56 focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400">
                 <Filter className="h-4 w-4 mr-2 text-muted-foreground" />
                 <SelectValue placeholder="All categories" />
               </SelectTrigger>
@@ -403,13 +405,15 @@ export function DiscoverTab() {
       {/* Tenders grid */}
       {loading ? (
         <div className="flex flex-col items-center justify-center py-16">
-          <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
+          <Loader2 className="h-8 w-8 animate-spin text-emerald-600 mb-3" />
           <p className="text-sm text-muted-foreground">Loading published tenders…</p>
         </div>
       ) : filtered.length === 0 ? (
-        <Card>
+        <Card className="border-emerald-100/50">
           <CardContent className="p-12 text-center">
-            <FileText className="h-16 w-16 text-muted-foreground/30 mx-auto mb-4" />
+            <div className="bg-emerald-50 rounded-full p-4 w-20 h-20 mx-auto mb-4 flex items-center justify-center border border-emerald-100">
+              <FileText className="h-8 w-8 text-emerald-300" />
+            </div>
             <h3 className="text-lg font-semibold mb-1">
               {totalTenders === 0 ? "No tenders published yet" : "No results found"}
             </h3>
@@ -419,7 +423,7 @@ export function DiscoverTab() {
                 : "Try a different search term or category filter."}
             </p>
             {search && (
-              <Button variant="outline" className="mt-4" onClick={() => { setSearch(""); setCategory("All"); }}>
+              <Button variant="outline" className="mt-4 border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300" onClick={() => { setSearch(""); setCategory("All"); }}>
                 Clear filters
               </Button>
             )}
@@ -435,18 +439,21 @@ export function DiscoverTab() {
               <Card
                 key={t.id}
                 className={cn(
-                  "flex flex-col transition-all hover:shadow-lg",
-                  isAdded ? "border-emerald-300 ring-1 ring-emerald-200" : "hover:border-primary/30"
+                  "flex flex-col transition-all duration-200 border-emerald-100/50 shadow-sm",
+                  isAdded
+                    ? "border-emerald-300 ring-1 ring-emerald-200 shadow-emerald-500/10"
+                    : "",
+                  "hover:-translate-y-0.5 hover:shadow-lg hover:border-emerald-300"
                 )}
               >
                 <CardContent className="p-5 flex flex-col flex-1">
                   {/* Top row */}
                   <div className="flex items-start justify-between gap-2 mb-2">
-                    <span className="text-[10px] font-mono text-muted-foreground">
+                    <span className="font-mono text-[10px] text-muted-foreground bg-muted/50 px-2 py-0.5 rounded">
                       {t.reference_number}
                     </span>
                     {t.category && (
-                      <Badge variant="outline" className="text-[9px] h-5 px-1.5 bg-primary/5 text-primary border-primary/20 shrink-0">
+                      <Badge variant="outline" className="text-[9px] h-5 px-1.5 bg-emerald-50 text-emerald-700 border-emerald-200 shrink-0">
                         {t.category}
                       </Badge>
                     )}
@@ -472,7 +479,7 @@ export function DiscoverTab() {
                         <Badge
                           variant="outline"
                           className={cn(
-                            "text-[9px] h-4 px-1 ml-auto",
+                            "text-[9px] h-5 px-1.5 ml-auto",
                             days <= 7
                               ? "bg-rose-50 text-rose-700 border-rose-200"
                               : days <= 30
@@ -490,8 +497,8 @@ export function DiscoverTab() {
                     </div>
                     {t.budget > 0 && (
                       <div className="flex items-center gap-1.5">
-                        <TrendingUp className="h-3 w-3 shrink-0" />
-                        <span className="font-medium text-foreground">
+                        <TrendingUp className="h-3 w-3 shrink-0 text-emerald-600" />
+                        <span className="font-bold text-emerald-700">
                           Est. R {t.budget.toLocaleString("en-ZA")}
                         </span>
                       </div>
@@ -500,7 +507,7 @@ export function DiscoverTab() {
 
                   {/* Added status + progress */}
                   {isAdded && (
-                    <div className="mt-3 p-2 rounded-md bg-emerald-50 border border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-800">
+                    <div className="mt-3 p-2 rounded-md bg-emerald-50/70 border border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-800">
                       <div className="flex items-center justify-between text-[11px] mb-1">
                         <span className="flex items-center gap-1 font-medium text-emerald-700 dark:text-emerald-400">
                           <CheckCircle2 className="h-3 w-3" />
@@ -508,7 +515,7 @@ export function DiscoverTab() {
                         </span>
                         <span className="text-emerald-700 dark:text-emerald-400 font-semibold">{progress}%</span>
                       </div>
-                      <Progress value={progress} className="h-1.5 bg-emerald-100" />
+                      <Progress value={progress} className="h-1.5 bg-emerald-100 [&>div]:bg-gradient-to-r [&>div]:from-emerald-400 [&>div]:to-teal-500" />
                     </div>
                   )}
 
@@ -517,7 +524,7 @@ export function DiscoverTab() {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="flex-1 text-xs"
+                      className="flex-1 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300"
                       onClick={() => openDetail(t)}
                     >
                       <Eye className="h-3.5 w-3.5 mr-1" />
@@ -526,7 +533,7 @@ export function DiscoverTab() {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="text-xs"
+                      className="text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300"
                       onClick={() => downloadPDF(t)}
                     >
                       <Download className="h-3.5 w-3.5" />
@@ -544,7 +551,7 @@ export function DiscoverTab() {
                     ) : (
                       <Button
                         size="sm"
-                        className="flex-1 text-xs"
+                        className="flex-1 text-xs bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-sm shadow-emerald-500/30 transition-all duration-200"
                         onClick={() => handleAddToMyTenders(t)}
                       >
                         <Plus className="h-3.5 w-3.5 mr-1" />
@@ -564,7 +571,7 @@ export function DiscoverTab() {
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           {loadingDetail ? (
             <div className="p-12 flex flex-col items-center">
-              <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
+              <Loader2 className="h-8 w-8 animate-spin text-emerald-600 mb-3" />
               <p className="text-sm text-muted-foreground">Loading tender details…</p>
             </div>
           ) : selectedTender && (
@@ -573,11 +580,11 @@ export function DiscoverTab() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2 mb-2">
-                      <span className="text-[10px] font-mono text-muted-foreground px-2 py-0.5 rounded bg-muted">
+                      <span className="font-mono text-[10px] text-muted-foreground px-2 py-0.5 rounded bg-muted/50">
                         {selectedTender.reference_number}
                       </span>
                       {selectedTender.category && (
-                        <Badge variant="outline" className="text-[9px] h-5 px-1.5 bg-primary/5 text-primary border-primary/20">
+                        <Badge variant="outline" className="text-[9px] h-5 px-1.5 bg-emerald-50 text-emerald-700 border-emerald-200">
                           {selectedTender.category}
                         </Badge>
                       )}
@@ -596,28 +603,28 @@ export function DiscoverTab() {
 
               {/* Key details grid */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 py-2">
-                <div className="rounded-md border p-3">
-                  <div className="text-[10px] uppercase text-muted-foreground flex items-center gap-1">
+                <div className="rounded-lg border border-emerald-100/60 bg-gradient-to-br from-muted/30 to-transparent p-3">
+                  <div className="text-[10px] uppercase tracking-wide font-medium text-emerald-700 flex items-center gap-1">
                     <Building2 className="h-3 w-3" /> Category
                   </div>
                   <div className="text-sm font-medium mt-1">{selectedTender.category || "—"}</div>
                 </div>
-                <div className="rounded-md border p-3">
-                  <div className="text-[10px] uppercase text-muted-foreground flex items-center gap-1">
+                <div className="rounded-lg border border-emerald-100/60 bg-gradient-to-br from-muted/30 to-transparent p-3">
+                  <div className="text-[10px] uppercase tracking-wide font-medium text-emerald-700 flex items-center gap-1">
                     <TrendingUp className="h-3 w-3" /> Budget
                   </div>
-                  <div className="text-sm font-bold mt-1 text-amber-700">
+                  <div className="text-sm font-bold mt-1 text-emerald-700">
                     {selectedTender.budget ? `R ${selectedTender.budget.toLocaleString("en-ZA")}` : "—"}
                   </div>
                 </div>
-                <div className="rounded-md border p-3">
-                  <div className="text-[10px] uppercase text-muted-foreground flex items-center gap-1">
+                <div className="rounded-lg border border-emerald-100/60 bg-gradient-to-br from-muted/30 to-transparent p-3">
+                  <div className="text-[10px] uppercase tracking-wide font-medium text-emerald-700 flex items-center gap-1">
                     <CalendarClock className="h-3 w-3" /> Closing
                   </div>
                   <div className="text-sm font-medium mt-1">{formatDate(selectedTender.closing_date)}</div>
                 </div>
-                <div className="rounded-md border p-3">
-                  <div className="text-[10px] uppercase text-muted-foreground flex items-center gap-1">
+                <div className="rounded-lg border border-emerald-100/60 bg-gradient-to-br from-muted/30 to-transparent p-3">
+                  <div className="text-[10px] uppercase tracking-wide font-medium text-emerald-700 flex items-center gap-1">
                     <MapPin className="h-3 w-3" /> Location
                   </div>
                   <div className="text-sm font-medium mt-1 line-clamp-2">{selectedTender.location || "—"}</div>
@@ -627,38 +634,51 @@ export function DiscoverTab() {
               {/* Description */}
               {(fullTender?.description || selectedTender.description) && (
                 <div>
-                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5 font-medium">Description</div>
+                  <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide mb-1.5 font-medium text-emerald-700">
+                    <span className="h-3 w-0.5 rounded-full bg-emerald-500" />
+                    Description
+                  </div>
                   <p className="text-sm whitespace-pre-wrap leading-relaxed">{fullTender?.description || selectedTender.description}</p>
                 </div>
               )}
 
               {fullTender?.scope_of_work && (
                 <div>
-                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5 font-medium">Scope of Work</div>
+                  <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide mb-1.5 font-medium text-emerald-700">
+                    <span className="h-3 w-0.5 rounded-full bg-emerald-500" />
+                    Scope of Work
+                  </div>
                   <p className="text-sm whitespace-pre-wrap leading-relaxed">{fullTender.scope_of_work}</p>
                 </div>
               )}
 
               {fullTender?.evaluation_criteria && (
                 <div>
-                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5 font-medium">Evaluation Criteria</div>
+                  <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide mb-1.5 font-medium text-emerald-700">
+                    <span className="h-3 w-0.5 rounded-full bg-emerald-500" />
+                    Evaluation Criteria
+                  </div>
                   <p className="text-sm whitespace-pre-wrap leading-relaxed">{fullTender.evaluation_criteria}</p>
                 </div>
               )}
 
               {(fullTender?.submission_method || selectedTender.submission_method) && (
                 <div>
-                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5 font-medium">Submission Method</div>
+                  <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide mb-1.5 font-medium text-emerald-700">
+                    <span className="h-3 w-0.5 rounded-full bg-emerald-500" />
+                    Submission Method
+                  </div>
                   <p className="text-sm whitespace-pre-wrap leading-relaxed">{fullTender?.submission_method || selectedTender.submission_method}</p>
                 </div>
               )}
 
               {fullTender?.ai_generated_content && (
                 <div>
-                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5 font-medium flex items-center gap-1">
+                  <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide mb-1.5 font-medium text-emerald-700">
+                    <span className="h-3 w-0.5 rounded-full bg-emerald-500" />
                     <FileText className="h-3 w-3" /> Full Tender Document
                   </div>
-                  <div className="rounded-md border border-border bg-muted/30 p-4 max-h-[300px] overflow-y-auto">
+                  <div className="rounded-lg border border-emerald-100 bg-emerald-50/20 p-4 max-h-[300px] overflow-y-auto">
                     <pre className="text-xs whitespace-pre-wrap font-sans leading-relaxed">{fullTender.ai_generated_content}</pre>
                   </div>
                 </div>
@@ -666,8 +686,11 @@ export function DiscoverTab() {
 
               {/* Contact */}
               {(fullTender?.contact_person || fullTender?.contact_email || fullTender?.contact_phone) && (
-                <div className="rounded-md border border-border p-4 bg-muted/20">
-                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2 font-medium">Contact Details</div>
+                <div className="rounded-lg border border-emerald-100/60 p-4 bg-gradient-to-br from-muted/20 to-transparent">
+                  <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide mb-2 font-medium text-emerald-700">
+                    <span className="h-3 w-0.5 rounded-full bg-emerald-500" />
+                    Contact Details
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
                     {fullTender?.contact_person && (
                       <div><span className="text-[10px] text-muted-foreground">Person</span><div className="font-medium">{fullTender.contact_person}</div></div>
@@ -684,13 +707,13 @@ export function DiscoverTab() {
 
               {/* Compliance check */}
               {compliance && (
-                <div className="rounded-md border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 dark:border-emerald-800 p-4">
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 dark:border-emerald-800 p-4 shadow-sm">
                   <div className="flex items-center justify-between mb-2">
-                    <div className="text-[11px] uppercase tracking-wide font-medium text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
+                    <div className="text-[11px] uppercase tracking-wide font-medium text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
                       <ShieldCheck className="h-3.5 w-3.5" /> Compliance Check
                     </div>
                     <Badge className={cn(
-                      "text-xs",
+                      "text-xs shadow-sm",
                       compliance.compliance_percentage >= 80
                         ? "bg-emerald-600"
                         : compliance.compliance_percentage >= 50
@@ -725,12 +748,13 @@ export function DiscoverTab() {
 
               {/* Actions */}
               <div className="flex flex-wrap gap-2 pt-2 border-t">
-                <Button size="sm" variant="outline" onClick={() => downloadPDF(selectedTender)}>
+                <Button size="sm" variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300" onClick={() => downloadPDF(selectedTender)}>
                   <Download className="h-4 w-4 mr-1.5" /> Download PDF
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
+                  className="border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300"
                   onClick={() => handleComplianceCheck(selectedTender)}
                   disabled={checkingCompliance}
                 >
@@ -753,7 +777,7 @@ export function DiscoverTab() {
                     </Button>
                     <Button
                       size="sm"
-                      className="ml-auto"
+                      className="ml-auto bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-sm shadow-emerald-500/30 transition-all duration-200"
                       onClick={() => setShowSubmit(true)}
                     >
                       <Send className="h-4 w-4 mr-1.5" /> Submit Bid
@@ -762,7 +786,7 @@ export function DiscoverTab() {
                 ) : (
                   <Button
                     size="sm"
-                    className="ml-auto"
+                    className="ml-auto bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-sm shadow-emerald-500/30 transition-all duration-200"
                     onClick={() => handleAddToMyTenders(selectedTender)}
                   >
                     <Plus className="h-4 w-4 mr-1.5" /> Add to My Tenders
@@ -873,25 +897,25 @@ function SubmitBidDialog({
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="bid-company">Company Name *</Label>
-              <Input id="bid-company" value={companyName} onChange={(e) => setCompanyName(e.target.value)} required />
+              <Label htmlFor="bid-company" className="text-emerald-900 font-medium">Company Name *</Label>
+              <Input id="bid-company" value={companyName} onChange={(e) => setCompanyName(e.target.value)} required className="focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="bid-contact">Contact Person *</Label>
-              <Input id="bid-contact" value={contactPerson} onChange={(e) => setContactPerson(e.target.value)} required />
+              <Label htmlFor="bid-contact" className="text-emerald-900 font-medium">Contact Person *</Label>
+              <Input id="bid-contact" value={contactPerson} onChange={(e) => setContactPerson(e.target.value)} required className="focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="bid-email">Email</Label>
-              <Input id="bid-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <Label htmlFor="bid-email" className="text-emerald-900 font-medium">Email</Label>
+              <Input id="bid-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="bid-phone">Phone</Label>
-              <Input id="bid-phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
+              <Label htmlFor="bid-phone" className="text-emerald-900 font-medium">Phone</Label>
+              <Input id="bid-phone" value={phone} onChange={(e) => setPhone(e.target.value)} className="focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="bid-bbbee">B-BBEE Level</Label>
+              <Label htmlFor="bid-bbbee" className="text-emerald-900 font-medium">B-BBEE Level</Label>
               <Select value={bbbeeLevel} onValueChange={setBbbeeLevel}>
-                <SelectTrigger id="bid-bbbee"><SelectValue placeholder="Select level" /></SelectTrigger>
+                <SelectTrigger id="bid-bbbee" className="focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400"><SelectValue placeholder="Select level" /></SelectTrigger>
                 <SelectContent>
                   {["Level 1", "Level 2", "Level 3", "Level 4", "Level 5", "Level 6", "Level 7", "Level 8", "Non-compliant"].map((l) => (
                     <SelectItem key={l} value={l}>{l}</SelectItem>
@@ -900,22 +924,23 @@ function SubmitBidDialog({
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="bid-amount">Bid Amount (R)</Label>
-              <Input id="bid-amount" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" />
+              <Label htmlFor="bid-amount" className="text-emerald-900 font-medium">Bid Amount (R)</Label>
+              <Input id="bid-amount" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" className="focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400" />
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="bid-summary">Proposal Summary</Label>
+            <Label htmlFor="bid-summary" className="text-emerald-900 font-medium">Proposal Summary</Label>
             <Textarea
               id="bid-summary"
               rows={4}
               value={summary}
               onChange={(e) => setSummary(e.target.value)}
               placeholder="Briefly describe your approach, experience, and value proposition…"
+              className="focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400"
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="bid-files">Supporting Documents</Label>
+            <Label htmlFor="bid-files" className="text-emerald-900 font-medium">Supporting Documents</Label>
             <Input
               id="bid-files"
               type="file"
@@ -927,8 +952,12 @@ function SubmitBidDialog({
             </p>
           </div>
           <div className="flex justify-end gap-2 pt-2 border-t">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" disabled={submitting}>
+            <Button type="button" variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button
+              type="submit"
+              disabled={submitting}
+              className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-sm shadow-emerald-500/30 transition-all duration-200"
+            >
               {submitting ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Send className="h-4 w-4 mr-1.5" />}
               {submitting ? "Submitting…" : "Submit Bid"}
             </Button>

@@ -328,7 +328,10 @@ function PortalShell({
   children: React.ReactNode;
 }) {
   const SidebarContent = (
-    <nav className="flex flex-col gap-1 p-3">
+    <nav className="flex flex-col gap-0.5 p-3">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-600/60 px-3 pt-3 pb-1">
+        Menu
+      </div>
       {TABS.map((tab) => {
         const Icon = tab.icon;
         const active = activeTab === tab.id;
@@ -339,14 +342,24 @@ function PortalShell({
             disabled={disabled}
             onClick={() => onTabChange(tab.id)}
             className={cn(
-              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors text-left",
+              "relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 text-left",
               "disabled:opacity-50 disabled:cursor-not-allowed",
               active
-                ? "bg-amber-600 text-white shadow-sm"
-                : "text-amber-900 hover:bg-amber-100"
+                ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md shadow-amber-500/30"
+                : "text-amber-900/70 hover:bg-amber-50 hover:text-amber-900"
             )}
           >
-            <Icon className="h-4.5 w-4.5 shrink-0" />
+            {active && (
+              <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-white/80" />
+            )}
+            <span
+              className={cn(
+                "flex items-center justify-center transition-colors",
+                active ? "bg-white/20 rounded-md p-1 -ml-0.5" : "p-0"
+              )}
+            >
+              <Icon className="h-4.5 w-4.5 shrink-0" />
+            </span>
             <span className="truncate">{tab.label}</span>
           </button>
         );
@@ -357,7 +370,7 @@ function PortalShell({
   return (
     <div className="min-h-screen flex flex-col bg-amber-50/30">
       {/* Header */}
-      <header className="sticky top-0 z-40 bg-amber-600 text-white shadow-md">
+      <header className="sticky top-0 z-40 bg-gradient-to-r from-amber-600 via-amber-600 to-orange-600 text-white shadow-md shadow-amber-900/5 border-b border-amber-700/20">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
             {/* Mobile nav trigger */}
@@ -365,7 +378,7 @@ function PortalShell({
               <SheetTrigger asChild>
                 <button
                   type="button"
-                  className="lg:hidden inline-flex items-center justify-center rounded-md p-2 hover:bg-amber-700/50"
+                  className="lg:hidden inline-flex items-center justify-center rounded-md p-2 hover:bg-white/15 transition-colors"
                   aria-label="Open menu"
                 >
                   <Menu className="h-5 w-5" />
@@ -382,10 +395,12 @@ function PortalShell({
               </SheetContent>
             </Sheet>
 
-            <Building2 className="h-6 w-6 shrink-0" />
+            <div className="flex items-center justify-center bg-white/15 backdrop-blur-sm rounded-lg p-1.5">
+              <Building2 className="h-5 w-5 shrink-0" />
+            </div>
             <div className="flex flex-col leading-tight">
               <span className="text-base font-semibold">TM Flow — Issuer Portal</span>
-              <span className="text-[11px] text-amber-100/90 hidden sm:block">
+              <span className="text-[11px] text-amber-100/80 hidden sm:block">
                 {company?.name || "Your organisation"}
               </span>
             </div>
@@ -394,7 +409,7 @@ function PortalShell({
           <div className="flex items-center gap-3">
             <div className="hidden sm:flex flex-col items-end leading-tight">
               <span className="text-sm font-medium">{user?.full_name || "User"}</span>
-              <span className="text-[11px] text-amber-100/90">{user?.email}</span>
+              <span className="text-[11px] text-amber-100/80">{user?.email}</span>
             </div>
             <Avatar className="h-9 w-9 border-2 border-amber-300">
               <AvatarFallback className="bg-amber-700 text-white text-xs font-semibold">
@@ -405,7 +420,7 @@ function PortalShell({
               variant="secondary"
               size="sm"
               onClick={onLogout}
-              className="bg-white text-amber-700 hover:bg-amber-50"
+              className="bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-sm"
             >
               <LogOut className="h-4 w-4 mr-1.5" />
               <span className="hidden sm:inline">Sign Out</span>
@@ -428,7 +443,7 @@ function PortalShell({
       </div>
 
       {/* Footer */}
-      <footer className="mt-auto border-t border-amber-100 bg-white">
+      <footer className="mt-auto border-t border-amber-100 bg-gradient-to-b from-white to-amber-50/30">
         <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5">
             <Building2 className="h-3.5 w-3.5 text-amber-600" />
@@ -535,17 +550,19 @@ function CompanySetup({
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-b from-amber-50 to-white">
-      <header className="bg-amber-600 text-white shadow">
+      <header className="bg-gradient-to-r from-amber-600 via-amber-600 to-orange-600 text-white shadow-md shadow-amber-900/5 border-b border-amber-700/20">
         <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-2">
-            <Building2 className="h-6 w-6" />
+            <div className="flex items-center justify-center bg-white/15 backdrop-blur-sm rounded-lg p-1.5">
+              <Building2 className="h-5 w-5" />
+            </div>
             <span className="text-base font-semibold">TM Flow — Issuer Portal</span>
           </div>
           <Button
             variant="secondary"
             size="sm"
             onClick={onLogout}
-            className="bg-white text-amber-700 hover:bg-amber-50"
+            className="bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-sm"
           >
             <LogOut className="h-4 w-4 mr-1.5" /> Sign Out
           </Button>
@@ -703,7 +720,7 @@ function CompanySetup({
                   <Button
                     onClick={handleCreate}
                     disabled={creating}
-                    className="bg-amber-600 hover:bg-amber-700 text-white"
+                    className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-sm shadow-amber-500/30 transition-all duration-200"
                   >
                     {creating ? (
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -787,7 +804,7 @@ function CompanySetup({
                   <Button
                     onClick={handleJoin}
                     disabled={joining || !joinSelected}
-                    className="bg-amber-600 hover:bg-amber-700 text-white"
+                    className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-sm shadow-amber-500/30 transition-all duration-200"
                   >
                     {joining ? (
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -803,7 +820,7 @@ function CompanySetup({
         </Card>
       </main>
 
-      <footer className="mt-auto border-t border-amber-100 bg-white">
+      <footer className="mt-auto border-t border-amber-100 bg-gradient-to-b from-white to-amber-50/30">
         <div className="mx-auto max-w-7xl px-4 py-4 text-xs text-muted-foreground text-center">
           TM Flow — Issuer Portal
         </div>
@@ -898,6 +915,13 @@ function OverviewTab({ onJump }: { onJump: (t: TabId) => void }) {
     rose: "bg-rose-100 text-rose-700",
   };
 
+  const toneDot: Record<string, string> = {
+    amber: "bg-amber-500",
+    emerald: "bg-emerald-500",
+    slate: "bg-slate-400",
+    rose: "bg-rose-500",
+  };
+
   const topBidders: any[] = stats?.top_bidders ?? [];
 
   return (
@@ -913,10 +937,21 @@ function OverviewTab({ onJump }: { onJump: (t: TabId) => void }) {
         {cards.map((c) => {
           const Icon = c.icon;
           return (
-            <Card key={c.label} className="border-amber-100">
+            <Card
+              key={c.label}
+              className="border-amber-100/80 shadow-sm hover:shadow-md transition-shadow bg-gradient-to-br from-white to-amber-50/30"
+            >
               <CardContent className="p-4 flex flex-col gap-2">
-                <div className={cn("h-9 w-9 rounded-lg flex items-center justify-center", toneClass[c.tone])}>
-                  <Icon className="h-5 w-5" />
+                <div className="flex items-start justify-between">
+                  <div
+                    className={cn(
+                      "h-11 w-11 rounded-xl flex items-center justify-center",
+                      toneClass[c.tone]
+                    )}
+                  >
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <span className={cn("h-1.5 w-1.5 rounded-full mt-2", toneDot[c.tone])} />
                 </div>
                 <div className="text-2xl font-bold text-amber-900">{c.value}</div>
                 <div className="text-xs text-muted-foreground">{c.label}</div>
@@ -927,8 +962,8 @@ function OverviewTab({ onJump }: { onJump: (t: TabId) => void }) {
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">
-        <Card className="border-amber-100">
-          <CardHeader className="pb-3">
+        <Card className="border-amber-100/80 shadow-sm hover:shadow-md transition-shadow">
+          <CardHeader className="pb-3 border-b border-amber-50">
             <CardTitle className="flex items-center gap-2 text-base">
               <Trophy className="h-4 w-4 text-amber-600" /> Top Bidders
             </CardTitle>
@@ -942,19 +977,19 @@ function OverviewTab({ onJump }: { onJump: (t: TabId) => void }) {
                 description="Bidders will appear here once tenders receive bids."
               />
             ) : (
-              <ul className="space-y-2 max-h-80 overflow-y-auto pr-1">
+              <ul className="space-y-2 max-h-80 overflow-y-auto pr-1 pt-3">
                 {topBidders.slice(0, 10).map((b, i) => (
                   <li
                     key={i}
-                    className="flex items-center justify-between rounded-lg border border-amber-100 bg-amber-50/40 p-3"
+                    className="flex items-center justify-between rounded-xl border border-amber-100/80 bg-gradient-to-br from-amber-50/50 to-transparent p-3 hover:shadow-sm transition-shadow"
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       <div
                         className={cn(
-                          "flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold",
-                          i === 0 && "bg-amber-500 text-white",
-                          i === 1 && "bg-slate-400 text-white",
-                          i === 2 && "bg-orange-400 text-white",
+                          "flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold shadow-sm",
+                          i === 0 && "bg-gradient-to-br from-amber-400 to-orange-500 text-white",
+                          i === 1 && "bg-gradient-to-br from-slate-300 to-slate-400 text-white",
+                          i === 2 && "bg-gradient-to-br from-orange-300 to-amber-400 text-white",
                           i > 2 && "bg-amber-100 text-amber-700"
                         )}
                       >
@@ -981,14 +1016,14 @@ function OverviewTab({ onJump }: { onJump: (t: TabId) => void }) {
           </CardContent>
         </Card>
 
-        <Card className="border-amber-100">
-          <CardHeader className="pb-3">
+        <Card className="border-amber-100/80 shadow-sm hover:shadow-md transition-shadow">
+          <CardHeader className="pb-3 border-b border-amber-50">
             <CardTitle className="flex items-center gap-2 text-base">
               <TrendingUp className="h-4 w-4 text-amber-600" /> Quick Actions
             </CardTitle>
             <CardDescription>Jump to common workflows</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-2">
+          <CardContent className="space-y-2 pt-3">
             <QuickAction
               icon={Bot}
               title="Generate a tender with AI"
@@ -1035,10 +1070,10 @@ function QuickAction({
     <button
       type="button"
       onClick={onClick}
-      className="w-full flex items-center justify-between rounded-lg border border-amber-100 bg-amber-50/40 p-3 text-left hover:bg-amber-100 transition-colors"
+      className="w-full flex items-center justify-between rounded-xl border border-amber-100/80 bg-gradient-to-br from-amber-50/50 to-transparent p-3 text-left hover:shadow-md hover:border-amber-200 transition-all duration-200"
     >
       <div className="flex items-center gap-3 min-w-0">
-        <div className="h-8 w-8 rounded-lg bg-amber-600 text-white flex items-center justify-center">
+        <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 text-white flex items-center justify-center shadow-sm shadow-amber-500/30">
           <Icon className="h-4 w-4" />
         </div>
         <div className="min-w-0">
@@ -1207,7 +1242,7 @@ function TendersTab() {
         </div>
         <Button
           onClick={openCreate}
-          className="bg-amber-600 hover:bg-amber-700 text-white"
+          className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-sm shadow-amber-500/30 transition-all duration-200"
         >
           <Plus className="h-4 w-4 mr-1.5" /> Create Tender
         </Button>
@@ -1238,7 +1273,7 @@ function TendersTab() {
             !search && (
               <Button
                 onClick={openCreate}
-                className="bg-amber-600 hover:bg-amber-700 text-white"
+                className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-sm shadow-amber-500/30 transition-all duration-200"
               >
                 <Plus className="h-4 w-4 mr-1.5" /> Create Tender
               </Button>
@@ -1248,20 +1283,26 @@ function TendersTab() {
       ) : (
         <div className="grid gap-3">
           {filtered.map((t) => (
-            <Card key={t.id} className="border-amber-100 hover:border-amber-300 transition-colors">
+            <Card
+              key={t.id}
+              className={cn(
+                "border-amber-100/80 hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 shadow-sm",
+                t.is_published ? "border-l-4 border-l-emerald-400" : "border-l-4 border-l-amber-400"
+              )}
+            >
               <CardContent className="p-4">
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2 mb-1">
-                      <span className="font-mono text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded">
+                      <span className="font-mono text-[11px] text-amber-700 bg-amber-100 px-2 py-0.5 rounded">
                         {t.reference_number || `T-${t.id}`}
                       </span>
                       {t.is_published ? (
-                        <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
+                        <Badge className="bg-emerald-100 text-emerald-700 border border-emerald-200 hover:bg-emerald-100">
                           <CheckCircle2 className="h-3 w-3 mr-1" /> Published
                         </Badge>
                       ) : (
-                        <Badge variant="outline" className="text-slate-600">
+                        <Badge className="bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-100">
                           Draft
                         </Badge>
                       )}
@@ -1271,7 +1312,7 @@ function TendersTab() {
                         </Badge>
                       )}
                       {t.awarded_bid_id && (
-                        <Badge className="bg-amber-600 text-white hover:bg-amber-600">
+                        <Badge className="bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-500 hover:to-orange-500">
                           <Award className="h-3 w-3 mr-1" /> Awarded
                         </Badge>
                       )}
@@ -1305,7 +1346,7 @@ function TendersTab() {
                       size="sm"
                       variant="outline"
                       onClick={() => openEdit(t)}
-                      className="border-amber-300 text-amber-700 hover:bg-amber-50"
+                      className="border-amber-200 text-amber-700 hover:bg-amber-50 hover:border-amber-300"
                     >
                       <Eye className="h-4 w-4 mr-1" /> View / Edit
                     </Button>
@@ -1495,7 +1536,7 @@ function TendersTab() {
             <Button
               onClick={handleSave}
               disabled={saving}
-              className="bg-amber-600 hover:bg-amber-700 text-white"
+              className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-sm shadow-amber-500/30 transition-all duration-200"
             >
               {saving ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -1599,13 +1640,16 @@ function AIWriterTab() {
         </p>
       </div>
 
-      <Card className="border-amber-200">
-        <CardHeader className="pb-3">
+      <Card className="border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50/50 shadow-sm">
+        <CardHeader className="pb-3 border-b border-amber-100/80">
           <CardTitle className="flex items-center gap-2 text-base">
-            <Sparkles className="h-4 w-4 text-amber-600" /> Prompt
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-sm shadow-amber-500/30">
+              <Sparkles className="h-4 w-4" />
+            </span>
+            Prompt
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-3 pt-4">
           <Field label="What do you need to procure?">
             <Textarea
               rows={3}
@@ -1633,7 +1677,11 @@ function AIWriterTab() {
               <Button
                 onClick={handleGenerate}
                 disabled={generating || !prompt.trim()}
-                className="w-full bg-amber-600 hover:bg-amber-700 text-white"
+                className={cn(
+                  "w-full text-white shadow-md shadow-amber-500/30 transition-all duration-200",
+                  "bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600",
+                  !generating && !!prompt.trim() && "animate-pulse"
+                )}
               >
                 {generating ? (
                   <>
@@ -1672,11 +1720,14 @@ function AIWriterTab() {
       )}
 
       {result && (
-        <Card className="border-amber-300">
-          <CardHeader className="pb-3">
+        <Card className="border-amber-300 shadow-lg">
+          <CardHeader className="pb-3 border-b border-amber-100">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <CardTitle className="flex items-center gap-2 text-base">
-                <FileText className="h-4 w-4 text-amber-600" /> Generated Tender
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 text-white shadow-sm">
+                  <CheckCircle2 className="h-4 w-4" />
+                </span>
+                Generated Tender
               </CardTitle>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={() => setResult(null)}>
@@ -1686,7 +1737,7 @@ function AIWriterTab() {
                   size="sm"
                   onClick={handleSave}
                   disabled={saving}
-                  className="bg-amber-600 hover:bg-amber-700 text-white"
+                  className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-sm shadow-amber-500/30 transition-all duration-200"
                 >
                   {saving ? (
                     <Loader2 className="h-4 w-4 mr-1 animate-spin" />
@@ -1914,7 +1965,10 @@ function BidManagementTab() {
       ) : (
         <div className="grid gap-3">
           {filtered.map((b) => (
-            <Card key={b.id} className="border-amber-100 hover:border-amber-300 transition-colors">
+            <Card
+              key={b.id}
+              className="border-amber-100/80 shadow-sm hover:shadow-md hover:-translate-y-0.5 hover:border-amber-200 transition-all duration-200"
+            >
               <CardContent className="p-4">
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
@@ -1925,7 +1979,7 @@ function BidManagementTab() {
                           B-BBEE {b.bidder_bbbee_level}
                         </Badge>
                       )}
-                      <span className="font-mono text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded">
+                      <span className="font-mono text-[11px] text-amber-700 bg-amber-100 px-2 py-0.5 rounded">
                         {b.tender_reference || `T-${b.tender_id}`}
                       </span>
                     </div>
@@ -1950,7 +2004,7 @@ function BidManagementTab() {
                       size="sm"
                       variant="outline"
                       onClick={() => setDetailBid(b)}
-                      className="border-amber-300 text-amber-700 hover:bg-amber-50"
+                      className="border-amber-200 text-amber-700 hover:bg-amber-50 hover:border-amber-300"
                     >
                       <Eye className="h-4 w-4 mr-1" /> View
                     </Button>
@@ -1983,7 +2037,7 @@ function BidManagementTab() {
 function BidStatusBadge({ status, awarded }: { status?: string; awarded?: boolean }) {
   if (awarded || status === "awarded") {
     return (
-      <Badge className="bg-amber-600 text-white hover:bg-amber-600">
+      <Badge className="bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-500 hover:to-orange-500 shadow-sm shadow-amber-500/30">
         <Crown className="h-3 w-3 mr-1" /> Awarded
       </Badge>
     );
@@ -1996,7 +2050,7 @@ function BidStatusBadge({ status, awarded }: { status?: string; awarded?: boolea
     );
   }
   return (
-    <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">
+    <Badge className="bg-amber-100 text-amber-800 border border-amber-200 hover:bg-amber-100">
       <Clock className="h-3 w-3 mr-1" /> Pending
     </Badge>
   );
@@ -2115,10 +2169,21 @@ function DetailItem({
 function ScoreCard({ label, value }: { label: string; value?: number | null }) {
   const v = typeof value === "number" ? value : 0;
   return (
-    <div className="rounded-lg border border-amber-200 bg-white p-3">
-      <div className="text-xs text-muted-foreground">{label} Score</div>
-      <div className="text-2xl font-bold text-amber-700">{v}/100</div>
-      <Progress value={v} className="h-1.5 mt-2 [&>div]:bg-amber-600" />
+    <div className="rounded-xl border border-amber-100/80 bg-white p-3 flex items-center gap-3 shadow-sm hover:shadow-md transition-shadow">
+      <div className="h-14 w-14 rounded-full bg-gradient-to-br from-amber-500 to-orange-500 text-white flex items-center justify-center text-lg font-bold shadow-md shadow-amber-500/30 shrink-0">
+        {v}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-xs text-muted-foreground">{label} Score</div>
+        <div className="text-lg font-bold text-amber-900">
+          {v}
+          <span className="text-xs text-muted-foreground font-normal">/100</span>
+        </div>
+        <Progress
+          value={v}
+          className="h-1.5 mt-1.5 [&>div]:bg-gradient-to-r [&>div]:from-amber-400 [&>div]:to-orange-500"
+        />
+      </div>
     </div>
   );
 }
@@ -2179,8 +2244,8 @@ function TopBiddersTab() {
       </div>
 
       <div className="grid lg:grid-cols-2 gap-5">
-        <Card className="border-amber-100">
-          <CardHeader className="pb-3">
+        <Card className="border-amber-100/80 shadow-sm hover:shadow-md transition-shadow">
+          <CardHeader className="pb-3 border-b border-amber-50">
             <CardTitle className="flex items-center gap-2 text-base">
               <Trophy className="h-4 w-4 text-amber-600" /> Leaderboard
             </CardTitle>
@@ -2194,19 +2259,19 @@ function TopBiddersTab() {
                 description="Once tenders start receiving bids, your top bidders will appear here."
               />
             ) : (
-              <ul className="space-y-2 max-h-96 overflow-y-auto pr-1">
+              <ul className="space-y-2 max-h-96 overflow-y-auto pr-1 pt-3">
                 {topBidders.map((b, i) => (
                   <li
                     key={i}
-                    className="flex items-center justify-between rounded-lg border border-amber-100 bg-amber-50/40 p-3"
+                    className="flex items-center justify-between rounded-xl border border-amber-100/80 bg-gradient-to-br from-amber-50/50 to-transparent p-3 hover:shadow-sm transition-shadow"
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       <div
                         className={cn(
-                          "flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold shrink-0",
-                          i === 0 && "bg-amber-500 text-white",
-                          i === 1 && "bg-slate-400 text-white",
-                          i === 2 && "bg-orange-400 text-white",
+                          "flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold shrink-0 shadow-sm",
+                          i === 0 && "bg-gradient-to-br from-amber-400 to-orange-500 text-white",
+                          i === 1 && "bg-gradient-to-br from-slate-300 to-slate-400 text-white",
+                          i === 2 && "bg-gradient-to-br from-orange-300 to-amber-400 text-white",
                           i > 2 && "bg-amber-100 text-amber-700"
                         )}
                       >
@@ -2234,14 +2299,14 @@ function TopBiddersTab() {
           </CardContent>
         </Card>
 
-        <Card className="border-amber-100">
-          <CardHeader className="pb-3">
+        <Card className="border-amber-100/80 shadow-sm hover:shadow-md transition-shadow">
+          <CardHeader className="pb-3 border-b border-amber-50">
             <CardTitle className="flex items-center gap-2 text-base">
               <FileStack className="h-4 w-4 text-amber-600" /> Bids Per Tender
             </CardTitle>
             <CardDescription>Click a tender to see its bids</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-3 pt-3">
             {tenders.length === 0 ? (
               <EmptyState
                 icon={FileStack}
@@ -2257,10 +2322,10 @@ function TopBiddersTab() {
                         type="button"
                         onClick={() => setSelectedTenderId(t.id)}
                         className={cn(
-                          "w-full flex items-center justify-between rounded-lg p-2.5 text-left text-sm transition-colors",
+                          "w-full flex items-center justify-between rounded-xl p-2.5 text-left text-sm transition-all duration-200",
                           selectedTenderId === t.id
-                            ? "bg-amber-600 text-white"
-                            : "hover:bg-amber-100 text-amber-900"
+                            ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md shadow-amber-500/30"
+                            : "hover:bg-amber-50 text-amber-900"
                         )}
                       >
                         <span className="truncate">
@@ -2299,7 +2364,7 @@ function TopBiddersTab() {
                     {tenderBids.map((b) => (
                       <li
                         key={b.id}
-                        className="rounded-lg border border-amber-100 bg-amber-50/40 p-3"
+                        className="rounded-xl border border-amber-100/80 bg-gradient-to-br from-amber-50/40 to-transparent p-3 hover:shadow-sm transition-shadow"
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div className="min-w-0">
@@ -2315,7 +2380,7 @@ function TopBiddersTab() {
                               {fmtRand(b.total_amount)}
                             </div>
                             {b.awarded && (
-                              <Badge className="bg-amber-600 text-white hover:bg-amber-600 mt-1">
+                              <Badge className="bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-500 hover:to-orange-500 mt-1 shadow-sm shadow-amber-500/30">
                                 <Crown className="h-3 w-3 mr-1" /> Awarded
                               </Badge>
                             )}
@@ -2453,13 +2518,13 @@ function BidReviewTab() {
 
       <div className="grid lg:grid-cols-3 gap-4">
         {/* Left panel: tenders */}
-        <Card className="border-amber-100 lg:col-span-1">
-          <CardHeader className="pb-3">
+        <Card className="border-amber-100/80 lg:col-span-1 bg-amber-50/20 shadow-sm">
+          <CardHeader className="pb-3 border-b border-amber-100/80">
             <CardTitle className="text-base flex items-center gap-2">
               <FileStack className="h-4 w-4 text-amber-600" /> Tenders
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-3">
             {tenders.length === 0 ? (
               <EmptyState
                 icon={FileStack}
@@ -2474,10 +2539,10 @@ function BidReviewTab() {
                       type="button"
                       onClick={() => setSelectedTenderId(t.id)}
                       className={cn(
-                        "w-full flex items-start justify-between gap-2 rounded-lg p-3 text-left transition-colors",
+                        "w-full flex items-start justify-between gap-2 rounded-xl p-3 text-left transition-all duration-200",
                         selectedTenderId === t.id
-                          ? "bg-amber-600 text-white"
-                          : "hover:bg-amber-100 text-amber-900"
+                          ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md shadow-amber-500/30"
+                          : "hover:bg-amber-100/60 text-amber-900"
                       )}
                     >
                       <div className="min-w-0">
@@ -2528,10 +2593,13 @@ function BidReviewTab() {
           ) : (
             <>
               {recommended && (
-                <Card className="border-amber-400 bg-gradient-to-br from-amber-50 to-amber-100/50">
+                <Card className="border-2 border-emerald-300 bg-gradient-to-br from-emerald-50 to-amber-50 shadow-md">
                   <CardContent className="p-4">
-                    <div className="flex items-center gap-2 text-xs font-semibold text-amber-700 uppercase tracking-wide mb-2">
-                      <Crown className="h-4 w-4" /> Recommended Winner
+                    <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-2">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-sm shadow-emerald-500/30">
+                        <Trophy className="h-3.5 w-3.5" />
+                      </span>
+                      Recommended Winner
                     </div>
                     <div className="flex items-center justify-between flex-wrap gap-2">
                       <div>
@@ -2546,7 +2614,7 @@ function BidReviewTab() {
                         {recommended.technical_score != null && (
                           <div className="text-center">
                             <div className="text-xs text-muted-foreground">Technical</div>
-                            <div className="text-lg font-bold text-amber-800">
+                            <div className="h-12 w-12 rounded-full bg-gradient-to-br from-amber-500 to-orange-500 text-white flex items-center justify-center text-base font-bold shadow-md shadow-amber-500/30 mx-auto mt-1">
                               {recommended.technical_score}
                             </div>
                           </div>
@@ -2554,7 +2622,7 @@ function BidReviewTab() {
                         {recommended.financial_score != null && (
                           <div className="text-center">
                             <div className="text-xs text-muted-foreground">Financial</div>
-                            <div className="text-lg font-bold text-amber-800">
+                            <div className="h-12 w-12 rounded-full bg-gradient-to-br from-amber-500 to-orange-500 text-white flex items-center justify-center text-base font-bold shadow-md shadow-amber-500/30 mx-auto mt-1">
                               {recommended.financial_score}
                             </div>
                           </div>
@@ -2566,7 +2634,10 @@ function BidReviewTab() {
               )}
 
               {bids.map((b) => (
-                <Card key={b.id} className="border-amber-100">
+                <Card
+                  key={b.id}
+                  className="border-amber-100/80 shadow-sm hover:shadow-md transition-shadow bg-white"
+                >
                   <CardContent className="p-4 space-y-3">
                     <div className="flex items-start justify-between gap-3 flex-wrap">
                       <div className="min-w-0">
@@ -2589,7 +2660,7 @@ function BidReviewTab() {
                           variant="outline"
                           onClick={() => handleReview(b)}
                           disabled={reviewingBidId === b.id}
-                          className="border-amber-300 text-amber-700 hover:bg-amber-50"
+                          className="border-amber-200 text-amber-700 hover:bg-amber-50 hover:border-amber-300"
                         >
                           {reviewingBidId === b.id ? (
                             <>
@@ -2622,7 +2693,7 @@ function BidReviewTab() {
                             size="sm"
                             onClick={() => handleAward(b, true)}
                             disabled={awardingBidId === b.id}
-                            className="bg-amber-600 hover:bg-amber-700 text-white"
+                            className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-sm shadow-amber-500/30 transition-all duration-200"
                           >
                             {awardingBidId === b.id ? (
                               <Loader2 className="h-4 w-4 mr-1 animate-spin" />
@@ -2665,7 +2736,7 @@ function BidReviewTab() {
                           />
                         </button>
                         {expandedBidId === b.id && (
-                          <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm whitespace-pre-wrap max-h-64 overflow-y-auto">
+                          <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm whitespace-pre-wrap max-h-64 overflow-y-auto">
                             {b.ai_review}
                           </div>
                         )}
@@ -2765,7 +2836,7 @@ function MembersTab({ company, currentUser }: { company: any; currentUser: any }
         </p>
       </div>
 
-      <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4 text-sm text-amber-900">
+      <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50/70 to-transparent p-4 text-sm text-amber-900 shadow-sm">
         <p className="flex items-start gap-2">
           <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
           <span>
@@ -2788,7 +2859,10 @@ function MembersTab({ company, currentUser }: { company: any; currentUser: any }
           {members.map((m) => {
             const isCurrent = m.user_id === currentUser?.id;
             return (
-              <Card key={m.id} className="border-amber-100">
+              <Card
+                key={m.id}
+                className="border-amber-100/80 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
+              >
                 <CardContent className="p-4">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0">
@@ -2808,7 +2882,7 @@ function MembersTab({ company, currentUser }: { company: any; currentUser: any }
                             </Badge>
                           )}
                           {m.role === "admin" && (
-                            <Badge className="bg-amber-600 text-white hover:bg-amber-600">
+                            <Badge className="bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-500 hover:to-orange-500 shadow-sm shadow-amber-500/30">
                               <ShieldCheck className="h-3 w-3 mr-1" /> Admin
                             </Badge>
                           )}
@@ -2842,7 +2916,7 @@ function MembersTab({ company, currentUser }: { company: any; currentUser: any }
                             size="sm"
                             onClick={() => handleApprove(m)}
                             disabled={actingId === m.id}
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                            className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-sm shadow-emerald-500/30 transition-all duration-200"
                           >
                             {actingId === m.id ? (
                               <Loader2 className="h-4 w-4 mr-1 animate-spin" />
@@ -2903,8 +2977,8 @@ function SettingsTab({ company }: { company: any }) {
         </p>
       </div>
 
-      <Card className="border-amber-100">
-        <CardHeader>
+      <Card className="border-amber-100/80 shadow-sm hover:shadow-md transition-shadow">
+        <CardHeader className="border-b border-amber-50">
           <CardTitle className="flex items-center gap-2 text-base">
             <Building2 className="h-4 w-4 text-amber-600" /> Company Profile
           </CardTitle>
@@ -2912,7 +2986,7 @@ function SettingsTab({ company }: { company: any }) {
             Read-only view of your company details.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4 pt-4">
           <div className="grid sm:grid-cols-2 gap-4">
             <SettingsItem icon={Building2} label="Company Name" value={company?.name} />
             <SettingsItem
@@ -2935,13 +3009,13 @@ function SettingsTab({ company }: { company: any }) {
           {company?.description && (
             <div>
               <div className="text-xs text-muted-foreground mb-1">Description</div>
-              <div className="rounded-lg border border-amber-100 bg-amber-50/40 p-3 text-sm">
+              <div className="rounded-xl border border-amber-100/80 bg-gradient-to-br from-amber-50/40 to-transparent p-3 text-sm">
                 {company.description}
               </div>
             </div>
           )}
 
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50/40 p-3 text-sm text-amber-800 shadow-sm">
             <p className="flex items-start gap-2">
               <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
               <span>
@@ -2966,7 +3040,7 @@ function SettingsItem({
   value?: string | null;
 }) {
   return (
-    <div className="rounded-lg border border-amber-100 bg-white p-3">
+    <div className="rounded-xl border border-amber-100/80 bg-gradient-to-br from-white to-amber-50/30 p-3 shadow-sm hover:shadow-md transition-shadow">
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <Icon className="h-3.5 w-3.5" />
         {label}
@@ -3021,8 +3095,8 @@ function EmptyState({
   return (
     <Card className="border-dashed border-amber-200 bg-amber-50/30">
       <CardContent className="p-8 flex flex-col items-center text-center gap-3">
-        <div className="h-12 w-12 rounded-full bg-amber-100 flex items-center justify-center">
-          <Icon className="h-6 w-6 text-amber-600" />
+        <div className="bg-amber-50 rounded-full p-4 w-20 h-20 mx-auto flex items-center justify-center border border-amber-100">
+          <Icon className="h-7 w-7 text-amber-300" />
         </div>
         <div>
           <h3 className="font-semibold text-amber-900">{title}</h3>

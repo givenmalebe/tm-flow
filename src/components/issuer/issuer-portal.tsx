@@ -881,10 +881,10 @@ function OverviewTab({ onJump }: { onJump: (t: TabId) => void }) {
 
   const cards: { label: string; value: number | string; icon: React.ElementType; tone: string }[] = [
     { label: "Total Tenders", value: stats?.total_tenders ?? 0, icon: FileStack, tone: "amber" },
-    { label: "Published", value: stats?.published ?? 0, icon: Send, tone: "emerald" },
-    { label: "Drafts", value: stats?.drafts ?? 0, icon: FileText, tone: "slate" },
-    { label: "Open", value: stats?.open ?? 0, icon: Clock, tone: "amber" },
-    { label: "Awarded", value: stats?.awarded ?? 0, icon: Award, tone: "emerald" },
+    { label: "Published", value: stats?.published_tenders ?? 0, icon: Send, tone: "emerald" },
+    { label: "Drafts", value: stats?.draft_tenders ?? 0, icon: FileText, tone: "slate" },
+    { label: "Open", value: stats?.open_tenders ?? 0, icon: Clock, tone: "amber" },
+    { label: "Awarded", value: stats?.awarded_tenders ?? 0, icon: Award, tone: "emerald" },
     { label: "Total Bids", value: stats?.total_bids ?? 0, icon: Inbox, tone: "amber" },
     { label: "Pending Bids", value: stats?.pending_bids ?? 0, icon: AlertCircle, tone: "rose" },
     { label: "Awarded Bids", value: stats?.awarded_bids ?? 0, icon: Trophy, tone: "emerald" },

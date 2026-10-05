@@ -21,6 +21,7 @@ import {
   Clock,
   Inbox,
   Filter,
+  ArrowRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -99,36 +100,52 @@ interface ComplianceResult {
 
 /* ------------------------------------------------------------------ */
 /*  localStorage helpers for "My Tenders" + progress                  */
+/*  Maps published tender ID → { applicantTenderId, progress }        */
 /* ------------------------------------------------------------------ */
 
 const MY_TENDERS_KEY = "tmflow_my_tenders";
 
-function getMyTenders(): Record<number, number> {
+interface MyTenderEntry {
+  applicantTenderId: number;
+  progress: number;
+}
+
+function getMyTenders(): Record<number, MyTenderEntry> {
   if (typeof window === "undefined") return {};
   try {
     const raw = localStorage.getItem(MY_TENDERS_KEY);
-    return raw ? JSON.parse(raw) : {};
+    const parsed = raw ? JSON.parse(raw) : {};
+    // Handle old format (number → number) and new format (number → {applicantTenderId, progress})
+    const result: Record<number, MyTenderEntry> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof v === "number") {
+        result[Number(k)] = { applicantTenderId: v, progress: 0 };
+      } else if (v && typeof v === "object") {
+        result[Number(k)] = v as MyTenderEntry;
+      }
+    }
+    return result;
   } catch {
     return {};
   }
 }
 
-function saveMyTender(tenderId: number) {
-  const map = getMyTenders();
-  map[tenderId] = 0;
+function saveMyTenderMap(map: Record<number, MyTenderEntry>) {
   localStorage.setItem(MY_TENDERS_KEY, JSON.stringify(map));
 }
 
-function removeMyTender(tenderId: number) {
+function removeMyTender(publishedTenderId: number) {
   const map = getMyTenders();
-  delete map[tenderId];
-  localStorage.setItem(MY_TENDERS_KEY, JSON.stringify(map));
+  delete map[publishedTenderId];
+  saveMyTenderMap(map);
 }
 
-function setMyTenderProgress(tenderId: number, progress: number) {
+function setMyTenderProgress(publishedTenderId: number, progress: number) {
   const map = getMyTenders();
-  map[tenderId] = progress;
-  localStorage.setItem(MY_TENDERS_KEY, JSON.stringify(map));
+  if (map[publishedTenderId]) {
+    map[publishedTenderId].progress = progress;
+    saveMyTenderMap(map);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -143,10 +160,11 @@ export function DiscoverTab() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
   const [categories, setCategories] = useState<string[]>([]);
-  const [myTenders, setMyTenders] = useState<Record<number, number>>({});
+  const [myTenders, setMyTenders] = useState<Record<number, MyTenderEntry>>({});
   const [selectedTender, setSelectedTender] = useState<PublicTender | null>(null);
   const [fullTender, setFullTender] = useState<FullTender | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [addingId, setAddingId] = useState<number | null>(null);
   const [showSubmit, setShowSubmit] = useState(false);
   const [compliance, setCompliance] = useState<ComplianceResult | null>(null);
   const [checkingCompliance, setCheckingCompliance] = useState(false);
@@ -203,19 +221,73 @@ export function DiscoverTab() {
     }
   };
 
-  /* ---- Add / Remove from My Tenders ---- */
-  const handleAddToMyTenders = (t: PublicTender) => {
-    saveMyTender(t.id);
-    setMyTenders(getMyTenders());
-    toast.success("Tender added to your list", {
-      description: "Track preparation progress in the Tenders tab.",
-    });
+  /* ---- Add to My Tenders — creates a real tender in the applicant's register ---- */
+  const handleAddToMyTenders = async (t: PublicTender) => {
+    if (myTenders[t.id]) {
+      toast.info("This tender is already in your list");
+      return;
+    }
+    setAddingId(t.id);
+    try {
+      // Fetch full tender details so we can copy all fields
+      const full = await publicApi.getTender(t.id);
+      // Create the tender in the applicant's register
+      const created = await api.createTender({
+        reference_number: full.reference_number || `PUB-${t.id}`,
+        title: full.title,
+        client_company: full.company_name || "Unknown",
+        description: full.description || "",
+        scope_of_work: full.scope_of_work || "",
+        category: full.category || "",
+        location_site: full.location || "",
+        closing_date: full.closing_date || null,
+        estimated_value: full.budget || null,
+        contract_period: full.contract_period || "",
+        submission_method: full.submission_method || "Bids must be submitted online through the TM Flow portal by the closing date.",
+        contact_person: full.contact_person || "",
+        contact_email: full.contact_email || "",
+        contact_telephone: full.contact_phone || "",
+        status: "Interested",
+        notes: `Imported from public tender board. Published tender ID: ${t.id}. Issued by ${full.company_name || "Unknown"}.`,
+      });
+      // Store the mapping (published ID → applicant tender ID)
+      const map = getMyTenders();
+      map[t.id] = { applicantTenderId: created.id, progress: 0 };
+      saveMyTenderMap(map);
+      setMyTenders({ ...map });
+      toast.success("Tender added to your register", {
+        description: "It's now in your Tenders tab, ready for preparation.",
+      });
+    } catch (e: any) {
+      toast.error("Failed to add tender", { description: e.message });
+    } finally {
+      setAddingId(null);
+    }
   };
 
-  const handleRemoveFromMyTenders = (t: PublicTender) => {
+  const handleRemoveFromMyTenders = async (t: PublicTender) => {
+    const entry = myTenders[t.id];
+    if (!entry) return;
+    // Remove from localStorage
     removeMyTender(t.id);
     setMyTenders(getMyTenders());
-    toast.success("Tender removed from your list");
+    // Optionally delete from the applicant's register
+    try {
+      await api.deleteTender(entry.applicantTenderId);
+      toast.success("Tender removed from your register");
+    } catch {
+      // If delete fails (e.g. already deleted), just remove from localStorage
+      toast.success("Tender removed from your list");
+    }
+  };
+
+  /* ---- Navigate to the tender in the Tenders tab ---- */
+  const handleGoToTender = (t: PublicTender) => {
+    const entry = myTenders[t.id];
+    if (entry) {
+      selectTender(entry.applicantTenderId);
+    }
+    setTab("tenders");
   };
 
   /* ---- Compliance check ---- */
@@ -434,7 +506,8 @@ export function DiscoverTab() {
           {filtered.map((t) => {
             const days = daysUntil(t.closing_date);
             const isAdded = myTenders[t.id] !== undefined;
-            const progress = myTenders[t.id] ?? 0;
+            const progress = myTenders[t.id]?.progress ?? 0;
+            const isAdding = addingId === t.id;
             return (
               <Card
                 key={t.id}
@@ -539,23 +612,37 @@ export function DiscoverTab() {
                       <Download className="h-3.5 w-3.5" />
                     </Button>
                     {isAdded ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-xs text-rose-600 border-rose-200 hover:bg-rose-50"
-                        onClick={() => handleRemoveFromMyTenders(t)}
-                      >
-                        <X className="h-3.5 w-3.5 mr-1" />
-                        Remove
-                      </Button>
+                      <>
+                        <Button
+                          size="sm"
+                          className="flex-1 text-xs bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-sm shadow-emerald-500/30 transition-all duration-200"
+                          onClick={() => handleGoToTender(t)}
+                        >
+                          <ArrowRight className="h-3.5 w-3.5 mr-1" />
+                          Go to Tender
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-xs text-rose-600 border-rose-200 hover:bg-rose-50"
+                          onClick={() => handleRemoveFromMyTenders(t)}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
                     ) : (
                       <Button
                         size="sm"
-                        className="flex-1 text-xs bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-sm shadow-emerald-500/30 transition-all duration-200"
+                        className="flex-1 text-xs bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-sm shadow-emerald-500/30 transition-all duration-200 disabled:opacity-60"
                         onClick={() => handleAddToMyTenders(t)}
+                        disabled={isAdding}
                       >
-                        <Plus className="h-3.5 w-3.5 mr-1" />
-                        Add to My Tenders
+                        {isAdding ? (
+                          <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                        ) : (
+                          <Plus className="h-3.5 w-3.5 mr-1" />
+                        )}
+                        {isAdding ? "Adding…" : "Add to My Tenders"}
                       </Button>
                     )}
                   </div>
@@ -769,15 +856,22 @@ export function DiscoverTab() {
                   <>
                     <Button
                       size="sm"
+                      className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-sm shadow-emerald-500/30 transition-all duration-200"
+                      onClick={() => handleGoToTender(selectedTender)}
+                    >
+                      <ArrowRight className="h-4 w-4 mr-1.5" /> Go to Tender
+                    </Button>
+                    <Button
+                      size="sm"
                       variant="outline"
                       className="text-rose-600 border-rose-200 hover:bg-rose-50"
                       onClick={() => handleRemoveFromMyTenders(selectedTender)}
                     >
-                      <X className="h-4 w-4 mr-1.5" /> Remove from My Tenders
+                      <X className="h-4 w-4 mr-1.5" /> Remove
                     </Button>
                     <Button
                       size="sm"
-                      className="ml-auto bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-sm shadow-emerald-500/30 transition-all duration-200"
+                      className="ml-auto bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-sm shadow-amber-500/30 transition-all duration-200"
                       onClick={() => setShowSubmit(true)}
                     >
                       <Send className="h-4 w-4 mr-1.5" /> Submit Bid
@@ -786,10 +880,16 @@ export function DiscoverTab() {
                 ) : (
                   <Button
                     size="sm"
-                    className="ml-auto bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-sm shadow-emerald-500/30 transition-all duration-200"
+                    className="ml-auto bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-sm shadow-emerald-500/30 transition-all duration-200 disabled:opacity-60"
                     onClick={() => handleAddToMyTenders(selectedTender)}
+                    disabled={addingId === selectedTender.id}
                   >
-                    <Plus className="h-4 w-4 mr-1.5" /> Add to My Tenders
+                    {addingId === selectedTender.id ? (
+                      <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                    ) : (
+                      <Plus className="h-4 w-4 mr-1.5" />
+                    )}
+                    {addingId === selectedTender.id ? "Adding…" : "Add to My Tenders"}
                   </Button>
                 )}
               </div>

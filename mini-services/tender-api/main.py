@@ -2364,7 +2364,22 @@ def dashboard(db: Session = Depends(get_db), user: User = Depends(get_current_us
                        "Clarification Submitted", "Shortlisted", "Interview/Presentation",
                        "Negotiation"}
     active = [t for t in all_tenders if t.status in active_statuses]
-    preparing = [t for t in all_tenders if t.status in {"Preparing", "Documents Outstanding", "Pricing in Progress", "Awaiting Information"}]
+    # "Being Prepared" = tenders that have started preparation (checklist progress > 0)
+    # OR have an explicit preparing status. This catches tenders added from Discover
+    # (status "Interested") once the user starts uploading documents.
+    preparing = []
+    for t in all_tenders:
+        if t.status in {"Preparing", "Documents Outstanding", "Pricing in Progress", "Awaiting Information"}:
+            preparing.append(t)
+            continue
+        # Check if the tender has any checklist progress
+        checklist = t.checklist_items or []
+        if checklist:
+            complete = sum(1 for c in checklist if c.status == "Complete")
+            total_eligible = sum(1 for c in checklist if c.status != "Not Applicable")
+            # Has progress but not fully complete (fully complete = Ready for Submission)
+            if complete > 0 and complete < total_eligible and t.status not in {"Ready for Submission", "Submitted", "Awarded", "Unsuccessful", "Withdrawn", "Cancelled", "Expired"}:
+                preparing.append(t)
     ready = [t for t in all_tenders if t.status == "Ready for Submission"]
     submitted = [t for t in all_tenders if t.status == "Submitted"]
     # Closing soon (next 7 days, not closed)

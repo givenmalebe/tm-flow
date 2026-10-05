@@ -962,16 +962,16 @@ function OverviewTab({ onJump }: { onJump: (t: TabId) => void }) {
                       </div>
                       <div className="min-w-0">
                         <div className="font-medium text-sm truncate text-amber-900">
-                          {b.company_name || b.bidder_name || "Unknown"}
+                          {b.company_name || b.bidder_company_name || "Unknown"}
                         </div>
                         <div className="text-xs text-muted-foreground">
                           {b.bid_count ?? 0} bid{(b.bid_count ?? 0) === 1 ? "" : "s"}
                         </div>
                       </div>
                     </div>
-                    {b.bbbee_level && (
+                    {b.bidder_bbbee_level && (
                       <Badge variant="outline" className="border-amber-300 text-amber-700">
-                        B-BBEE L{b.bbbee_level}
+                        B-BBEE {b.bidder_bbbee_level}
                       </Badge>
                     )}
                   </li>
@@ -1854,7 +1854,7 @@ function BidManagementTab() {
   }, [load]);
 
   const handleDelete = async (b: any) => {
-    if (!confirm(`Delete bid from "${b.bidder_company || b.contact_person}"?`)) return;
+    if (!confirm(`Delete bid from "${b.bidder_company_name || b.bidder_contact_person}"?`)) return;
     setDeletingId(b.id);
     try {
       await issuerApi.deleteBid(b.id);
@@ -1873,8 +1873,8 @@ function BidManagementTab() {
     const q = search.toLowerCase();
     return bids.filter(
       (b) =>
-        (b.bidder_company || "").toLowerCase().includes(q) ||
-        (b.contact_person || "").toLowerCase().includes(q) ||
+        (b.bidder_company_name || "").toLowerCase().includes(q) ||
+        (b.bidder_contact_person || "").toLowerCase().includes(q) ||
         (b.tender_title || "").toLowerCase().includes(q) ||
         (b.tender_reference || "").toLowerCase().includes(q)
     );
@@ -1920,9 +1920,9 @@ function BidManagementTab() {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2 mb-1">
                       <BidStatusBadge status={b.status} awarded={!!b.awarded} />
-                      {b.bbbee_level && (
+                      {b.bidder_bbbee_level && (
                         <Badge variant="outline" className="border-amber-300 text-amber-700">
-                          B-BBEE L{b.bbbee_level}
+                          B-BBEE {b.bidder_bbbee_level}
                         </Badge>
                       )}
                       <span className="font-mono text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded">
@@ -1930,10 +1930,10 @@ function BidManagementTab() {
                       </span>
                     </div>
                     <h3 className="font-semibold text-amber-900 truncate">
-                      {b.bidder_company || "Unknown bidder"}
+                      {b.bidder_company_name || "Unknown bidder"}
                     </h3>
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground mt-1">
-                      <span>{b.contact_person || "—"}</span>
+                      <span>{b.bidder_contact_person || "—"}</span>
                       <span>{b.contact_email || ""}</span>
                       <span>Submitted {fmtDate(b.submitted_at || b.created_at)}</span>
                       <span className="font-medium text-amber-800">
@@ -2011,21 +2011,21 @@ function BidDetailDialog({ bid, onClose }: { bid: any | null; onClose: () => voi
             <DialogHeader>
               <DialogTitle className="text-amber-900">Bid Details</DialogTitle>
               <DialogDescription>
-                From <span className="font-semibold">{bid.bidder_company}</span> for{" "}
+                From <span className="font-semibold">{bid.bidder_company_name}</span> for{" "}
                 {bid.tender_title || bid.tender_reference}
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4">
               <div className="grid sm:grid-cols-2 gap-3 text-sm">
-                <DetailItem label="Bidder Company" value={bid.bidder_company} />
-                <DetailItem label="Contact Person" value={bid.contact_person} />
+                <DetailItem label="Bidder Company" value={bid.bidder_company_name} />
+                <DetailItem label="Contact Person" value={bid.bidder_contact_person} />
                 <DetailItem label="Contact Email" value={bid.contact_email} />
                 <DetailItem label="Contact Phone" value={bid.contact_phone} />
                 <DetailItem label="Tender" value={bid.tender_title || bid.tender_reference} />
                 <DetailItem label="Submitted" value={fmtDateTime(bid.submitted_at || bid.created_at)} />
                 <DetailItem label="Total Amount" value={fmtRand(bid.total_amount)} highlight />
-                <DetailItem label="B-BBEE Level" value={bid.bbbee_level ? `Level ${bid.bbbee_level}` : "—"} />
+                <DetailItem label="B-BBEE Level" value={bid.bidder_bbbee_level || "—"} />
                 <DetailItem label="Status" value={bid.awarded ? "Awarded" : bid.status || "Pending"} />
                 <DetailItem label="Validity (days)" value={bid.validity_days ?? "—"} />
               </div>
@@ -2214,7 +2214,7 @@ function TopBiddersTab() {
                       </div>
                       <div className="min-w-0">
                         <div className="font-medium text-sm truncate text-amber-900">
-                          {b.company_name || b.bidder_name || "Unknown"}
+                          {b.company_name || b.bidder_company_name || "Unknown"}
                         </div>
                         <div className="text-xs text-muted-foreground">
                           {b.bid_count ?? 0} bid{(b.bid_count ?? 0) === 1 ? "" : "s"}
@@ -2222,9 +2222,9 @@ function TopBiddersTab() {
                         </div>
                       </div>
                     </div>
-                    {b.bbbee_level && (
+                    {b.bidder_bbbee_level && (
                       <Badge variant="outline" className="border-amber-300 text-amber-700">
-                        B-BBEE L{b.bbbee_level}
+                        B-BBEE {b.bidder_bbbee_level}
                       </Badge>
                     )}
                   </li>
@@ -2304,7 +2304,7 @@ function TopBiddersTab() {
                         <div className="flex items-center justify-between gap-2">
                           <div className="min-w-0">
                             <div className="font-medium text-sm truncate text-amber-900">
-                              {b.bidder_company || "Unknown"}
+                              {b.bidder_company_name || "Unknown"}
                             </div>
                             <div className="text-xs text-muted-foreground">
                               {b.contact_person || "—"} · {fmtDate(b.submitted_at || b.created_at)}
@@ -2572,7 +2572,7 @@ function BidReviewTab() {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="font-semibold text-amber-900">
-                            {b.bidder_company || "Unknown bidder"}
+                            {b.bidder_company_name || "Unknown bidder"}
                           </h3>
                           <BidStatusBadge status={b.status} awarded={!!b.awarded} />
                         </div>
@@ -2717,7 +2717,7 @@ function MembersTab({ company, currentUser }: { company: any; currentUser: any }
     setActingId(m.id);
     try {
       await issuerApi.updateMember(m.id, "approved");
-      toast.success(`${m.user_name || "Member"} approved`);
+      toast.success(`${m.full_name || m.email || "Member"} approved`);
       load();
     } catch (err: any) {
       toast.error("Failed to approve member", { description: err?.message });
@@ -2730,7 +2730,7 @@ function MembersTab({ company, currentUser }: { company: any; currentUser: any }
     setActingId(m.id);
     try {
       await issuerApi.updateMember(m.id, "rejected");
-      toast.success(`${m.user_name || "Member"} rejected`);
+      toast.success(`${m.full_name || m.email || "Member"} rejected`);
       load();
     } catch (err: any) {
       toast.error("Failed to reject member", { description: err?.message });
@@ -2740,7 +2740,7 @@ function MembersTab({ company, currentUser }: { company: any; currentUser: any }
   };
 
   const handleRemove = async (m: any) => {
-    if (!confirm(`Remove ${m.user_name || m.user_email} from the team?`)) return;
+    if (!confirm(`Remove ${m.full_name || m.email} from the team?`)) return;
     setActingId(m.id);
     try {
       await issuerApi.removeMember(m.id);
@@ -2794,13 +2794,13 @@ function MembersTab({ company, currentUser }: { company: any; currentUser: any }
                     <div className="flex items-center gap-3 min-w-0">
                       <Avatar className="h-10 w-10 border border-amber-200">
                         <AvatarFallback className="bg-amber-100 text-amber-700 text-xs font-semibold">
-                          {initials(m.user_name || m.user_email)}
+                          {initials(m.full_name || m.email)}
                         </AvatarFallback>
                       </Avatar>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium text-amber-900">
-                            {m.user_name || "Unknown"}
+                            {m.full_name || "Unknown"}
                           </span>
                           {isCurrent && (
                             <Badge variant="outline" className="border-amber-400 text-amber-700">
@@ -2829,7 +2829,7 @@ function MembersTab({ company, currentUser }: { company: any; currentUser: any }
                           )}
                         </div>
                         <div className="text-xs text-muted-foreground mt-0.5">
-                          {m.user_email || "—"}
+                          {m.email || "—"}
                           {m.job_title && ` · ${m.job_title}`}
                         </div>
                       </div>

@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "TenderFlow Python FastAPI backend",
   "scripts": {
-    "dev": "python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+    "dev": "/home/z/.venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000",
+    "postinstall": "/home/z/.venv/bin/pip3 install -r requirements.txt --quiet 2>/dev/null || true"
   }
 }

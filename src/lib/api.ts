@@ -582,10 +582,15 @@ export const api = {
   },
 
   async generateDocumentByPrompt(tenderId: number, prompt: string, title?: string) {
-    return request<any>(`/tenders/${tenderId}/documents/generate-by-prompt`, {
+    // Returns { job_id, status: "pending" } immediately
+    return request<{ job_id: string; status: string }>(`/tenders/${tenderId}/documents/generate-by-prompt`, {
       method: "POST",
       body: { prompt, title },
     });
+  },
+
+  async generateDocumentByPromptStatus(tenderId: number, jobId: string) {
+    return request<{ status: string; result: any; error: string | null }>(`/tenders/${tenderId}/documents/generate-by-prompt/${jobId}`);
   },
 
   async listDocumentTypes() {

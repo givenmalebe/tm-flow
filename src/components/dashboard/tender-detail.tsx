@@ -2522,17 +2522,35 @@ function AISection({ tender, onChanged }: { tender: any; onChanged: () => void }
       return;
     }
     setGeneratingDoc(true);
-    toast.info("AI is generating your document…", {
-      description: "This uses full tender context — may take 20-30 seconds.",
-    });
     try {
-      const result = await api.generateDocumentByPrompt(tender.id, prompt.trim(), docTitle.trim() || undefined);
-      toast.success("Document generated!", {
-        description: "Find it in the Documents tab to view, edit, or download.",
+      // Step 1: start the job (returns immediately with job_id)
+      const startRes = await api.generateDocumentByPrompt(tender.id, prompt.trim(), docTitle.trim() || undefined);
+      const jobId = startRes.job_id;
+      toast.success("AI is generating your document…", {
+        description: "This uses full tender context — may take 20-40 seconds.",
       });
-      setPrompt("");
-      setDocTitle("");
-      onChanged();
+
+      // Step 2: poll for the result every 3 seconds, up to ~3 minutes
+      const maxAttempts = 60;
+      for (let i = 0; i < maxAttempts; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const status = await api.generateDocumentByPromptStatus(tender.id, jobId);
+        if (status.status === "done" && status.result) {
+          toast.success("Document generated!", {
+            description: "Find it in the Documents tab to view, edit, or download.",
+          });
+          setPrompt("");
+          setDocTitle("");
+          onChanged();
+          setGeneratingDoc(false);
+          return;
+        }
+        if (status.status === "error") {
+          throw new Error(status.error || "AI generation failed");
+        }
+        // status === "pending" → keep polling
+      }
+      throw new Error("AI generation timed out. Please try again.");
     } catch (e: any) {
       toast.error("Generation failed", { description: e.message });
     } finally {

@@ -2898,8 +2898,8 @@ def generate_document_by_prompt_endpoint(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Generate any document via a natural-language prompt. The AI has full context
-    of the tender, extracted info, company profile, checklist, and existing documents."""
+    """Generate any document via a natural-language prompt. Async job pattern —
+    returns a job_id immediately, frontend polls GET .../generate-by-prompt/{job_id}."""
     prompt = (payload.get("prompt") or "").strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="A prompt is required.")
@@ -2945,34 +2945,65 @@ def generate_document_by_prompt_endpoint(
         {"name": l.name, "category": l.category}
         for l in db.query(LibraryDocument).filter(LibraryDocument.created_by == user.id).all()
     ]
+    ai_summary = tender.ai_summary or ""
+    ref_number = tender.reference_number
 
-    content = ai_module.generate_document_by_prompt(
-        prompt=prompt,
-        tender=tender_data,
-        extracted=extracted,
-        company=company,
-        checklist_items=checklist_items,
-        generated_docs=generated_docs,
-        library_docs=library_docs,
-        ai_summary=tender.ai_summary or "",
-    )
+    # Start async job
+    job_id = str(uuid.uuid4())
+    _AI_JOBS[job_id] = {"status": "pending", "result": None, "error": None, "created_at": datetime.utcnow().isoformat()}
 
-    # Save as a custom document (doc_type = "custom")
-    new_doc = GeneratedDocument(
-        tender_id=tender_id,
-        doc_type="custom",
-        title=f"{custom_title} — {tender.reference_number}",
-        content=content,
-    )
-    db.add(new_doc)
-    db.commit()
-    db.refresh(new_doc)
-    return {
-        "id": new_doc.id, "doc_type": new_doc.doc_type, "title": new_doc.title,
-        "content": new_doc.content,
-        "created_at": new_doc.created_at.isoformat() if new_doc.created_at else None,
-        "updated_at": new_doc.updated_at.isoformat() if new_doc.updated_at else None,
-    }
+    def _run_job():
+        try:
+            content = ai_module.generate_document_by_prompt(
+                prompt=prompt,
+                tender=tender_data,
+                extracted=extracted,
+                company=company,
+                checklist_items=checklist_items,
+                generated_docs=generated_docs,
+                library_docs=library_docs,
+                ai_summary=ai_summary,
+            )
+            # Save the document to the database in a new session
+            job_db = SessionLocal()
+            try:
+                new_doc = GeneratedDocument(
+                    tender_id=tender_id,
+                    doc_type="custom",
+                    title=f"{custom_title} — {ref_number}",
+                    content=content,
+                )
+                job_db.add(new_doc)
+                job_db.commit()
+                job_db.refresh(new_doc)
+                result = {
+                    "id": new_doc.id, "doc_type": new_doc.doc_type, "title": new_doc.title,
+                    "content": new_doc.content,
+                    "created_at": new_doc.created_at.isoformat() if new_doc.created_at else None,
+                    "updated_at": new_doc.updated_at.isoformat() if new_doc.updated_at else None,
+                }
+            finally:
+                job_db.close()
+            _AI_JOBS[job_id] = {"status": "done", "result": result, "error": None, "created_at": _AI_JOBS[job_id]["created_at"]}
+        except Exception as e:
+            _AI_JOBS[job_id] = {"status": "error", "result": None, "error": str(e), "created_at": _AI_JOBS[job_id]["created_at"]}
+
+    threading.Thread(target=_run_job, daemon=True).start()
+    return {"job_id": job_id, "status": "pending"}
+
+
+@app.get("/api/tenders/{tender_id}/documents/generate-by-prompt/{job_id}")
+def generate_document_by_prompt_status(
+    tender_id: int,
+    job_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Poll the status of an AI document generation job."""
+    job = _AI_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return job
 
 
 @app.get("/api/document-types")

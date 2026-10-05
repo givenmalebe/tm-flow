@@ -2307,7 +2307,7 @@ function TopBiddersTab() {
                               {b.bidder_company_name || "Unknown"}
                             </div>
                             <div className="text-xs text-muted-foreground">
-                              {b.contact_person || "—"} · {fmtDate(b.submitted_at || b.created_at)}
+                              {b.bidder_contact_person || "—"} · {fmtDate(b.submitted_at || b.created_at)}
                             </div>
                           </div>
                           <div className="text-right shrink-0">
@@ -2536,10 +2536,10 @@ function BidReviewTab() {
                     <div className="flex items-center justify-between flex-wrap gap-2">
                       <div>
                         <div className="font-bold text-amber-900">
-                          {recommended.bidder_company || "Unknown"}
+                          {recommended.bidder_company_name || "Unknown"}
                         </div>
                         <div className="text-sm text-amber-700">
-                          {recommended.contact_person || "—"} · {fmtRand(recommended.total_amount)}
+                          {recommended.bidder_contact_person || "—"} · {fmtRand(recommended.total_amount)}
                         </div>
                       </div>
                       <div className="flex gap-4">
@@ -2577,7 +2577,7 @@ function BidReviewTab() {
                           <BidStatusBadge status={b.status} awarded={!!b.awarded} />
                         </div>
                         <div className="text-xs text-muted-foreground mt-0.5">
-                          {b.contact_person || "—"} · {fmtDate(b.submitted_at || b.created_at)} ·{" "}
+                          {b.bidder_contact_person || "—"} · {fmtDate(b.submitted_at || b.created_at)} ·{" "}
                           <span className="font-medium text-amber-800">
                             {fmtRand(b.total_amount)}
                           </span>

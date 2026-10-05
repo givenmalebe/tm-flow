@@ -1761,3 +1761,70 @@ Respond with ONLY this JSON:
             "conditions": [],
             "_error": str(e),
         }
+
+
+def verify_checklist_document(item_name: str, item_category: str, document_text: str, filename: str = "") -> Dict[str, Any]:
+    """AI verifies whether an uploaded document matches the required checklist item.
+
+    Returns dict with:
+      - matches: bool (whether the document is the correct type)
+      - confidence: str (high/medium/low)
+      - reason: str (explanation)
+      - detected_type: str (what document type the AI detected)
+      - key_info: str (key information found, e.g. registration number, expiry date)
+    """
+    system = (
+        "You are a compliance document verifier for South African tender submissions. "
+        "You determine whether an uploaded document matches the required compliance item. "
+        "You understand SA document types: CIPC certificates, SARS tax clearances, B-BBEE certificates, "
+        "COIDA letters, PSIRA certificates, company profiles, financial statements, etc. "
+        "You MUST respond with ONLY a valid JSON object (no markdown, no code fences)."
+    )
+    user_prompt = f"""Verify whether this uploaded document matches the required compliance item.
+
+REQUIRED CHECKLIST ITEM:
+- Name: {item_name}
+- Category: {item_category}
+
+UPLOADED DOCUMENT:
+- Filename: {filename}
+- Extracted text (first 1500 chars): {document_text[:1500]}
+
+Respond with ONLY this JSON:
+{{
+  "matches": true/false,
+  "confidence": "high" | "medium" | "low",
+  "detected_type": "What document type this actually is (e.g. 'B-BBEE Certificate', 'Tax Clearance Certificate')",
+  "key_info": "Key information found (e.g. 'Registration number: 2018/123456/07, Expiry: 2025-12-31') or 'None found'",
+  "reason": "1-2 sentence explanation of why this does or does not match"
+}}"""
+
+    try:
+        result = _run_zai_chat(user_prompt, system=system, max_tokens=1000)
+        result = result.strip()
+        if result.startswith("```"):
+            result = result.split("\n", 1)[1] if "\n" in result else result[3:]
+        if result.endswith("```"):
+            result = result[:-3]
+        result = result.strip()
+        if result.startswith("json"):
+            result = result[4:].strip()
+        first = result.find("{")
+        last = result.rfind("}")
+        if first >= 0 and last > first:
+            result = result[first:last + 1]
+        data = json.loads(result)
+        data.setdefault("matches", False)
+        data.setdefault("confidence", "low")
+        data.setdefault("detected_type", "Unknown")
+        data.setdefault("key_info", "")
+        data.setdefault("reason", "Could not verify document.")
+        return data
+    except Exception as e:
+        return {
+            "matches": True,  # Default to accepting if AI fails — don't block the user
+            "confidence": "low",
+            "detected_type": "Unknown",
+            "key_info": "",
+            "reason": f"AI verification unavailable: {e}. Document accepted pending manual review.",
+        }

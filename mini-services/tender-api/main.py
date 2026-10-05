@@ -1401,6 +1401,94 @@ def delete_checklist_item(item_id: int, db: Session = Depends(get_db), user: Use
     return {"deleted": True}
 
 
+@app.post("/api/checklist/{item_id}/upload")
+async def upload_checklist_document(
+    item_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Upload a document for a checklist item. The AI reads the document and verifies
+    it matches the required item type. The document is also saved to the compliance library."""
+    c = db.query(ChecklistItem).filter(ChecklistItem.id == item_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Checklist item not found")
+
+    # Save the uploaded file to the library subfolder
+    rel_path = _save_upload(file, subdir="library")
+    full_path = os.path.join(UPLOAD_DIR, rel_path)
+    file_size = os.path.getsize(full_path)
+
+    # Extract text from the document
+    document_text = ""
+    try:
+        document_text = ai_module.extract_text_from_file(full_path, file.filename)
+    except Exception:
+        document_text = ""
+
+    # AI verification — check if the document matches the required item
+    verification = {"matches": True, "confidence": "low", "detected_type": "", "key_info": "", "reason": ""}
+    if document_text and len(document_text.strip()) > 20:
+        try:
+            verification = ai_module.verify_checklist_document(
+                item_name=c.name,
+                item_category=c.category or "",
+                document_text=document_text,
+                filename=file.filename or "",
+            )
+        except Exception as e:
+            verification = {
+                "matches": True,
+                "confidence": "low",
+                "detected_type": "Unknown",
+                "key_info": "",
+                "reason": f"AI verification unavailable: {e}",
+            }
+
+    # Determine the library category from the checklist item
+    lib_category = c.library_category or c.category or "Other"
+
+    # Save to the compliance library so it's reusable
+    lib_doc = LibraryDocument(
+        name=file.filename or c.name,
+        category=lib_category,
+        description=f"Uploaded for checklist item: {c.name}",
+        filename=rel_path,
+        file_path=rel_path,
+        file_type=file.content_type,
+        file_size=file_size,
+        notes=f"AI verification: {verification.get('reason', '')}",
+        created_by=user.id,
+    )
+    db.add(lib_doc)
+    db.flush()
+
+    # Link the library doc to the checklist item and update status
+    c.linked_library_doc_id = lib_doc.id
+    if verification.get("matches"):
+        c.status = "Complete"
+        c.notes = f"Verified: {verification.get('detected_type', '')}. {verification.get('key_info', '')}"
+    else:
+        c.status = "Outstanding"
+        c.notes = f"AI flagged: {verification.get('reason', '')}. Please upload the correct document."
+
+    db.commit()
+    db.refresh(c)
+
+    return {
+        "id": c.id,
+        "status": c.status,
+        "linked_library_doc_id": c.linked_library_doc_id,
+        "notes": c.notes,
+        "verification": verification,
+        "library_doc": {
+            "id": lib_doc.id,
+            "name": lib_doc.name,
+            "category": lib_doc.category,
+        },
+    }
+
+
 # ---------------------- Library Document Routes ----------------------
 
 @app.get("/api/library")

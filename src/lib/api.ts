@@ -218,6 +218,16 @@ export const api = {
     return request<{ deleted: boolean }>(`/checklist/${itemId}`, { method: "DELETE" });
   },
 
+  async uploadChecklistDocument(itemId: number, file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    return request<any>(`/checklist/${itemId}/upload`, {
+      method: "POST",
+      body: form,
+      isForm: true,
+    });
+  },
+
   // ---- Library ----
   async listLibrary(params: { category?: string; search?: string } = {}) {
     const qs = new URLSearchParams();

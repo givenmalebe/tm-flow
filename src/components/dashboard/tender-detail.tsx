@@ -1030,6 +1030,8 @@ function ChecklistSection({ tender, onChanged }: { tender: any; onChanged: () =>
   const [libraryDocs, setLibraryDocs] = useState<any[]>([]);
   const [showLink, setShowLink] = useState<number | null>(null);
   const [regenerating, setRegenerating] = useState(false);
+  const [uploadingId, setUploadingId] = useState<number | null>(null);
+  const [verification, setVerification] = useState<Record<number, any>>({});
 
   useEffect(() => {
     setItems(tender.checklist_items || []);
@@ -1046,6 +1048,48 @@ function ChecklistSection({ tender, onChanged }: { tender: any; onChanged: () =>
     } catch (e: any) {
       toast.error(e.message || "Update failed");
     }
+  };
+
+  const handleUploadDocument = async (itemId: number, file: File) => {
+    setUploadingId(itemId);
+    toast.info("Uploading and verifying document with AI…");
+    try {
+      const result = await api.uploadChecklistDocument(itemId, file);
+      // Update the item in the local state
+      setItems((arr) => arr.map((it) => it.id === itemId ? {
+        ...it,
+        status: result.status,
+        linked_library_doc_id: result.linked_library_doc_id,
+        notes: result.notes,
+      } : it));
+      // Store the verification result to display
+      setVerification((prev) => ({ ...prev, [itemId]: result.verification }));
+      // Show toast based on verification
+      if (result.verification?.matches) {
+        toast.success("Document verified!", {
+          description: `Detected: ${result.verification.detected_type || "Document"}. Item marked complete.`,
+        });
+      } else {
+        toast.warning("Document may not match", {
+          description: result.verification?.reason || "The AI could not confirm this is the correct document type.",
+        });
+      }
+      onChanged();
+    } catch (e: any) {
+      toast.error("Upload failed", { description: e.message });
+    } finally {
+      setUploadingId(null);
+    }
+  };
+
+  const handleUnlinkDocument = async (item: any) => {
+    await updateItem(item.id, { linked_library_doc_id: null, status: "Outstanding", notes: null });
+    setVerification((prev) => {
+      const next = { ...prev };
+      delete next[item.id];
+      return next;
+    });
+    toast.success("Document removed — item is now outstanding");
   };
 
   const addItem = async () => {
@@ -1192,7 +1236,11 @@ function ChecklistSection({ tender, onChanged }: { tender: any; onChanged: () =>
               </CardTitle>
             </CardHeader>
             <CardContent className="p-3 pt-0 space-y-1">
-              {grouped[cat].map((item: any) => (
+              {grouped[cat].map((item: any) => {
+                const hasDoc = !!item.linked_library_doc_id;
+                const verify = verification[item.id];
+                const isUploading = uploadingId === item.id;
+                return (
                 <div key={item.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-muted/50 group">
                   <Select
                     value={item.status}
@@ -1223,54 +1271,132 @@ function ChecklistSection({ tender, onChanged }: { tender: any; onChanged: () =>
                         onBlur={(e) => updateItem(item.id, { name: e.target.value })}
                         className="h-7 text-sm border-0 hover:border focus-visible:border px-1 py-0"
                       />
-                      {item.mandatory === false && (
-                        <Badge variant="outline" className="text-[10px] bg-muted">Optional</Badge>
+                      {/* Status badge — Outstanding (amber) when no doc, Complete (emerald) when doc uploaded */}
+                      {!hasDoc && item.status !== "Not Applicable" && (
+                        <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border-amber-200">
+                          <Clock className="h-2.5 w-2.5 mr-0.5" />
+                          Outstanding
+                        </Badge>
                       )}
-                      {item.mandatory === true && (
-                        <Badge variant="outline" className="text-[10px] bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300">Mandatory</Badge>
+                      {hasDoc && item.status === "Complete" && (
+                        <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200">
+                          <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />
+                          Uploaded
+                        </Badge>
                       )}
                     </div>
                     {item.description && (
                       <p className="text-xs text-muted-foreground mt-0.5 ml-1">{item.description}</p>
                     )}
-                    {item.linked_library_doc_id && (
-                      <div className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1 mt-1 ml-1">
-                        <Link2 className="h-3 w-3" />
-                        Linked: {libraryDocs.find((d) => d.id === item.linked_library_doc_id)?.name || "library document"}
-                        {item.status === "Expired" && (
-                          <Badge variant="outline" className="text-[10px] bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300 ml-1">
-                            Expired
-                          </Badge>
+                    {/* Show uploaded document info + AI verification */}
+                    {hasDoc && (
+                      <div className="mt-1 ml-1 space-y-1">
+                        <div className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                          <CheckCircle2 className="h-3 w-3" />
+                          {libraryDocs.find((d) => d.id === item.linked_library_doc_id)?.name || "Document uploaded"}
+                          {item.status === "Expired" && (
+                            <Badge variant="outline" className="text-[10px] bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300 ml-1">
+                              Expired
+                            </Badge>
+                          )}
+                        </div>
+                        {/* AI verification result */}
+                        {verify && (
+                          <div className={cn(
+                            "text-[11px] rounded px-2 py-1 flex items-start gap-1.5",
+                            verify.matches
+                              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400"
+                              : "bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-400"
+                          )}>
+                            {verify.matches
+                              ? <CheckCircle2 className="h-3 w-3 mt-0.5 shrink-0" />
+                              : <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
+                            }
+                            <span>
+                              <strong>AI:</strong> {verify.detected_type}
+                              {verify.key_info && verify.key_info !== "None found" ? ` · ${verify.key_info}` : ""}
+                              {" — "}
+                              {verify.reason}
+                            </span>
+                          </div>
+                        )}
+                        {item.notes && !verify && (
+                          <p className="text-[11px] text-muted-foreground ml-1">{item.notes}</p>
                         )}
                       </div>
                     )}
-                    {item.library_category && !item.linked_library_doc_id && (
+                    {/* Hint to upload when no doc */}
+                    {!hasDoc && item.status !== "Not Applicable" && (
                       <div className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-1 ml-1">
-                        <AlertTriangle className="h-3 w-3" />
-                        Upload a {item.library_category} document to your library to auto-complete this item
+                        <Upload className="h-3 w-3" />
+                        Upload document to complete this item
                       </div>
                     )}
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 opacity-0 group-hover:opacity-100 shrink-0 mt-0.5"
-                    onClick={() => setShowLink(item.id)}
-                    title="Link library document"
-                  >
-                    <Link2 className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 opacity-0 group-hover:opacity-100 text-rose-600 hover:text-rose-700 shrink-0 mt-0.5"
-                    onClick={() => deleteItem(item.id)}
-                    title="Remove"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  {/* Upload document button */}
+                  {item.status !== "Not Applicable" && (
+                    <div className="flex items-center gap-1 shrink-0 mt-0.5">
+                      {hasDoc ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs text-rose-600 hover:bg-rose-50"
+                          onClick={() => handleUnlinkDocument(item)}
+                          disabled={isUploading}
+                          title="Remove document"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      ) : (
+                        <label className="cursor-pointer">
+                          <span className={cn(
+                            "inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-xs font-medium transition-colors",
+                            "bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800",
+                            isUploading && "opacity-60 cursor-wait"
+                          )}>
+                            {isUploading ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Upload className="h-3.5 w-3.5" />
+                            )}
+                            {isUploading ? "Verifying…" : "Upload"}
+                          </span>
+                          <input
+                            type="file"
+                            className="hidden"
+                            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.txt"
+                            disabled={isUploading}
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              if (f) handleUploadDocument(item.id, f);
+                              e.target.value = "";
+                            }}
+                          />
+                        </label>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 opacity-0 group-hover:opacity-100"
+                        onClick={() => setShowLink(item.id)}
+                        title="Link existing library document"
+                      >
+                        <Link2 className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 opacity-0 group-hover:opacity-100 text-rose-600 hover:text-rose-700"
+                        onClick={() => deleteItem(item.id)}
+                        title="Remove item"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
-              ))}
+                );
+              })}
             </CardContent>
           </Card>
         ))

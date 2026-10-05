@@ -95,7 +95,7 @@ interface TenderDetailProps {
   onBack: () => void;
 }
 
-type SubTab = "overview" | "preparation" | "readiness" | "documents" | "checklist" | "briefings" | "pricing" | "submission" | "communications" | "addendums" | "generated" | "ai";
+type SubTab = "overview" | "preparation" | "readiness" | "checklist" | "briefings" | "pricing" | "submission" | "communications" | "addendums" | "generated" | "ai";
 
 export function TenderDetail({ tenderId, onBack }: TenderDetailProps) {
   const { refresh } = useDashboardStore();
@@ -242,7 +242,6 @@ export function TenderDetail({ tenderId, onBack }: TenderDetailProps) {
           <TabsTrigger value="overview" className="text-xs"><FileText className="h-3.5 w-3.5 mr-1" />Overview</TabsTrigger>
           <TabsTrigger value="readiness" className="text-xs"><Target className="h-3.5 w-3.5 mr-1" />Readiness</TabsTrigger>
           <TabsTrigger value="preparation" className="text-xs"><ClipboardCheck className="h-3.5 w-3.5 mr-1" />Preparation</TabsTrigger>
-          <TabsTrigger value="documents" className="text-xs"><FileStack className="h-3.5 w-3.5 mr-1" />Documents</TabsTrigger>
           <TabsTrigger value="checklist" className="text-xs"><ListChecks className="h-3.5 w-3.5 mr-1" />Checklist</TabsTrigger>
           <TabsTrigger value="briefings" className="text-xs"><MapPin className="h-3.5 w-3.5 mr-1" />Briefings</TabsTrigger>
           <TabsTrigger value="pricing" className="text-xs"><Calculator className="h-3.5 w-3.5 mr-1" />Pricing</TabsTrigger>
@@ -261,9 +260,6 @@ export function TenderDetail({ tenderId, onBack }: TenderDetailProps) {
         </TabsContent>
         <TabsContent value="preparation" className="mt-4">
           <PreparationSection tender={tender} onChanged={fetch} />
-        </TabsContent>
-        <TabsContent value="documents" className="mt-4">
-          <DocumentsSection tender={tender} onChanged={fetch} />
         </TabsContent>
         <TabsContent value="checklist" className="mt-4">
           <ChecklistSection tender={tender} onChanged={fetch} />

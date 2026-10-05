@@ -780,9 +780,13 @@ export const issuerApi = {
     return request<any>(`/issuer/tenders/${id}/unpublish`, { method: "POST" });
   },
 
-  // ---- AI Tender Writer ----
+  // ---- AI Tender Writer (async: POST starts job, GET polls for result) ----
   async aiGenerateTender(prompt: string, industry?: string) {
-    return request<any>("/issuer/tenders/ai-generate", { method: "POST", body: { prompt, industry } });
+    // Returns { job_id, status: "pending" } immediately
+    return request<{ job_id: string; status: string }>("/issuer/tenders/ai-generate", { method: "POST", body: { prompt, industry } });
+  },
+  async aiGenerateStatus(jobId: string) {
+    return request<{ status: string; result: any; error: string | null }>(`/issuer/tenders/ai-generate/${jobId}`);
   },
 
   // ---- Bids ----

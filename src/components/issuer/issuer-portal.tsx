@@ -1586,11 +1586,32 @@ function AIWriterTab() {
     }
     setGenerating(true);
     try {
-      const r = await issuerApi.aiGenerateTender(prompt, industry || undefined);
-      setResult(r as AIGenResult);
-      toast.success("Tender generated!", {
-        description: "Review the fields and save as a tender.",
+      // Step 1: start the job (returns immediately with job_id)
+      const startRes = await issuerApi.aiGenerateTender(prompt, industry || undefined);
+      const jobId = startRes.job_id;
+      toast.success("AI is generating your tender…", {
+        description: "This usually takes 20-40 seconds. Please keep this page open.",
       });
+
+      // Step 2: poll for the result every 3 seconds, up to ~3 minutes
+      const maxAttempts = 60; // 60 * 3s = 180s
+      for (let i = 0; i < maxAttempts; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const status = await issuerApi.aiGenerateStatus(jobId);
+        if (status.status === "done" && status.result) {
+          setResult(status.result as AIGenResult);
+          toast.success("Tender generated!", {
+            description: "Review the fields and save as a tender.",
+          });
+          setGenerating(false);
+          return;
+        }
+        if (status.status === "error") {
+          throw new Error(status.error || "AI generation failed");
+        }
+        // status === "pending" → keep polling
+      }
+      throw new Error("AI generation timed out. Please try again.");
     } catch (err: any) {
       toast.error("AI generation failed", { description: err?.message });
     } finally {

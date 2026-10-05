@@ -4350,24 +4350,56 @@ def issuer_unpublish_tender(
     return _serialize_issued_tender(t, company, bid_count, db)
 
 
+# In-memory store for AI generation jobs (job_id -> {status, result, error})
+_AI_JOBS: dict = {}
+
+
 @app.post("/api/issuer/tenders/ai-generate")
 def issuer_ai_generate_tender(
     payload: dict,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """AI Tender Writer — generate a complete tender specification from a prompt."""
+    """AI Tender Writer — start async generation and return a job ID immediately.
+    The frontend polls /api/issuer/tenders/ai-generate/{job_id} for the result."""
     company, member = _get_issuer_membership(db, user)
     prompt = (payload.get("prompt") or "").strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="A prompt describing the tender is required.")
     industry = payload.get("industry") or company.industry or "General"
-    result = ai_module.generate_tender_from_prompt(
-        prompt=prompt,
-        industry=industry,
-        company_name=company.name,
-    )
-    return result
+    company_name = company.name
+
+    job_id = str(uuid.uuid4())
+    _AI_JOBS[job_id] = {"status": "pending", "result": None, "error": None, "created_at": datetime.utcnow().isoformat()}
+
+    def _run_job():
+        try:
+            result = ai_module.generate_tender_from_prompt(
+                prompt=prompt,
+                industry=industry,
+                company_name=company_name,
+            )
+            _AI_JOBS[job_id] = {"status": "done", "result": result, "error": None, "created_at": _AI_JOBS[job_id]["created_at"]}
+        except Exception as e:
+            _AI_JOBS[job_id] = {"status": "error", "result": None, "error": str(e), "created_at": _AI_JOBS[job_id]["created_at"]}
+
+    threading.Thread(target=_run_job, daemon=True).start()
+    return {"job_id": job_id, "status": "pending"}
+
+
+@app.get("/api/issuer/tenders/ai-generate/{job_id}")
+def issuer_ai_generate_status(
+    job_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Poll the status of an AI tender generation job."""
+    # Verify membership (keep endpoint secure)
+    _get_issuer_membership(db, user)
+    job = _AI_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return job
 
 
 @app.get("/api/issuer/tenders/{tender_id}/bids")

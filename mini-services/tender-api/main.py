@@ -2357,7 +2357,7 @@ def dashboard(db: Session = Depends(get_db), user: User = Depends(get_current_us
     today = date.today()
     week_end = today + timedelta(days=7)
     month_end = today + timedelta(days=30)
-    all_tenders = db.query(Tender).all()
+    all_tenders = db.query(Tender).filter(Tender.created_by == user.id).all()
     active_statuses = {"New Opportunity", "Under Review", "Interested", "Preparing",
                        "Documents Outstanding", "Pricing in Progress", "Awaiting Information",
                        "Ready for Submission", "Submitted", "Clarification Requested",
@@ -2402,7 +2402,7 @@ def dashboard(db: Session = Depends(get_db), user: User = Depends(get_current_us
             "days_remaining": (n.closing_date - today).days,
         }
     # Documents
-    library_docs = db.query(LibraryDocument).all()
+    library_docs = db.query(LibraryDocument).filter(LibraryDocument.created_by == user.id).all()
     docs_expiring_soon = []
     docs_expired = []
     for d in library_docs:

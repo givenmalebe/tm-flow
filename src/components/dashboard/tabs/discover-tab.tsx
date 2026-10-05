@@ -153,7 +153,7 @@ function setMyTenderProgress(publishedTenderId: number, progress: number) {
 /* ------------------------------------------------------------------ */
 
 export function DiscoverTab() {
-  const { setTab, selectTender } = useDashboardStore();
+  const { setTab, selectTender, refresh } = useDashboardStore();
   const [tenders, setTenders] = useState<PublicTender[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -284,10 +284,15 @@ export function DiscoverTab() {
   /* ---- Navigate to the tender in the Tenders tab ---- */
   const handleGoToTender = (t: PublicTender) => {
     const entry = myTenders[t.id];
-    if (entry) {
-      selectTender(entry.applicantTenderId);
-    }
+    // Refresh the tenders list so the newly added tender shows up
+    refresh();
+    // Switch to the Tenders tab (this clears selectedTenderId)
     setTab("tenders");
+    // If we have the applicant tender ID, select it to open the detail view
+    // (use a small delay so setTab's clearing doesn't override this)
+    if (entry) {
+      setTimeout(() => selectTender(entry.applicantTenderId), 100);
+    }
   };
 
   /* ---- Compliance check ---- */

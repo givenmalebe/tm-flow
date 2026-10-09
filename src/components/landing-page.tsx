@@ -620,7 +620,7 @@ function Hero({ onGetStarted }: LandingPageProps) {
   return (
     <section
       id="top"
-      className="relative isolate overflow-hidden bg-gradient-to-br from-emerald-950 via-emerald-900 to-teal-950 min-h-[calc(100vh-4rem)] flex items-center pt-8 pb-16"
+      className="relative isolate overflow-hidden bg-gradient-to-br from-emerald-950 via-emerald-900 to-teal-950 min-h-[calc(100vh-4rem)] flex items-center pt-6 pb-12"
     >
       {/* Animated mesh gradient background */}
       <div
@@ -665,8 +665,8 @@ function Hero({ onGetStarted }: LandingPageProps) {
       />
 
       {/* Content — two-column: text left, flow diagram right */}
-      <div className="relative z-10 mx-auto max-w-7xl px-4 py-24 sm:px-6 lg:px-8 w-full">
-        <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
+      <div className="relative z-10 mx-auto max-w-screen-2xl px-6 py-16 sm:px-8 lg:px-12 w-full">
+        <div className="grid lg:grid-cols-2 gap-10 lg:gap-12 xl:gap-16 items-center">
           {/* LEFT: Text content */}
           <motion.div
             initial="hidden"

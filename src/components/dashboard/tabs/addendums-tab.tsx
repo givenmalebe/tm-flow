@@ -151,7 +151,7 @@ const ACCEPTED_FILE_TYPES = ".pdf,.doc,.docx,.txt";
 
 // ---- Helpers ----
 function downloadUrl(filePath: string): string {
-  return `/uploads/${filePath}?XTransformPort=8000`;
+  return `/uploads/${filePath}`;
 }
 
 function hasAiChanges(a: AddendumRaw): a is AddendumRaw & { ai_changes: AiChanges } {

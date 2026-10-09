@@ -1,20 +1,28 @@
 /**
- * TM Flow - Frontend API client
- * All requests route through the Caddy gateway using XTransformPort=8000
- * to reach the Python FastAPI backend.
+ * TM Flow - Frontend API client.
+ *
+ * Requests route to the Next.js catch-all proxy at /api/*, which forwards to
+ * the Python FastAPI backend (BACKEND_URL, a Cloud Run service when deployed).
+ *
+ * Authentication uses Firebase Auth. There is no bespoke JWT any more: each
+ * request carries the current Firebase ID token, which the proxy forwards to
+ * FastAPI unchanged.
  */
+import { getFirebaseAuth } from "@/lib/firebase";
 
-const API_PORT = "8000";
-
-function getToken(): string | null {
+/**
+ * Returns the current Firebase ID token, or null when signed out.
+ * Reading it is async because the SDK may need to refresh an expired token.
+ */
+async function getToken(): Promise<string | null> {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem("tenderflow_token");
-}
-
-function setToken(token: string | null) {
-  if (typeof window === "undefined") return;
-  if (token) localStorage.setItem("tenderflow_token", token);
-  else localStorage.removeItem("tenderflow_token");
+  const user = getFirebaseAuth().currentUser;
+  if (!user) return null;
+  try {
+    return await user.getIdToken();
+  } catch {
+    return null;
+  }
 }
 
 function getUserStorage(): any | null {
@@ -46,12 +54,12 @@ async function request<T = any>(
   options: RequestOptions = {}
 ): Promise<T> {
   const { method = "GET", body, isForm = false, skipAuth = false } = options;
-  const url = `/api${path}${path.includes("?") ? "&" : "?"}XTransformPort=${API_PORT}`;
+  const url = `/api${path}`;
 
   const headers: Record<string, string> = {};
   if (!isForm) headers["Content-Type"] = "application/json";
   if (!skipAuth) {
-    const token = getToken();
+    const token = await getToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
 
@@ -80,36 +88,36 @@ async function request<T = any>(
 
 // Auth
 export const api = {
-  // ---- Auth ----
-  async register(email: string, full_name: string, password: string, company_name?: string, account_type?: "applicant" | "issuer") {
-    const data = await request<{ access_token: string; user: any }>("/auth/register", {
-      method: "POST",
-      body: { email, full_name, password, company_name, account_type: account_type || "applicant" },
-      skipAuth: true,
-    });
-    setToken(data.access_token);
-    setUserStorage(data.user);
-    return data;
+  /**
+   * @deprecated Auth is owned by Firebase Auth via auth-context.tsx. Kept so
+   * existing call sites typecheck; it no longer issues a session token.
+   */
+  async register(
+    email: string,
+    full_name: string,
+    _password: string,
+    _company_name?: string,
+    _account_type?: "applicant" | "issuer"
+  ) {
+    void email;
+    void full_name;
+    throw new Error("Use the Firebase Auth signup flow in auth-context.tsx.");
   },
 
-  async login(email: string, password: string) {
-    const data = await request<{ access_token: string; user: any }>("/auth/login", {
-      method: "POST",
-      body: { email, password },
-      skipAuth: true,
-    });
-    setToken(data.access_token);
-    setUserStorage(data.user);
-    return data;
+  /** @deprecated See api.register. */
+  async login(_email: string, _password: string) {
+    throw new Error("Use the Firebase Auth signin flow in auth-context.tsx.");
   },
 
   logout() {
-    setToken(null);
     setUserStorage(null);
   },
 
+  /**
+   * @deprecated The profile is read from SQL Connect via auth-context.tsx.
+   */
   async me() {
-    return request<any>("/auth/me");
+    return getUserStorage();
   },
 
   getToken,
@@ -145,11 +153,10 @@ export const api = {
   },
 
   async exportTendersCsv() {
-    const url = `/api/tenders/export?XTransformPort=8000`;
     const headers: Record<string, string> = {};
-    const token = getToken();
+    const token = await getToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
-    const res = await fetch(url, { headers, credentials: "include" });
+    const res = await fetch("/api/tenders/export", { headers, credentials: "include" });
     if (!res.ok) throw new Error("Export failed");
     return res.blob();
   },

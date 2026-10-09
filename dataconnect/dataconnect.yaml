@@ -1,0 +1,12 @@
+specVersion: "v1"
+serviceId: "tmflow"
+location: "europe-west1"
+schema:
+  source: "./schema"
+  datasource:
+    postgresql:
+      database: "tmflow"
+      cloudSql:
+        instanceId: "tmflow-db"
+connectorDirs:
+  - "connector"

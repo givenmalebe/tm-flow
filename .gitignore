@@ -10,6 +10,9 @@ node_modules
 !.yarn/releases
 !.yarn/versions
 
+# stray git backups
+.git-backup-*/
+
 # testing
 /coverage
 
@@ -30,8 +33,36 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# env files — NEVER commit. API keys and database URLs live here.
+.env
+.env.*
+!.env.example
+
+# firebase
+.firebase/
+.firebaserc
+firebase-debug.log
+*-debug.log
+ui-debug.log
+
+# service account keys
+*service-account*.json
+*-key.json
+google-services.json
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.pid
+
+# local data
+*.db
+*.sqlite3
+uploads/
+!uploads/.gitkeep
 
 # vercel
 .vercel
@@ -42,7 +73,6 @@ yarn-error.log*
 next-env.d.ts
 local-*
 .claude
-.z-ai-config
 *.log
 dev.log
 dev.out.log

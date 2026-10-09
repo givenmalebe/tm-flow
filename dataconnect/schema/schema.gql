@@ -1,0 +1,337 @@
+# TM Flow - SQL Connect schema
+# Ported from mini-services/tender-api/database.py (SQLAlchemy + SQLite).
+#
+# Relationships are declared once, on the child side, as a singular reference.
+# SQL Connect generates the inverse `_on_` list field automatically, so parent
+# types carry no list fields.
+#
+# Cascade behaviour is implicit: a required reference (`!`) generates
+# ON DELETE CASCADE, an optional reference generates SET NULL. That reproduces
+# the ON DELETE clauses in the original schema without directives.
+#
+# users.id is typed String and holds the Firebase Auth UID verbatim, so
+# auth.uid comparisons are exact. All other primary keys are implicit UUIDs.
+
+# ============================================================
+# Identity and tenancy
+# ============================================================
+
+type User @table {
+  id: String! @default(expr: "auth.uid")
+  email: String! @unique
+  fullName: String!
+  companyName: String
+  role: String! @default(value: "admin")
+  accountType: String! @default(value: "applicant")
+  onboardingCompleted: Boolean! @default(value: false)
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+
+type Organisation @table {
+  name: String!
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+
+type Membership @table(key: ["organisation", "user"]) {
+  organisation: Organisation!
+  user: User!
+  role: String! @default(value: "owner")
+  joinedAt: Timestamp! @default(expr: "request.time")
+}
+
+# ============================================================
+# Core tender entity
+# ============================================================
+
+type Tender @table {
+  organisation: Organisation!
+
+  referenceNumber: String!
+  title: String!
+  clientCompany: String!
+  description: String
+  scopeOfWork: String
+  category: String
+  locationSite: String
+  issueDate: Date
+  closingDate: Date
+  closingTime: String
+  validityPeriod: String
+  estimatedValue: Float
+  contractPeriod: String
+  status: String! @default(value: "New Opportunity")
+  contactPerson: String
+  contactEmail: String
+  contactTelephone: String
+  submissionMethod: String
+  personResponsible: String
+  notes: String
+  outcome: String
+  unsuccessfulReason: String
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+  createdBy: String
+}
+
+type TenderDocument @table {
+  tender: Tender!
+  filename: String!
+  originalFilename: String!
+  filePath: String!
+  fileType: String
+  fileSize: Int
+  uploadedAt: Timestamp! @default(expr: "request.time")
+  isPrimary: Boolean! @default(value: false)
+}
+
+type ChecklistItem @table {
+  tender: Tender!
+  name: String!
+  description: String
+  category: String
+  mandatory: Boolean! @default(value: true)
+  libraryCategory: String
+  status: String! @default(value: "Outstanding")
+  linkedLibraryDoc: LibraryDocument
+  notes: String
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type LibraryDocument @table {
+  organisation: Organisation!
+  name: String!
+  category: String!
+  description: String
+  filename: String!
+  filePath: String!
+  fileType: String
+  fileSize: Int
+  issueDate: Date
+  expiryDate: Date
+  uploadedAt: Timestamp! @default(expr: "request.time")
+  notes: String
+  createdBy: String
+}
+
+type Briefing @table {
+  tender: Tender!
+  briefingType: String! @default(value: "Briefing")
+  date: Date!
+  time: String
+  location: String
+  contactPerson: String
+  attendanceRequired: Boolean! @default(value: true)
+  attendanceConfirmed: Boolean! @default(value: false)
+  personAttending: String
+  certificatePath: String
+  notes: String
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+
+type PricingVersion @table {
+  tender: Tender!
+  versionNumber: Int!
+  versionLabel: String
+  lineItems: String
+  subtotal: Float! @default(value: 0)
+  vat: Float! @default(value: 0)
+  total: Float! @default(value: 0)
+  notes: String
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+
+type Submission @table {
+  tender: Tender! @unique
+  submissionDate: Date
+  submissionTime: String
+  submissionMethod: String
+  submittedBy: String
+  confirmationReference: String
+  confirmationFilePath: String
+  finalDocumentsPath: String
+  finalPricing: Float
+  notes: String
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+
+type Communication @table {
+  tender: Tender!
+  commType: String!
+  subject: String
+  body: String
+  commDate: Timestamp
+  meetingDate: Timestamp
+  meetingLocation: String
+  fromParty: String
+  toParty: String
+  attachmentPath: String
+  attachmentOriginalFilename: String
+  notes: String
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+
+type Addendum @table {
+  tender: Tender!
+  addendumNumber: String
+  title: String!
+  description: String
+  filePath: String
+  issuedDate: Date
+  aiChanges: String
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+
+type GeneratedDocument @table {
+  tender: Tender!
+  docType: String!
+  title: String!
+  content: String!
+  tableOfContents: String
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type ReminderSetting @table {
+  daysBefore: Int!
+  enabled: Boolean! @default(value: true)
+}
+
+type CompanyProfile @table {
+  organisation: Organisation!
+  user: User!
+  companyName: String!
+  registrationNumber: String
+  vatNumber: String
+  psiraNumber: String
+  bbbbeeLevel: String
+  address: String
+  phone: String
+  email: String
+  website: String
+  logoPath: String
+  primaryColor: String! @default(value: "#0f766e")
+  fontFamily: String! @default(value: "Arial, sans-serif")
+  letterheadTagline: String
+  directorName: String
+  directorTitle: String
+  organogramPath: String
+  organogramText: String
+  signaturePath: String
+  letterheadPath: String
+  companyProfileDocPath: String
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+# ============================================================
+# Issuer portal
+# ============================================================
+
+type IssuerCompany @table {
+  organisation: Organisation!
+  name: String!
+  registrationNumber: String
+  description: String
+  industry: String
+  address: String
+  phone: String
+  email: String
+  website: String
+  logoPath: String
+  primaryColor: String! @default(value: "#0f766e")
+  createdAt: Timestamp! @default(expr: "request.time")
+  createdBy: String
+}
+
+type CompanyMember @table {
+  company: IssuerCompany!
+  userId: String!
+  role: String! @default(value: "member")
+  status: String! @default(value: "pending")
+  jobTitle: String
+  joinedAt: Timestamp! @default(expr: "request.time")
+  approvedAt: Timestamp
+}
+
+type IssuedTender @table {
+  company: IssuerCompany!
+  referenceNumber: String!
+  title: String!
+  description: String
+  scopeOfWork: String
+  category: String
+  location: String
+  issueDate: Date
+  closingDate: Date
+  closingTime: String
+  budget: Float
+  contractPeriod: String
+  evaluationCriteria: String
+  submissionMethod: String
+  contactPerson: String
+  contactEmail: String
+  contactPhone: String
+  status: String! @default(value: "Open")
+  isPublished: Boolean! @default(value: false)
+  aiGeneratedContent: String
+  notes: String
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+  createdBy: String
+}
+
+type Bid @table {
+  tender: IssuedTender!
+  bidderCompanyName: String!
+  bidderEmail: String
+  bidderContactPerson: String
+  bidderPhone: String
+  bidderBbbeeLevel: String
+  totalAmount: Float!
+  proposalSummary: String
+  technicalScore: Float
+  financialScore: Float
+  status: String! @default(value: "Pending")
+  submittedAt: Timestamp! @default(expr: "request.time")
+  reviewedAt: Timestamp
+  reviewedBy: String
+  notes: String
+  aiReview: String
+  aiReviewedAt: Timestamp
+}
+
+type BidDocument @table {
+  bid: Bid!
+  docType: String
+  filename: String!
+  originalFilename: String!
+  filePath: String!
+  fileType: String
+  fileSize: Int
+  uploadedAt: Timestamp! @default(expr: "request.time")
+}
+
+# ============================================================
+# Bidder portal
+# ============================================================
+
+type BidderCompany @table {
+  organisation: Organisation!
+  name: String!
+  description: String
+  industry: String
+  phone: String
+  email: String
+  createdAt: Timestamp! @default(expr: "request.time")
+  createdBy: String
+}
+
+type BidderMember @table {
+  company: BidderCompany!
+  userId: String!
+  role: String! @default(value: "member")
+  status: String! @default(value: "pending")
+  jobTitle: String
+  joinedAt: Timestamp! @default(expr: "request.time")
+  approvedAt: Timestamp
+}

@@ -26,16 +26,17 @@ from database import (
     IssuerCompany, CompanyMember, IssuedTender, Bid, BidDocument,
     BidderCompany, BidderMember
 )
-from auth import (
-    hash_password, verify_password, create_access_token, get_current_user
-)
+from auth import get_current_user
 import ai_module
 
 # Initialize DB on import
 init_db()
 
 # Upload directory
-UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+UPLOAD_DIR = os.environ.get(
+    "UPLOAD_DIR", os.path.join(os.environ.get("DATA_DIR", os.path.dirname(__file__)), "uploads")
+)
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = FastAPI(title="TM Flow API", version="1.0.0")
@@ -609,33 +610,27 @@ def _regenerate_checklist(tender_id: int, db: Session):
 
 
 # ---------------------- Auth Routes ----------------------
+#
+# Signup and signin are owned by Firebase Auth (see auth.py). These routes are
+# retained so existing tooling that still posts here gets a clear signal rather
+# than a 422, and so /auth/me keeps working: it accepts the Firebase ID token
+# that auth-context.tsx sends.
+
 
 @app.post("/api/auth/register", response_model=TokenOut)
-def register(payload: UserCreate, db: Session = Depends(get_db)):
-    existing = db.query(User).filter(User.email == payload.email.lower()).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    user = User(
-        email=payload.email.lower(),
-        full_name=payload.full_name,
-        company_name=payload.company_name,
-        account_type=payload.account_type or "applicant",
-        hashed_password=hash_password(payload.password),
+def register(payload: UserCreate):
+    raise HTTPException(
+        status_code=410,
+        detail="Registration moved to Firebase Auth. Create the account in the client SDK.",
     )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    token = create_access_token({"sub": str(user.id)})
-    return TokenOut(access_token=token, user=UserOut.model_validate(user))
 
 
 @app.post("/api/auth/login", response_model=TokenOut)
-def login(payload: UserLogin, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == payload.email.lower()).first()
-    if not user or not verify_password(payload.password, user.hashed_password):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    token = create_access_token({"sub": str(user.id)})
-    return TokenOut(access_token=token, user=UserOut.model_validate(user))
+def login(payload: UserLogin):
+    raise HTTPException(
+        status_code=410,
+        detail="Sign-in moved to Firebase Auth. Use signInWithEmailAndPassword.",
+    )
 
 
 @app.get("/api/auth/me", response_model=UserOut)
@@ -2165,7 +2160,7 @@ def search_addendums(
         # Build a search query for addendums for this tender
         query = f"{tender.reference_number} {tender.title} addendum site:etenders.gov.za OR site:tenderbulletins.co.za OR site:gov.za"
         try:
-            raw_results = ai_module._run_zai_web_search(query, num=5)
+            raw_results = ai_module._gemini_web_search(query, num=5)
             if raw_results:
                 # Use AI to filter for actual addendum results
                 raw_text = json.dumps(raw_results, indent=2, default=str)[:5000]
@@ -2180,7 +2175,7 @@ Return ONLY a JSON array of addendum results:
 [{{"title": string, "url": string, "description": string, "date": string|null}}]
 If no actual addendums found, return []."""
                 try:
-                    response = ai_module._run_zai_chat(prompt, system="You are a tender addendum search assistant. Return ONLY valid JSON.")
+                    response = ai_module._gemini_chat(prompt, system="You are a tender addendum search assistant. Return ONLY valid JSON.")
                     response = response.strip()
                     first = response.find("[")
                     last = response.rfind("]")

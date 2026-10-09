@@ -377,7 +377,7 @@ export function CompanyTab() {
               {profile?.logo_path ? (
                 <div className="rounded-lg border p-4 bg-muted/30 flex flex-col items-center">
                   <img
-                    src={`/uploads/${profile.logo_path}?XTransformPort=8000`}
+                    src={`/uploads/${profile.logo_path}`}
                     alt="Company logo"
                     className="max-h-24 max-w-full object-contain mb-2"
                   />
@@ -695,7 +695,7 @@ export function CompanyTab() {
               >
                 {profile?.logo_path && (
                   <img
-                    src={`/uploads/${profile.logo_path}?XTransformPort=8000`}
+                    src={`/uploads/${profile.logo_path}`}
                     alt="Logo"
                     className="max-h-16 max-w-full object-contain mb-2"
                   />

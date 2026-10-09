@@ -126,7 +126,7 @@ function expiryLabel(days: number | null): string {
 }
 
 function downloadUrl(filename: string): string {
-  return `/uploads/${filename}?XTransformPort=8000`;
+  return `/uploads/${filename}`;
 }
 
 // ---- Stat card ----

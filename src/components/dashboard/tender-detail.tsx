@@ -965,7 +965,7 @@ function DocumentsSection({ tender, onChanged }: { tender: any; onChanged: () =>
                   asChild
                 >
                   <a
-                    href={`/uploads/${doc.filename}?XTransformPort=8000`}
+                    href={`/uploads/${doc.filename}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     title="Download"
@@ -2363,7 +2363,7 @@ function AddendumsSection({ tender, onChanged }: { tender: any; onChanged: () =>
                     {a.issued_date && <>Issued: {formatDate(a.issued_date)} · </>}
                     Added: {formatDateTime(a.created_at)}
                     {a.file_path && (
-                      <> · <a href={`/uploads/${a.file_path}?XTransformPort=8000`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Download</a></>
+                      <> · <a href={`/uploads/${a.file_path}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Download</a></>
                     )}
                   </div>
                   {a.description && <p className="text-sm mt-1">{a.description}</p>}
@@ -2657,7 +2657,7 @@ function AISection({ tender, onChanged }: { tender: any; onChanged: () => void }
               </CardDescription>
             </div>
             <Button asChild size="sm" variant="outline">
-              <a href={`/uploads/${tender.documents?.[0]?.filename || ""}?XTransformPort=8000`} target="_blank" rel="noopener noreferrer">
+              <a href={`/uploads/${tender.documents?.[0]?.filename || ""}`} target="_blank" rel="noopener noreferrer">
                 <FileText className="h-3.5 w-3.5" /> View doc
               </a>
             </Button>

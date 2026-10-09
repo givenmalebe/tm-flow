@@ -1,0 +1,130 @@
+# Registration creates the tenancy layer. Without the Organisation and
+# Membership rows a user would exist but see nothing.
+#
+# MUST be called exactly once per Firebase account. This mutation is not
+# idempotent: every call inserts a new Organisation and Membership row. Callers
+# must check HasOrganisation first and skip this when a membership exists.
+mutation RegisterUser (
+  $fullName: String!
+  $organisationName: String!
+  $companyName: String
+  $accountType: String
+) @auth(level: PUBLIC, insecureReason: "Signup must be callable before a user exists.") {
+  user_upsert(
+    data: {
+      id_expr: "auth.uid"
+      email_expr: "auth.token.email"
+      fullName: $fullName
+      companyName: $companyName
+      accountType: $accountType
+      role: "admin"
+    }
+  )
+  organisation_insert(data: { name: $organisationName })
+  membership_insert(
+    data: {
+      userId_expr: "auth.uid"
+      organisationId_expr: "response.organisation_insert.id"
+      role: "owner"
+    }
+  )
+}
+
+# The organisation is read from the caller's own membership row inside the
+# transaction, never from a client argument, so a write cannot be directed at
+# another organisation.
+mutation CreateTender (
+  $referenceNumber: String!
+  $title: String!
+  $clientCompany: String!
+  $description: String
+  $scopeOfWork: String
+  $category: String
+  $closingDate: Date
+) @auth(level: USER) @transaction {
+  callerOrg: query @check(message: "No organisation membership found for this account.") {
+    user(id_expr: "auth.uid") {
+      memberships_on_user(limit: 1) {
+        organisation {
+          id
+        }
+      }
+    }
+  }
+  tender_insert(
+    data: {
+      organisationId_expr: "response.callerOrg.user.memberships_on_user[0].organisation.id"
+      referenceNumber: $referenceNumber
+      title: $title
+      clientCompany: $clientCompany
+      description: $description
+      scopeOfWork: $scopeOfWork
+      category: $category
+      closingDate: $closingDate
+      status: "New Opportunity"
+      createdBy_expr: "auth.uid"
+    }
+  )
+}
+
+# Update and delete must both establish AND gate on ownership. The traversal
+# finds the tender only through the caller's own membership, and @check aborts
+# the transaction when that traversal is empty. Without the @check the write
+# would still execute against a row the caller has no relationship to.
+mutation UpdateTender (
+  $id: UUID!
+  $referenceNumber: String!
+  $title: String!
+  $clientCompany: String!
+  $description: String
+  $scopeOfWork: String
+  $category: String
+  $closingDate: Date
+  $status: String!
+) @auth(level: USER) @transaction {
+  # @check must sit on the innermost list. Placed on the outer query it only
+  # proves the caller has a membership row, which a non-member-of-this-tender
+  # user still does.
+  targetTender: query {
+    user(id_expr: "auth.uid") {
+      memberships_on_user {
+        organisation {
+          tenders_on_organisation(where: { id: { eq: $id } })
+            @check(message: "Tender not found in your organisation.") {
+            id
+          }
+        }
+      }
+    }
+  }
+  tender_update(
+    id: $id
+    data: {
+      referenceNumber: $referenceNumber
+      title: $title
+      clientCompany: $clientCompany
+      description: $description
+      scopeOfWork: $scopeOfWork
+      category: $category
+      closingDate: $closingDate
+      status: $status
+      updatedAt_expr: "request.time"
+    }
+  )
+}
+
+mutation DeleteTender($id: UUID!) @auth(level: USER) @transaction {
+  targetTender: query {
+    user(id_expr: "auth.uid") {
+      memberships_on_user {
+        organisation {
+          tenders_on_organisation(where: { id: { eq: $id } })
+            @check(message: "Tender not found in your organisation.") {
+            id
+          }
+        }
+      }
+    }
+  }
+  tender_delete(key: { id: $id })
+}

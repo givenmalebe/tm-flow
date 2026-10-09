@@ -1,0 +1,7 @@
+connectorId: "tmflow"
+generate:
+  javascriptSdk:
+    - outputDir: "../../src/lib/dataconnect-generated"
+      package: "@dataconnect/generated"
+      packageJsonDir: "../.."
+      react: true

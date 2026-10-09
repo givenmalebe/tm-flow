@@ -8,10 +8,25 @@ import {
   ReactNode,
   useCallback,
 } from "react";
-import { api } from "@/lib/api";
+import {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updateProfile,
+  signOut,
+  type User as FirebaseUser,
+} from "firebase/auth";
+import { getFirebaseAuth, getDataConnectInstance } from "@/lib/firebase";
+import { me, hasOrganisation, registerUser } from "@/lib/dataconnect-generated";
 
+/**
+ * The app-facing shape is unchanged from the pre-Firebase version: snake_case
+ * fields and a string `id`. Firebase Auth UIDs are strings, so `id` is typed
+ * string here where it was number before. Callers comparing
+ * `member.user_id === user.id` keep working because both sides are UIDs.
+ */
 interface AuthUser {
-  id: number;
+  id: string;
   email: string;
   full_name: string;
   company_name?: string;
@@ -41,45 +56,95 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
+  /**
+   * Loads the app-level profile from SQL Connect and creates the tenancy layer
+   * on first sign-in. RegisterUser is not idempotent, so it only runs when
+   * HasOrganisation reports no membership.
+   */
+  const loadProfile = useCallback(async (fbUser: FirebaseUser) => {
+    const dc = getDataConnectInstance();
+
+    const existing = await hasOrganisation(dc);
+    const memberships = existing.data.user?.memberships_on_user ?? [];
+
+    if (memberships.length === 0) {
+      await registerUser(dc, {
+        fullName: fbUser.displayName || fbUser.email?.split("@")[0] || "New user",
+        organisationName: `${fbUser.email?.split("@")[0] || "New user"}'s Organisation`,
+        companyName: null,
+        accountType: "applicant",
+      });
+    }
+
+    const res = await me(dc);
+    const row = res.data.user;
+    if (!row) {
+      setUser(null);
+      return;
+    }
+    setUser({
+      id: row.id,
+      email: row.email,
+      full_name: row.fullName,
+      company_name: row.companyName ?? undefined,
+      role: row.role,
+      account_type: row.accountType as "applicant" | "issuer",
+      onboarding_completed: row.onboardingCompleted,
+    });
+  }, []);
+
   const refreshUser = useCallback(async () => {
-    if (!api.getToken()) {
+    const fbUser = getFirebaseAuth().currentUser;
+    if (!fbUser) {
       setUser(null);
       setLoading(false);
       return;
     }
     try {
-      const me = await api.me();
-      setUser(me);
+      await loadProfile(fbUser);
     } catch {
-      api.logout();
       setUser(null);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadProfile]);
 
   useEffect(() => {
-    refreshUser();
-  }, [refreshUser]);
+    return onAuthStateChanged(getFirebaseAuth(), async (fbUser) => {
+      if (!fbUser) {
+        setUser(null);
+        setLoading(false);
+        return;
+      }
+      try {
+        await loadProfile(fbUser);
+      } catch {
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
+    });
+  }, [loadProfile]);
 
   const login = async (email: string, password: string) => {
-    const data = await api.login(email, password);
-    setUser(data.user);
+    await signInWithEmailAndPassword(getFirebaseAuth(), email, password);
   };
 
   const register = async (
     email: string,
     full_name: string,
     password: string,
-    company_name?: string,
-    account_type?: "applicant" | "issuer"
+    _company_name?: string,
+    _account_type?: "applicant" | "issuer"
   ) => {
-    const data = await api.register(email, full_name, password, company_name, account_type);
-    setUser(data.user);
+    const cred = await createUserWithEmailAndPassword(getFirebaseAuth(), email, password);
+    await updateProfile(cred.user, { displayName: full_name });
+    // The profile row and tenancy are written by the onAuthStateChanged
+    // handler via loadProfile, so the caller does not write them here.
   };
 
   const logout = () => {
-    api.logout();
+    signOut(getFirebaseAuth());
     setUser(null);
   };
 

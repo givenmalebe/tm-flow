@@ -81,7 +81,7 @@ export function TendersPage({ onBack, onSignIn, onGetStarted }: TendersPageProps
   const [mobileOpen, setMobileOpen] = React.useState(false);
 
   React.useEffect(() => {
-    fetch("/api/public/tenders?XTransformPort=8000")
+    fetch("/api/public/tenders")
       .then((r) => r.json())
       .then((data) => { setTenders(data.items || []); setLoading(false); })
       .catch(() => setLoading(false));
@@ -100,7 +100,7 @@ export function TendersPage({ onBack, onSignIn, onGetStarted }: TendersPageProps
 
   const downloadPDF = async (tender: any) => {
     try {
-      const res = await fetch(`/api/public/tenders/${tender.id}?XTransformPort=8000`);
+      const res = await fetch(`/api/public/tenders/${tender.id}`);
       const full = await res.json();
       const { jsPDF } = await import("jspdf");
       const doc = new jsPDF();
@@ -313,7 +313,7 @@ export function TendersPage({ onBack, onSignIn, onGetStarted }: TendersPageProps
                         <div className="flex gap-2 mt-4">
                           <Button size="sm" variant="outline" className="flex-1 text-xs" onClick={() => {
                             setSelectedTender(t); setFullTender(null); setLoadingDetail(true);
-                            fetch(`/api/public/tenders/${t.id}?XTransformPort=8000`).then((r) => r.json()).then((d) => { setFullTender(d); setLoadingDetail(false); }).catch(() => setLoadingDetail(false));
+                            fetch(`/api/public/tenders/${t.id}`).then((r) => r.json()).then((d) => { setFullTender(d); setLoadingDetail(false); }).catch(() => setLoadingDetail(false));
                           }}><Eye className="h-3.5 w-3.5 mr-1" />View Details</Button>
                           <Button size="sm" className="flex-1 text-xs bg-emerald-600 hover:bg-emerald-700" onClick={() => downloadPDF(t)}><Download className="h-3.5 w-3.5 mr-1" />Download</Button>
                         </div>

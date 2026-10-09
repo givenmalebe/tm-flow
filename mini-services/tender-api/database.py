@@ -12,8 +12,11 @@ from sqlalchemy import (
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 from sqlalchemy.engine import Engine
 
-# SQLite database path
-DB_PATH = os.path.join(os.path.dirname(__file__), "tender.db")
+# SQLite database path. DATA_DIR points at the mounted volume on Cloud Run;
+# locally the file sits beside this module.
+DATA_DIR = os.environ.get("DATA_DIR", os.path.dirname(__file__))
+os.makedirs(DATA_DIR, exist_ok=True)
+DB_PATH = os.environ.get("DB_PATH", os.path.join(DATA_DIR, "tender.db"))
 DB_URL = f"sqlite:///{DB_PATH}"
 
 # Enable foreign key constraints for SQLite
@@ -45,7 +48,10 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     full_name = Column(String(255), nullable=False)
     company_name = Column(String(255), nullable=True)
-    hashed_password = Column(String(255), nullable=False)
+    # Firebase Auth owns credentials, so this is never populated for new
+    # accounts. Kept NOT NULL-compatible by storing an empty string; rows
+    # created before the migration keep their real bcrypt hash.
+    hashed_password = Column(String(255), nullable=False, default="")
     role = Column(String(50), default="admin")  # admin / user
     account_type = Column(String(50), default="applicant")  # applicant / issuer
     onboarding_completed = Column(Boolean, default=False)

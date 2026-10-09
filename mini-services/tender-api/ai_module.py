@@ -1,6 +1,6 @@
 """
 TM Flow - AI module
-Uses the z-ai-web-dev-sdk CLI (Node.js) via subprocess for:
+Uses the Google Gemini API (gemini-flash-latest) via httpx for:
 - Tender document reading & extraction (chat)
 - AI assistant chat
 - AI tender summaries
@@ -8,44 +8,97 @@ Uses the z-ai-web-dev-sdk CLI (Node.js) via subprocess for:
 """
 import os
 import json
-import subprocess
-import tempfile
+import time
 from typing import Optional, Dict, Any, List
 
-Z_AI_CLI = os.path.join(
-    os.environ.get("Z_AI_CLI_PATH", "/home/z/my-project/node_modules/.bin/z-ai")
-)
+import httpx
 
 
-def _run_zai_chat(prompt: str, system: Optional[str] = None, max_tokens: int = 8000) -> str:
-    """Run the z-ai chat CLI and return the assistant text content."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        out_path = f.name
+def _load_env_file() -> None:
+    """
+    Populate os.environ from the repo-root .env for vars not already set.
+
+    The backend runs as a standalone service and does not inherit the .env that
+    Next.js loads, so GEMINI_API_KEY has to be read here. On Cloud Run the key
+    arrives as a real environment variable and this is a no-op.
+    """
+    env_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
+    if not os.path.isfile(env_path):
+        return
     try:
-        cmd = [Z_AI_CLI, "chat", "--prompt", prompt, "--output", out_path]
-        if system:
-            cmd += ["--system", system]
-        # 120s per call so two sequential AI calls (extraction + summary)
-        # fit within the 300s Next.js proxy timeout.
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-        if proc.returncode != 0:
-            raise RuntimeError(f"z-ai chat failed: {proc.stderr[:500]}")
-        with open(out_path, "r") as fp:
-            data = json.load(fp)
-        # Response structure: {choices:[{message:{content}}]} or {content}
-        if isinstance(data, dict):
-            if "choices" in data and data["choices"]:
-                msg = data["choices"][0].get("message", {})
-                return msg.get("content", "")
-            if "content" in data:
-                return data["content"]
-            return json.dumps(data)
-        return str(data)
-    finally:
-        try:
-            os.unlink(out_path)
-        except OSError:
-            pass
+        with open(env_path, "r") as fp:
+            for line in fp:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except OSError:
+        pass
+
+
+_load_env_file()
+
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+
+# 120s per call so two sequential AI calls (extraction + summary)
+# fit within the 300s Next.js proxy timeout.
+GEMINI_TIMEOUT = 120.0
+
+# Free-tier keys get rate-limited and the model sheds load under demand
+# spikes; retrying transient statuses clears most of those failures.
+GEMINI_RETRIES = 2
+GEMINI_RETRY_DELAY = 5.0
+GEMINI_RETRY_STATUS = {429, 500, 502, 503, 504}
+
+
+def _gemini_post(payload: Dict[str, Any], timeout: float) -> Dict[str, Any]:
+    """POST to the Gemini generateContent endpoint, retrying transient failures."""
+    if not GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY is not set")
+    url = f"{GEMINI_BASE_URL}/models/{GEMINI_MODEL}:generateContent"
+    headers = {"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"}
+
+    last_error = ""
+    for attempt in range(GEMINI_RETRIES + 1):
+        response = httpx.post(url, headers=headers, json=payload, timeout=timeout)
+        if response.status_code == 200:
+            return response.json()
+        last_error = f"HTTP {response.status_code}: {response.text[:500]}"
+        if response.status_code in GEMINI_RETRY_STATUS and attempt < GEMINI_RETRIES:
+            time.sleep(GEMINI_RETRY_DELAY * (attempt + 1))
+            continue
+        break
+
+    raise RuntimeError(f"Gemini request failed: {last_error}")
+
+
+def _gemini_text(data: Dict[str, Any]) -> str:
+    """Concatenate the text parts of the first candidate."""
+    candidates = data.get("candidates") or []
+    if not candidates:
+        raise RuntimeError(f"Gemini returned no candidates: {json.dumps(data)[:300]}")
+    parts = (candidates[0].get("content") or {}).get("parts") or []
+    text = "".join(p.get("text", "") for p in parts)
+    if not text:
+        raise RuntimeError("Gemini returned an empty response")
+    return text
+
+
+def _gemini_chat(prompt: str, system: Optional[str] = None, max_tokens: int = 8000) -> str:
+    """Call Gemini generateContent and return the assistant text content."""
+    payload: Dict[str, Any] = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"maxOutputTokens": max_tokens},
+    }
+    if system:
+        payload["systemInstruction"] = {"parts": [{"text": system}]}
+    return _gemini_text(_gemini_post(payload, GEMINI_TIMEOUT))
 
 
 # ---- Tender document extraction prompt ----
@@ -99,7 +152,7 @@ DOCUMENT CONTENT:
 
 Respond with ONLY the JSON object as specified."""
     try:
-        result = _run_zai_chat(prompt, system=EXTRACTION_SYSTEM)
+        result = _gemini_chat(prompt, system=EXTRACTION_SYSTEM)
         # Strip any potential markdown fences
         result = result.strip()
         if result.startswith("```"):
@@ -168,7 +221,7 @@ TENDER EXTRACTION (JSON):
 Return ONLY the JSON array as specified. Include every document and requirement needed to submit this tender."""
 
     try:
-        result = _run_zai_chat(prompt, system=CHECKLIST_SYSTEM)
+        result = _gemini_chat(prompt, system=CHECKLIST_SYSTEM)
         result = result.strip()
         if result.startswith("```"):
             result = result.split("\n", 1)[1] if "\n" in result else result[3:]
@@ -235,7 +288,7 @@ AI EXTRACTED INFO:
 {json.dumps(extracted, indent=2, default=str)}
 """
     try:
-        return _run_zai_chat(prompt, system=SUMMARY_SYSTEM)
+        return _gemini_chat(prompt, system=SUMMARY_SYSTEM)
     except RuntimeError as e:
         return f"Summary generation failed: {e}"
 
@@ -273,7 +326,7 @@ ADDENDUM CONTENT:
 
 Return ONLY the JSON object."""
     try:
-        result = _run_zai_chat(prompt, system=ADDENDUM_SYSTEM)
+        result = _gemini_chat(prompt, system=ADDENDUM_SYSTEM)
         result = result.strip()
         first = result.find("{")
         last = result.rfind("}")
@@ -360,7 +413,7 @@ USER QUESTION:
 
 Remember your mission: help the user WIN this tender. Be specific, actionable, and honest. Reference tenders by their reference number. If the question is about a specific tender, focus on that tender's data. If data is missing, say so."""
     try:
-        return _run_zai_chat(prompt, system=ASSISTANT_SYSTEM, max_tokens=6000)
+        return _gemini_chat(prompt, system=ASSISTANT_SYSTEM, max_tokens=6000)
     except RuntimeError as e:
         return f"I couldn't process that request right now. ({e})"
 
@@ -368,7 +421,7 @@ Remember your mission: help the user WIN this tender. Be specific, actionable, a
 def answer_general_question(question: str) -> str:
     """General fallback chat (no system data)."""
     try:
-        return _run_zai_chat(question, system=ASSISTANT_SYSTEM)
+        return _gemini_chat(question, system=ASSISTANT_SYSTEM)
     except RuntimeError as e:
         return f"I couldn't process that request right now. ({e})"
 
@@ -423,30 +476,40 @@ def extract_text_from_file(file_path: str, filename: str) -> str:
 
 # ---- AI Tender Discovery (web search) ----
 
-def _run_zai_web_search(query: str, num: int = 10) -> List[Dict[str, Any]]:
-    """Run the z-ai web_search function CLI and return search results."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        out_path = f.name
+def _gemini_web_search(query: str, num: int = 10) -> List[Dict[str, Any]]:
+    """
+    Search the web via Gemini Google Search grounding and return results.
+
+    Grounding is unavailable on some API tiers (HTTP 429), so any failure
+    degrades to an empty list. Callers treat that as "no AI top-up results"
+    and fall back to the Python tender scrapers.
+    """
+    payload = {
+        "contents": [{"parts": [{"text": query}]}],
+        "tools": [{"google_search": {}}],
+        "generationConfig": {"maxOutputTokens": 8000},
+    }
     try:
-        args = json.dumps({"query": query, "num": num})
-        cmd = [Z_AI_CLI, "function", "-n", "web_search", "-a", args, "-o", out_path]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        if proc.returncode != 0:
-            raise RuntimeError(f"z-ai web_search failed: {proc.stderr[:500]}")
-        with open(out_path, "r") as fp:
-            data = json.load(fp)
-        if isinstance(data, list):
-            return data
-        if isinstance(data, dict) and "results" in data:
-            return data["results"]
+        data = _gemini_post(payload, 60.0)
+    except Exception:
         return []
-    except (json.JSONDecodeError, RuntimeError, Exception):
-        return []
-    finally:
-        try:
-            os.unlink(out_path)
-        except OSError:
-            pass
+
+    chunks = ((data.get("candidates") or [{}])[0]
+              .get("groundingMetadata") or {}
+              .get("groundingChunks") or [])
+    results: List[Dict[str, Any]] = []
+    for chunk in chunks:
+        web = chunk.get("web") or {}
+        uri = web.get("uri") or web.get("url")
+        title = web.get("title")
+        if not uri and not title:
+            continue
+        results.append({
+            "title": title or uri or "",
+            "url": uri or "",
+            "snippet": (chunk.get("text") or "")[:1000],
+        })
+    return results[:num] if num else results
 
 
 # South African tender portals to prioritize in search
@@ -526,7 +589,7 @@ def discover_tenders(
     web_search_results: List[Dict[str, Any]] = []
     if len(scraped_results) < num_results:
         try:
-            raw_results = _run_zai_web_search(query, num=num_results)
+            raw_results = _gemini_web_search(query, num=num_results)
             if raw_results:
                 # Use AI to structure the raw web search results
                 raw_text = json.dumps(raw_results, indent=2, default=str)[:20000]
@@ -540,7 +603,7 @@ RAW SEARCH RESULTS (JSON):
 
 Return ONLY the JSON array as specified. Exclude non-tender results."""
                 try:
-                    response = _run_zai_chat(prompt, system=DISCOVER_SYSTEM)
+                    response = _gemini_chat(prompt, system=DISCOVER_SYSTEM)
                     response = response.strip()
                     if response.startswith("```"):
                         response = response.split("\n", 1)[1] if "\n" in response else response[3:]
@@ -698,7 +761,7 @@ The Method Statement must include:
 Make it specific to THIS tender — reference the client, the scope, the personnel requirements.
 Generate at least 2000 words. Be detailed and professional."""
     try:
-        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=6000)
+        return _gemini_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=6000)
     except RuntimeError as e:
         return f"Document generation failed: {e}"
 
@@ -735,7 +798,7 @@ The Implementation Plan must include:
 
 Make it specific to THIS tender. Generate at least 2000 words."""
     try:
-        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=6000)
+        return _gemini_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=6000)
     except RuntimeError as e:
         return f"Document generation failed: {e}"
 
@@ -780,7 +843,7 @@ The Technical Proposal must include:
 Address EVERY functionality requirement and evaluation criterion explicitly.
 Generate at least 2500 words. Be persuasive — this is what wins the technical score."""
     try:
-        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=6000)
+        return _gemini_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=6000)
     except RuntimeError as e:
         return f"Document generation failed: {e}"
 
@@ -815,7 +878,7 @@ The Risk Assessment must include:
 For each risk, include: Risk ID, Description, Likelihood (High/Medium/Low), Impact (High/Medium/Low), Risk Rating, Mitigation, Owner.
 Generate at least 2000 words."""
     try:
-        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=6000)
+        return _gemini_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=6000)
     except RuntimeError as e:
         return f"Document generation failed: {e}"
 
@@ -859,7 +922,7 @@ Include SOPs for:
 
 Generate at least 2500 words. Be specific to this tender's scope."""
     try:
-        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=6000)
+        return _gemini_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=6000)
     except RuntimeError as e:
         return f"Document generation failed: {e}"
 
@@ -896,7 +959,7 @@ Number each section (1, 2, 3...) with sub-sections (1.1, 1.2, ...).
 Also include a brief description of what each section contains.
 Format as a clean, professional table of contents."""
     try:
-        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=3000)
+        return _gemini_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=3000)
     except RuntimeError as e:
         return f"Document generation failed: {e}"
 
@@ -941,7 +1004,7 @@ The Cover Letter must include:
 
 Generate at least 800 words. Be formal, professional, and persuasive."""
     try:
-        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=4000)
+        return _gemini_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=4000)
     except RuntimeError as e:
         return f"Document generation failed: {e}"
 
@@ -988,7 +1051,7 @@ The Company Profile must include:
 
 Generate at least 1500 words. Be professional and detailed."""
     try:
-        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=5000)
+        return _gemini_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=5000)
     except RuntimeError as e:
         return f"Document generation failed: {e}"
 
@@ -1037,7 +1100,7 @@ The Compliance Documents section must include a formal cover sheet listing:
 For each item, provide a formal declaration that the document is attached and valid.
 Generate at least 1000 words."""
     try:
-        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=4000)
+        return _gemini_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=4000)
     except RuntimeError as e:
         return f"Document generation failed: {e}"
 
@@ -1099,7 +1162,7 @@ The Organogram must include:
 
 Generate at least 1200 words. Be specific to this tender's personnel requirements."""
     try:
-        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=4000)
+        return _gemini_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=4000)
     except RuntimeError as e:
         return f"Document generation failed: {e}"
 
@@ -1154,7 +1217,7 @@ The Pricing Schedule must include:
 Present the pricing in clear table format (using text-based tables).
 Generate at least 1500 words."""
     try:
-        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=5000)
+        return _gemini_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=5000)
     except RuntimeError as e:
         return f"Document generation failed: {e}"
 
@@ -1195,7 +1258,7 @@ The References document must include:
 Use placeholder names where real client details are not available, but make them realistic for the South African security/services industry.
 Generate at least 1200 words."""
     try:
-        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=4000)
+        return _gemini_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=4000)
     except RuntimeError as e:
         return f"Document generation failed: {e}"
 
@@ -1240,7 +1303,7 @@ The Signed Declarations must include:
 Each declaration should be a formal, legally-worded statement with a signature block.
 Generate at least 1000 words."""
     try:
-        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=4000)
+        return _gemini_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=4000)
     except RuntimeError as e:
         return f"Document generation failed: {e}"
 
@@ -1293,7 +1356,7 @@ The Appendices must include:
 
 Generate at least 1500 words. Be specific to this tender's requirements."""
     try:
-        return _run_zai_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=5000)
+        return _gemini_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=5000)
     except RuntimeError as e:
         return f"Document generation failed: {e}"
 
@@ -1398,7 +1461,7 @@ AI-EXTRACTED TENDER INFO:
 
 Generate a complete pricing sheet with realistic line items. Return ONLY the JSON object."""
     try:
-        result = _run_zai_chat(prompt, system=PRICING_SYSTEM)
+        result = _gemini_chat(prompt, system=PRICING_SYSTEM)
         result = result.strip()
         if result.startswith("```"):
             result = result.split("\n", 1)[1] if "\n" in result else result[3:]
@@ -1481,7 +1544,7 @@ COMPANY PROFILE:
 
 Generate the full READINESS REPORT with all 7 sections as specified."""
     try:
-        return _run_zai_chat(prompt, system=READINESS_SYSTEM, max_tokens=6000)
+        return _gemini_chat(prompt, system=READINESS_SYSTEM, max_tokens=6000)
     except RuntimeError as e:
         return f"Readiness report generation failed: {e}"
 
@@ -1550,7 +1613,7 @@ AI-EXTRACTED INFO:
 
 Return ONLY the JSON array of required documents."""
     try:
-        result = _run_zai_chat(prompt, system=SMART_DOCS_SYSTEM)
+        result = _gemini_chat(prompt, system=SMART_DOCS_SYSTEM)
         result = result.strip()
         if result.startswith("```"):
             result = result.split("\n", 1)[1] if "\n" in result else result[3:]
@@ -1633,7 +1696,7 @@ Respond with ONLY this JSON schema (fill all fields with rich, detailed, profess
 Make the content specific, detailed, and immediately usable. Use South African context (Rand currency, SA legislation, etc.)."""
 
     try:
-        result = _run_zai_chat(user_prompt, system=system, max_tokens=8000)
+        result = _gemini_chat(user_prompt, system=system, max_tokens=8000)
         # Strip markdown fences if present
         result = result.strip()
         if result.startswith("```"):
@@ -1726,7 +1789,7 @@ Respond with ONLY this JSON:
 }}"""
 
     try:
-        result = _run_zai_chat(user_prompt, system=system, max_tokens=4000)
+        result = _gemini_chat(user_prompt, system=system, max_tokens=4000)
         result = result.strip()
         if result.startswith("```"):
             result = result.split("\n", 1)[1] if "\n" in result else result[3:]
@@ -1800,7 +1863,7 @@ Respond with ONLY this JSON:
 }}"""
 
     try:
-        result = _run_zai_chat(user_prompt, system=system, max_tokens=1000)
+        result = _gemini_chat(user_prompt, system=system, max_tokens=1000)
         result = result.strip()
         if result.startswith("```"):
             result = result.split("\n", 1)[1] if "\n" in result else result[3:]
@@ -1911,7 +1974,7 @@ Generate a complete, professional document based on the user's request. The docu
 Write the full document now:"""
 
     try:
-        result = _run_zai_chat(user_prompt, system=system, max_tokens=6000)
+        result = _gemini_chat(user_prompt, system=system, max_tokens=6000)
         return result.strip()
     except Exception as e:
         return f"Error generating document: {e}\n\nPlease try again."

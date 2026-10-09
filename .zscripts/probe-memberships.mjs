@@ -1,0 +1,10 @@
+﻿import { initializeApp } from "firebase/app";
+import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
+import { getDataConnect } from "firebase/data-connect";
+import { connectorConfig, myOrganisation } from "../src/lib/dataconnect-generated/index.cjs.js";
+const app = initializeApp({apiKey:"AIzaSyBkAbesCUmu9hjLzIEhrCgVqm5F-_aeLi8",authDomain:"tender-management-flow.firebaseapp.com",projectId:"tender-management-flow",storageBucket:"tender-management-flow.firebasestorage.app",messagingSenderId:"850311890595",appId:"1:850311890595:web:7e2734704371e31cd3a116"});
+const auth = getAuth(app); const dc = getDataConnect(connectorConfig,{app});
+await signInWithEmailAndPassword(auth,"auth-probe-tmflow@example.com","Probe-Pass-12345");
+const m = (await myOrganisation(dc)).data.user?.memberships_on_user ?? [];
+console.log("membership count:", m.length);
+m.forEach((x,i)=>console.log(`  [${i}] org=${x.organisation?.name} id=${x.organisation?.id?.slice(0,8)} role=${x.role}`));

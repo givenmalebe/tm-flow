@@ -1,0 +1,119 @@
+# Membership traversal is the authorisation mechanism: every company-scoped
+# read starts from the caller, so a missing traversal returns nothing rather
+# than another organisation's rows.
+query Me @auth(level: USER) {
+  user(id_expr: "auth.uid") {
+    id
+    email
+    fullName
+    companyName
+    role
+    accountType
+    onboardingCompleted
+  }
+}
+
+# Callers must run this before RegisterUser. A user with more than one
+# membership is a corrupted account state: the @check directives in UpdateTender
+# and DeleteTender evaluate per membership and would reject a legitimate write.
+query HasOrganisation @auth(level: USER) {
+  user(id_expr: "auth.uid") {
+    memberships_on_user(limit: 1) {
+      organisation {
+        id
+        name
+      }
+    }
+  }
+}
+
+query MyOrganisation @auth(level: USER) {
+  user(id_expr: "auth.uid") {
+    memberships_on_user {
+      role
+      organisation {
+        id
+        name
+      }
+    }
+  }
+}
+
+# @refresh is required: SQL Connect auto-invalidates single-entity lookups only.
+# Without it this list query serves a cached result and newly created tenders
+# never appear.
+query ListTenders
+  @auth(level: USER)
+  @refresh(
+    onMutationExecuted: [
+      { operation: "CreateTender" }
+      { operation: "UpdateTender" }
+      { operation: "DeleteTender" }
+    ]
+  ) {
+  user(id_expr: "auth.uid") {
+    memberships_on_user {
+      organisation {
+        tenders_on_organisation(limit: 200, orderBy: [{ closingDate: ASC }]) {
+          id
+          referenceNumber
+          title
+          clientCompany
+          status
+          closingDate
+          category
+        }
+      }
+    }
+  }
+}
+
+query GetTender($id: UUID!) @auth(level: USER) {
+  user(id_expr: "auth.uid") {
+    memberships_on_user {
+      organisation {
+        tenders_on_organisation(where: { id: { eq: $id } }) {
+          id
+          referenceNumber
+          title
+          clientCompany
+          description
+          scopeOfWork
+          status
+          closingDate
+          tenderDocuments_on_tender {
+            id
+            filename
+            filePath
+          }
+          checklistItems_on_tender {
+            id
+            name
+            category
+            mandatory
+            status
+          }
+        }
+      }
+    }
+  }
+}
+
+query PublicIssuedTenders @auth(level: PUBLIC, insecureReason: "Public tender listings are intentionally readable without an account.") {
+  issuedTenders(
+    where: { isPublished: { eq: true } }
+    orderBy: [{ closingDate: ASC }]
+    limit: 50
+  ) {
+    id
+    referenceNumber
+    title
+    description
+    category
+    location
+    closingDate
+    budget
+    contractPeriod
+    submissionMethod
+  }
+}

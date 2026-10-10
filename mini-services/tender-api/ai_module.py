@@ -565,6 +565,7 @@ def discover_tenders(
     keywords: str = "",
     location: str = "South Africa",
     num_results: int = 15,
+    skip_scrapers: bool = False,
 ) -> Dict[str, Any]:
     """
     Find real open tenders matching the given criteria.
@@ -588,14 +589,15 @@ def discover_tenders(
     sources_used: List[str] = []
     scrape_errors: List[str] = []
 
-    try:
-        from scraper import scrape_all
-        scrape_data = scrape_all(category, keywords, location, limit=num_results)
-        scraped_results = scrape_data.get("results", [])
-        sources_used = scrape_data.get("sources", [])
-        scrape_errors = scrape_data.get("errors", [])
-    except Exception as e:
-        scrape_errors.append(f"scraper module: {str(e)[:100]}")
+    if not skip_scrapers:
+        try:
+            from scraper import scrape_all
+            scrape_data = scrape_all(category, keywords, location, limit=num_results)
+            scraped_results = scrape_data.get("results", [])
+            sources_used = scrape_data.get("sources", [])
+            scrape_errors = scrape_data.get("errors", [])
+        except Exception as e:
+            scrape_errors.append(f"scraper module: {str(e)[:100]}")
 
     # --- Step 2: AI web search for additional coverage ---
     web_search_results: List[Dict[str, Any]] = []

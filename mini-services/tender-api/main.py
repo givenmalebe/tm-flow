@@ -3573,6 +3573,84 @@ def ai_briefing(db: Session = Depends(get_db), user: User = Depends(get_current_
     return ai_agent.build_briefing(db, user)
 
 
+@app.post("/api/ai/research")
+def ai_research(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Run an on-demand research pass for the caller's company scope."""
+    import ai_agent
+    return ai_agent.run_research(db, user)
+
+
+def _estimated_value_float(value):
+    """Best-effort 'R1.2m' -> 1200000.0; None when not numeric."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).lower().replace("r", "").replace(",", "").replace(" ", "")
+    multiplier = 1.0
+    if text.endswith("m"):
+        multiplier, text = 1_000_000.0, text[:-1]
+    elif text.endswith("k"):
+        multiplier, text = 1_000.0, text[:-1]
+    try:
+        return float(text) * multiplier
+    except ValueError:
+        return None
+
+
+@app.post("/api/ai/opportunities/{opp_id}/import")
+def ai_import_opportunity(
+    opp_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+):
+    """Promote a researched opportunity into a tracked Tender (with checklist)."""
+    import ai_agent
+    scope = ai_agent.resolve_scope(db, user)
+    opp = ai_agent.get_opportunity_checked(db, scope, opp_id)
+    if opp is None:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+
+    if opp.status == "imported" and opp.imported_tender_id:
+        return {"tender_id": opp.imported_tender_id, "opportunity_id": opp.id}
+
+    tender = Tender(
+        reference_number=(opp.reference_number or f"AI-{opp.id}"),
+        title=opp.title,
+        client_company=(opp.provider or opp.source_site or "Unknown"),
+        description=opp.description,
+        category=opp.category,
+        location_site=opp.location,
+        closing_date=opp.closing_date,
+        estimated_value=_estimated_value_float(opp.estimated_value),
+        status="Interested",
+        created_by=user.id,
+    )
+    db.add(tender)
+    db.commit()
+    db.refresh(tender)
+    _build_default_checklist(tender.id, db)
+    db.commit()
+
+    opp.status = "imported"
+    opp.imported_tender_id = tender.id
+    db.commit()
+    return {"tender_id": tender.id, "opportunity_id": opp.id}
+
+
+@app.post("/api/ai/opportunities/{opp_id}/dismiss")
+def ai_dismiss_opportunity(
+    opp_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+):
+    """Hide a researched opportunity from the briefing."""
+    import ai_agent
+    scope = ai_agent.resolve_scope(db, user)
+    opp = ai_agent.get_opportunity_checked(db, scope, opp_id)
+    if opp is None:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+    opp.status = "dismissed"
+    db.commit()
+    return {"opportunity_id": opp.id, "status": opp.status}
+
+
 # ---------------------- Search/Filter helper ----------------------
 
 @app.get("/api/tenders/search")

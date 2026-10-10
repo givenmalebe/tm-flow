@@ -3243,10 +3243,14 @@ def _build_full_system_context(db: Session, user: User, tender_id: Optional[int]
     - Extracted text from uploaded tender documents (capped per doc to fit context)
     """
     import os as _os
+    import ai_agent as _agent
 
-    # ---- Dashboard stats ----
     today = date.today()
-    all_tenders = db.query(Tender).all()
+    # COMPANY-SCOPED: the AI may only see data belonging to the caller's
+    # bidder company (or the caller's own rows when they have no company).
+    scope = _agent.resolve_scope(db, user)
+    member_ids = scope["member_ids"]
+    all_tenders = db.query(Tender).filter(Tender.created_by.in_(member_ids)).all()
     active_statuses = {"New Opportunity", "Under Review", "Interested", "Preparing",
                        "Documents Outstanding", "Pricing in Progress", "Awaiting Information",
                        "Ready for Submission", "Submitted", "Clarification Requested",
@@ -3256,8 +3260,12 @@ def _build_full_system_context(db: Session, user: User, tender_id: Optional[int]
     closing_this_week = [t for t in all_tenders if t.closing_date and t.status in active_statuses
                          and 0 <= (t.closing_date - today).days <= 7]
 
-    # ---- Compliance library ----
-    library_docs = db.query(LibraryDocument).all()
+    # ---- Compliance library (scope-filtered) ----
+    library_docs = (
+        db.query(LibraryDocument)
+        .filter(LibraryDocument.created_by.in_(member_ids))
+        .all()
+    )
     library_data = []
     for d in library_docs:
         days_to_expiry = None
@@ -3409,6 +3417,10 @@ def _build_full_system_context(db: Session, user: User, tender_id: Optional[int]
     context = {
         "user": {"full_name": user.full_name, "company_name": user.company_name, "email": user.email},
         "system_date": today.isoformat(),
+        "company_scope": {
+            "company_id": scope["company_id"],
+            "company_name": scope["company_name"],
+        },
         "dashboard": {
             "total_tenders": len(all_tenders),
             "active_tenders": len(active),
@@ -3424,11 +3436,45 @@ def _build_full_system_context(db: Session, user: User, tender_id: Optional[int]
         },
         "compliance_library": library_data,
         "tenders": tenders_data,
+        "company_profile": None,
+        "ai_memory": {"mission": None, "goals": [], "preferences": None},
+        "recent_chat": [],
+        "ai_opportunities": [],
     }
 
-    # If a focus tender is specified, also include its full serialized form
+    # ---- The AI's own identity: company profile, memory, chat, opportunities ----
+    profile = db.query(CompanyProfile).filter(CompanyProfile.user_id == user.id).first()
+    if profile:
+        context["company_profile"] = {
+            "company_name": profile.company_name,
+            "registration_number": profile.registration_number,
+            "vat_number": profile.vat_number,
+            "psira_number": profile.psira_number,
+            "bbbbee_level": profile.bbbbee_level,
+            "address": profile.address,
+            "phone": profile.phone,
+            "email": profile.email,
+            "website": profile.website,
+            "director_name": profile.director_name,
+            "director_title": profile.director_title,
+        }
+    memory = _agent.get_or_create_memory(db, scope)
+    context["ai_memory"] = {
+        "mission": memory.mission,
+        "goals": memory.goals or [],
+        "preferences": memory.preferences,
+    }
+    context["recent_chat"] = [
+        {"role": m.role, "content": (m.content or "")[:500]}
+        for m in _agent.list_chat_messages(db, scope, limit=20)
+    ]
+    context["ai_opportunities"] = _agent.recent_opportunity_summaries(db, scope)
+
+    # If a focus tender is specified, verify it belongs to the caller's scope
     if tender_id:
-        t = db.query(Tender).filter(Tender.id == tender_id).first()
+        t = db.query(Tender).filter(
+            Tender.id == tender_id, Tender.created_by.in_(member_ids)
+        ).first()
         if t:
             context["focus_tender_id"] = tender_id
 

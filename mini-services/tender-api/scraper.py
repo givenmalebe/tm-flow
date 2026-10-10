@@ -35,6 +35,25 @@ ETENDERS_TIMEOUT = 30
 # (a login wall is worse than offering no link at all).
 LOGIN_WALL_HOSTS = {"security.co.za", "www.security.co.za"}
 
+# Words that appear on almost every tender and so cannot narrow a search down to
+# one organisation's work.
+_GENERIC_SEARCH_TERMS = {
+    "services", "service", "supplier", "suppliers", "provider", "providers",
+    "company", "contract", "contracts", "tender", "tenders", "general",
+    "various", "appointment", "provision", "management", "limited", "ltd",
+    "pty", "the", "and", "for", "with",
+}
+
+
+def _search_terms(category: str = "", keywords: str = "") -> List[str]:
+    """Meaningful search terms for narrowing a portal listing to this tenant."""
+    terms = {
+        t.lower()
+        for t in f"{category or ''} {keywords or ''}".split()
+        if len(t) > 2 and t.lower() not in _GENERIC_SEARCH_TERMS
+    }
+    return sorted(terms)
+
 
 def public_url_or_none(url: Optional[str]) -> Optional[str]:
     """Return the URL only if it is a genuinely public link; drop known login
@@ -172,7 +191,7 @@ def scrape_security_co_za(category: str = "", keywords: str = "", location: str 
             # Filter by keywords — this portal lists everything, so we keep only
             # what matches the organisation we are researching for.
             relevance = "high"
-            search_terms = [t.lower() for t in (category + " " + keywords).split() if len(t) > 2]
+            search_terms = _search_terms(category, keywords)
             if search_terms:
                 text_lower = (title + " " + description + " " + region + " " + client_type).lower()
                 matches = sum(1 for term in search_terms if term in text_lower)
@@ -265,7 +284,7 @@ def scrape_tenderflow_co_za(category: str = "", keywords: str = "", location: st
             # Relevance check — drop listings unrelated to the organisation we are
             # researching for, so it only ever sees its own kind of work.
             relevance = "medium"
-            search_terms = [t.lower() for t in (category + " " + keywords).split() if len(t) > 2]
+            search_terms = _search_terms(category, keywords)
             if search_terms:
                 text_lower = (title + " " + card_text).lower()
                 matches = sum(1 for term in search_terms if term in text_lower)
@@ -448,7 +467,7 @@ def scrape_etenders_opportunities(
     if not rows:
         return []
 
-    terms = [t.lower() for t in f"{category} {keywords}".split() if len(t) > 2]
+    terms = _search_terms(category, keywords)
 
     results: List[Dict[str, Any]] = []
     for row in rows:

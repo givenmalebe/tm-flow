@@ -48,7 +48,7 @@ def test_discover_funding_structures_search_results(monkeypatch):
     def fake_search(query, num=10, timeout=45.0):
         return search_results
 
-    def fake_chat(prompt, system=None, max_tokens=8000):
+    def fake_chat(prompt, system=None, max_tokens=8000, timeout=None):
         return json.dumps([
             {"title": "SEFA SMME Loan", "provider": "SEFA", "type": "funding",
              "category": "Loan", "location": "South Africa", "closing_date": None,
@@ -77,14 +77,14 @@ def test_discover_funding_empty_search_returns_empty(monkeypatch):
 
 def test_discover_funding_invalid_json_returns_empty(monkeypatch):
     monkeypatch.setattr(ai_module, "_gemini_web_search", lambda q, num=10, timeout=45.0: [{"title": "x", "url": "https://x"}])
-    monkeypatch.setattr(ai_module, "_gemini_chat", lambda p, system=None, max_tokens=8000: "not json at all")
+    monkeypatch.setattr(ai_module, "_gemini_chat", lambda p, system=None, max_tokens=8000, timeout=None: "not json at all")
     assert ai_module.discover_funding("Acme") == []
 
 
 def test_score_opportunities_validates_and_clamps(monkeypatch):
     opps = [{"title": f"T{i}"} for i in range(4)]
 
-    def fake_chat(prompt, system=None, max_tokens=8000):
+    def fake_chat(prompt, system=None, max_tokens=8000, timeout=None):
         assert "T0" in prompt
         return json.dumps([
             {"index": 0, "score": 85, "reason": "You can apply because you are PSIRA registered"},
@@ -103,5 +103,5 @@ def test_score_opportunities_validates_and_clamps(monkeypatch):
 
 def test_score_opportunities_empty_input_and_failure(monkeypatch):
     assert ai_module.score_opportunities("Acme", []) == []
-    monkeypatch.setattr(ai_module, "_gemini_chat", lambda p, system=None, max_tokens=8000: "garbage")
+    monkeypatch.setattr(ai_module, "_gemini_chat", lambda p, system=None, max_tokens=8000, timeout=None: "garbage")
     assert ai_module.score_opportunities("Acme", [{"title": "T"}]) == []

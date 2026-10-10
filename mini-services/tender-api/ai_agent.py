@@ -31,8 +31,9 @@ from database import (
 # The briefing narrative is cached for this long before a Gemini call regenerates it.
 BRIEFING_TTL_HOURS = 12
 
-RESEARCH_SOFT_DEADLINE_S = 50.0
-SCRAPER_TIMEOUT_S = 20.0
+# Research runs behind a ~60s Hosting proxy, so keep the whole pass well under it.
+RESEARCH_SOFT_DEADLINE_S = 45.0
+SCRAPER_TIMEOUT_S = 12.0
 
 
 # ---------------------- scope resolution ----------------------
@@ -592,34 +593,38 @@ def run_research(db: Session, user: User) -> Dict[str, Any]:
 
     started = time.monotonic()
     try:
+        # Scrapers and funding discovery run concurrently to fit the proxy budget.
         tender_raw: List[Dict[str, Any]] = []
-        with ThreadPoolExecutor(max_workers=3) as pool:
+        funding_raw: List[Dict[str, Any]] = []
+        with ThreadPoolExecutor(max_workers=4) as pool:
             futures = [
                 pool.submit(scraper.scrape_security_co_za, category, keywords, location, 20),
                 pool.submit(scraper.scrape_tenderflow_co_za, category, keywords, location, 20),
                 pool.submit(scraper.scrape_etenders_search, category, keywords, location, 20),
             ]
-            for future in as_completed(futures):
+            funding_future = pool.submit(ai_module.discover_funding, summary, location)
+            for future in as_completed(futures + [funding_future]):
+                is_funding = future is funding_future
                 try:
-                    tender_raw.extend(future.result(timeout=SCRAPER_TIMEOUT_S) or [])
+                    result = future.result(timeout=SCRAPER_TIMEOUT_S + 5)
+                    if is_funding:
+                        funding_raw.extend(result or [])
+                    else:
+                        tender_raw.extend(result or [])
                 except Exception:
-                    pass
+                    if is_funding:
+                        funding_raw = []
 
         # Top up with AI web search only if the scrapers were thin and we have time.
         if len(tender_raw) < 15 and (time.monotonic() - started) < RESEARCH_SOFT_DEADLINE_S - 25:
             try:
                 web = ai_module.discover_tenders(
-                    category, keywords, location, num_results=15, skip_scrapers=True
+                    category, keywords, location, num_results=15,
+                    skip_scrapers=True, search_timeout=15,
                 )
                 tender_raw.extend(web.get("results", []) or [])
             except Exception:
                 pass
-
-        funding_raw: List[Dict[str, Any]] = []
-        try:
-            funding_raw = ai_module.discover_funding(summary, location) or []
-        except Exception:
-            funding_raw = []
 
         # Normalize + dedup within this run.
         candidates: Dict[str, Dict[str, Any]] = {}
@@ -696,11 +701,13 @@ def run_research(db: Session, user: User) -> Dict[str, Any]:
         run.finished_at = datetime.utcnow()
         db.commit()
 
-        # Refresh the cached narrative so the greeting reflects the new finds.
-        try:
-            build_briefing(db, user, force_refresh=True)
-        except Exception:
-            pass
+        # Refresh the cached narrative so the greeting reflects the new finds —
+        # but only when there's budget left (the briefing reloads it otherwise).
+        if (time.monotonic() - started) < 30:
+            try:
+                build_briefing(db, user, force_refresh=True)
+            except Exception:
+                pass
 
         return {
             "run_id": run.id,

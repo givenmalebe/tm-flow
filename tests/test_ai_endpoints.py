@@ -74,6 +74,24 @@ def test_assistant_saves_and_injects_context(db, client, act_as, monkeypatch):
     assert "second question" not in chat
 
 
+def test_assistant_failure_surfaces_error_and_saves_nothing(db, client, act_as, monkeypatch):
+    alice, _ = _pair(db)
+
+    def boom(question, context):
+        raise RuntimeError("Gemini request failed: HTTP 503")
+
+    monkeypatch.setattr(mainmod.ai_module, "assistant_answer", boom)
+    act_as(alice)
+
+    r = client.post("/api/ai/assistant", json={"question": "will this fail?"})
+    assert r.status_code == 502, r.text
+    assert "AI is unavailable" in r.json()["detail"]
+
+    # No fake reply, and the failed attempt is not recorded.
+    r = client.get("/api/ai/chat-history")
+    assert r.json()["items"] == []
+
+
 def test_memory_roundtrip(db, client, act_as):
     alice, bob = _pair(db)
     act_as(alice)

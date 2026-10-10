@@ -90,7 +90,12 @@ def _gemini_text(data: Dict[str, Any]) -> str:
     return text
 
 
-def _gemini_chat(prompt: str, system: Optional[str] = None, max_tokens: int = 8000) -> str:
+def _gemini_chat(
+    prompt: str,
+    system: Optional[str] = None,
+    max_tokens: int = 8000,
+    timeout: Optional[float] = None,
+) -> str:
     """Call Gemini generateContent and return the assistant text content."""
     payload: Dict[str, Any] = {
         "contents": [{"parts": [{"text": prompt}]}],
@@ -98,7 +103,7 @@ def _gemini_chat(prompt: str, system: Optional[str] = None, max_tokens: int = 80
     }
     if system:
         payload["systemInstruction"] = {"parts": [{"text": system}]}
-    return _gemini_text(_gemini_post(payload, GEMINI_TIMEOUT))
+    return _gemini_text(_gemini_post(payload, timeout or GEMINI_TIMEOUT))
 
 
 # ---- Tender document extraction prompt ----
@@ -423,19 +428,13 @@ COMPLETE SYSTEM SNAPSHOT (JSON):
 USER QUESTION:
 {question}
 
-Remember your mission: help the user WIN this tender. Be specific, actionable, and honest. Reference tenders by their reference number. If the question is about a specific tender, focus on that tender's data. If data is missing, say so."""
-    try:
-        return _gemini_chat(prompt, system=ASSISTANT_SYSTEM, max_tokens=6000)
-    except RuntimeError as e:
-        return f"I couldn't process that request right now. ({e})"
+    Remember your mission: help the user WIN this tender. Be specific, actionable, and honest. Reference tenders by their reference number. If the question is about a specific tender, focus on that tender's data. If data is missing, say so."""
+    return _gemini_chat(prompt, system=ASSISTANT_SYSTEM, max_tokens=6000)
 
 
 def answer_general_question(question: str) -> str:
     """General fallback chat (no system data)."""
-    try:
-        return _gemini_chat(question, system=ASSISTANT_SYSTEM)
-    except RuntimeError as e:
-        return f"I couldn't process that request right now. ({e})"
+    return _gemini_chat(question, system=ASSISTANT_SYSTEM)
 
 
 # ---- Document text extraction (PDF / txt) ----
@@ -566,6 +565,7 @@ def discover_tenders(
     location: str = "South Africa",
     num_results: int = 15,
     skip_scrapers: bool = False,
+    search_timeout: float = 60.0,
 ) -> Dict[str, Any]:
     """
     Find real open tenders matching the given criteria.
@@ -603,7 +603,7 @@ def discover_tenders(
     web_search_results: List[Dict[str, Any]] = []
     if len(scraped_results) < num_results:
         try:
-            raw_results = _gemini_web_search(query, num=num_results)
+            raw_results = _gemini_web_search(query, num=num_results, timeout=search_timeout)
             if raw_results:
                 # Use AI to structure the raw web search results
                 raw_text = json.dumps(raw_results, indent=2, default=str)[:20000]
@@ -692,7 +692,7 @@ FACTS (use only these):
 {json.dumps(facts, default=str)}
 
 Write the greeting now."""
-    return _gemini_chat(prompt, system=BRIEFING_SYSTEM, max_tokens=1000)
+    return _gemini_chat(prompt, system=BRIEFING_SYSTEM, max_tokens=1000, timeout=15)
 
 
 FUNDING_DISCOVER_SYSTEM = """You are a South African business funding analyst. You analyze web search results and identify real, currently-open funding opportunities for businesses: grants, loans, incentives and support programmes (e.g. from SEFA, SEDA, IDC, NYDA, NEF, dtic, banks, development agencies) and tender-linked finance (bridging finance, purchase order funding, invoice discounting).
@@ -715,6 +715,7 @@ Only include REAL funding opportunities with a working source URL. Deduplicate b
 def discover_funding(profile_summary: str, location: str = "South Africa") -> List[Dict[str, Any]]:
     """Find business funding programmes + tender finance via web search.
     Any failure degrades to an empty list — research keeps going."""
+    from concurrent.futures import ThreadPoolExecutor
     from datetime import datetime
 
     year = datetime.now().year
@@ -723,8 +724,13 @@ def discover_funding(profile_summary: str, location: str = "South Africa") -> Li
         f"tender bridging finance purchase order funding SMME South Africa {year}",
     ]
     raw: List[Dict[str, Any]] = []
-    for q in queries:
-        raw.extend(_gemini_web_search(q, num=10, timeout=20.0))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(_gemini_web_search, q, 10, 12.0) for q in queries]
+        for f in futures:
+            try:
+                raw.extend(f.result() or [])
+            except Exception:
+                pass
     if not raw:
         return []
 
@@ -738,7 +744,7 @@ RAW SEARCH RESULTS (JSON):
 
 Return ONLY the JSON array as specified."""
     try:
-        response = _gemini_chat(prompt, system=FUNDING_DISCOVER_SYSTEM)
+        response = _gemini_chat(prompt, system=FUNDING_DISCOVER_SYSTEM, timeout=12)
         response = response.strip()
         if response.startswith("```"):
             response = response.split("\n", 1)[1] if "\n" in response else response[3:]
@@ -781,7 +787,7 @@ OPPORTUNITIES (JSON):
 
 Respond with ONLY a JSON array: [{{"index": int, "score": int, "reason": string}}] with one element per opportunity index."""
     try:
-        response = _gemini_chat(prompt, max_tokens=4000)
+        response = _gemini_chat(prompt, max_tokens=4000, timeout=15)
         response = response.strip()
         if response.startswith("```"):
             response = response.split("\n", 1)[1] if "\n" in response else response[3:]

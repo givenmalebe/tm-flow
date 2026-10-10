@@ -3491,8 +3491,16 @@ def ai_assistant(payload: AIQuestion, db: Session = Depends(get_db), user: User 
     # Build the context BEFORE saving the question so recent_chat holds the
     # prior exchange, not a duplicate of the current one.
     context = _build_full_system_context(db, user, tender_id=payload.tender_id)
+    # Ask the AI first: a failed call must surface as an error, never a fake
+    # reply, and must not leave a half-recorded exchange in the history.
+    try:
+        answer = ai_module.assistant_answer(question, context)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"The AI is unavailable right now. Please try again. ({exc})",
+        )
     ai_agent.add_chat_message(db, scope, user, "user", question)
-    answer = ai_module.assistant_answer(question, context)
     ai_agent.add_chat_message(
         db, scope, user, "assistant", answer, context_tenders=len(context["tenders"])
     )

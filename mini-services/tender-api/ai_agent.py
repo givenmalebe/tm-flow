@@ -847,6 +847,13 @@ def run_research(db: Session, user: User) -> Dict[str, Any]:
     category = categories[0] if categories else ""
     keywords = " ".join(categories[:3])
 
+    # The tenant's own service phrases drive what we look for, so a cleaning
+    # company sees cleaning tenders rather than unrelated listings.
+    service_terms = ai_module._capability_terms(capability)
+    if service_terms:
+        category = service_terms[0]
+        keywords = " ".join(service_terms)
+
     run = AIResearchRun(
         company_id=scope["company_id"],
         user_id=_scope_user_id(scope),

@@ -169,15 +169,16 @@ def scrape_security_co_za(category: str = "", keywords: str = "", location: str 
                     # Still include it but mark relevance lower
                     pass
 
-            # Filter by keywords
+            # Filter by keywords — this portal lists everything, so we keep only
+            # what matches the organisation we are researching for.
             relevance = "high"
             search_terms = [t.lower() for t in (category + " " + keywords).split() if len(t) > 2]
             if search_terms:
-                text_lower = (title + " " + description).lower()
+                text_lower = (title + " " + description + " " + region + " " + client_type).lower()
                 matches = sum(1 for term in search_terms if term in text_lower)
                 if matches == 0:
-                    relevance = "low"
-                elif matches < len(search_terms) / 2:
+                    continue
+                if matches < len(search_terms) / 2:
                     relevance = "medium"
 
             results.append({
@@ -261,16 +262,19 @@ def scrape_tenderflow_co_za(category: str = "", keywords: str = "", location: st
                 if date_match:
                     closing_date = _parse_date(date_match.group(1))
 
-            # Relevance check
+            # Relevance check — drop listings unrelated to the organisation we are
+            # researching for, so it only ever sees its own kind of work.
             relevance = "medium"
             search_terms = [t.lower() for t in (category + " " + keywords).split() if len(t) > 2]
             if search_terms:
                 text_lower = (title + " " + card_text).lower()
                 matches = sum(1 for term in search_terms if term in text_lower)
+                if matches == 0:
+                    continue
                 if matches >= len(search_terms) / 2:
                     relevance = "high"
-                elif matches == 0:
-                    relevance = "low"
+                else:
+                    relevance = "medium"
 
             results.append({
                 "title": title[:200],
@@ -459,6 +463,12 @@ def scrape_etenders_opportunities(
     results.sort(
         key=lambda r: (rel_order.get(r.get("relevance", "medium"), 1), r.get("closing_date") or "9999")
     )
+    # When we know what the organisation does, never pad its list with tenders
+    # for completely unrelated work.
+    if terms:
+        relevant = [r for r in results if r.get("relevance") in ("high", "medium")]
+        if relevant:
+            return relevant[:limit]
     return results[:limit]
 
 

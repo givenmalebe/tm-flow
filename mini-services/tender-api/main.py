@@ -651,6 +651,12 @@ def complete_onboarding(
     user.onboarding_completed = True
     db.commit()
     db.refresh(user)
+    # Every real user gets a bidder company scope from day one.
+    try:
+        import ai_agent
+        ai_agent.ensure_company_bootstrap(db, user)
+    except Exception:
+        pass
     return {"onboarding_completed": True, "user": UserOut.model_validate(user).model_dump()}
 
 

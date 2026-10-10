@@ -7,7 +7,7 @@ import re
 import json
 from datetime import datetime, date
 from typing import List, Dict, Any, Optional
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, quote
 
 import requests
 from bs4 import BeautifulSoup
@@ -22,6 +22,32 @@ HEADERS = {
 }
 
 TIMEOUT = 15
+
+# The official National Treasury eTenders portal: public, authoritative, and —
+# unlike members-only portals — its tender document links actually resolve.
+ETENDERS_BASE = "https://www.etenders.gov.za"
+ETENDERS_API = f"{ETENDERS_BASE}/Home/PaginatedTenderOpportunities"
+ETENDERS_ACTIVE_STATUS = "1"  # status=1 -> currently open/published tenders
+ETENDERS_TIMEOUT = 30
+
+# Hosts whose tender detail pages sit behind a paid login. We still read their
+# public listings for content, but we must never emit these as clickable links
+# (a login wall is worse than offering no link at all).
+LOGIN_WALL_HOSTS = {"security.co.za", "www.security.co.za"}
+
+
+def public_url_or_none(url: Optional[str]) -> Optional[str]:
+    """Return the URL only if it is a genuinely public link; drop known login
+    walls so the UI never sends a user to a members-only sign-in page."""
+    if not url:
+        return None
+    try:
+        host = (urlparse(str(url)).netloc or "").lower().split(":")[0]
+    except Exception:
+        return url
+    if host in LOGIN_WALL_HOSTS:
+        return None
+    return url
 
 
 def _fetch(url: str, session: Optional[requests.Session] = None) -> Optional[str]:
@@ -41,6 +67,11 @@ def _parse_date(date_str: str) -> Optional[str]:
     if not date_str:
         return None
     date_str = date_str.strip()
+    # ISO 8601, with or without a time component (e.g. 2026-12-03T10:00:00).
+    try:
+        return datetime.fromisoformat(date_str.replace("Z", "+00:00")).date().isoformat()
+    except ValueError:
+        pass
     # Try common SA date formats
     formats = [
         "%d %b %Y", "%d %B %Y",
@@ -96,7 +127,6 @@ def scrape_security_co_za(category: str = "", keywords: str = "", location: str 
     for link in view_links[:limit]:
         try:
             href = link.get("href", "")
-            detail_url = urljoin(base, href)
             tender_id = re.search(r"tenderId=(\d+)", href)
             ref_no = tender_id.group(1) if tender_id else ""
 
@@ -158,7 +188,9 @@ def scrape_security_co_za(category: str = "", keywords: str = "", location: str 
                 "closing_date": closing_date,
                 "description": description[:500],
                 "source_site": "security.co.za",
-                "url": detail_url,
+                # Its detail pages are members-only, so no public link exists.
+                # Keep the scraped content, but offer no dead login-wall link.
+                "url": None,
                 "reference_number": ref_no,
                 "estimated_value": None,
                 "relevance": relevance,
@@ -261,76 +293,177 @@ def scrape_tenderflow_co_za(category: str = "", keywords: str = "", location: st
     return results
 
 
-def scrape_etenders_search(category: str = "", keywords: str = "", location: str = "South Africa", limit: int = 20) -> List[Dict[str, Any]]:
-    """
-    Try the National Treasury eTenders portal API/search.
-    The portal at etenders.gov.za publishes all government tenders.
-    """
-    base = "https://www.etenders.gov.za"
-    # Try the tender search page
-    url = f"{base}/tendersearch"
-    html = _fetch(url)
-    if not html:
-        # Try alternate page
-        html = _fetch(f"{base}/")
+def _etenders_document_url(doc: Dict[str, Any]) -> Optional[str]:
+    """Build the public download URL for one eTenders support document."""
+    if not isinstance(doc, dict):
+        return None
+    guid = doc.get("supportDocumentID") or doc.get("documentID")
+    if not guid:
+        return None
+    ext = str(doc.get("extension") or "").strip()
+    name = str(doc.get("fileName") or "tender-document").strip()
+    if ext and not name.lower().endswith(ext.lower()):
+        name = f"{name}{ext}"
+    return (
+        f"{ETENDERS_BASE}/home/Download/"
+        f"?blobName={guid}{ext}&downloadedFileName={quote(name)}"
+    )
 
-    if not html:
+
+def _etenders_active_opportunities() -> List[Dict[str, Any]]:
+    """Fetch every currently-open tender from the eTenders JSON endpoint.
+
+    The portal renders its table client-side and ignores DataTables search
+    params, so we pull the full active set (a few MB) and filter locally.
+    """
+    columns = ["", "category", "description", "eSubmission", "date_Published", "closing_Date"]
+    params = {
+        "draw": "1",
+        "start": "0",
+        "length": "3000",
+        "search[value]": "",
+        "search[regex]": "false",
+        "status": ETENDERS_ACTIVE_STATUS,
+        "order[0][column]": "5",
+        "order[0][dir]": "asc",
+    }
+    for i, key in enumerate(columns):
+        params[f"columns[{i}][data]"] = key
+        params[f"columns[{i}][name]"] = ""
+        params[f"columns[{i}][searchable]"] = "true"
+        params[f"columns[{i}][orderable]"] = "true"
+        params[f"columns[{i}][search][value]"] = ""
+        params[f"columns[{i}][search][regex]"] = "false"
+
+    headers = dict(HEADERS)
+    headers["Accept"] = "application/json, text/javascript, */*; q=0.01"
+    headers["X-Requested-With"] = "XMLHttpRequest"
+    headers["Referer"] = f"{ETENDERS_BASE}/Home/opportunities"
+    try:
+        resp = requests.get(ETENDERS_API, headers=headers, params=params, timeout=ETENDERS_TIMEOUT)
+        if resp.status_code == 200:
+            payload = resp.json()
+            if isinstance(payload, dict):
+                return payload.get("data") or []
+    except Exception:
+        pass
+    return []
+
+
+def _etenders_row_to_result(
+    row: Dict[str, Any], category: str, terms: List[str], location: str
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(row, dict):
+        return None
+
+    title = re.sub(r"\s+", " ", str(row.get("description") or "")).strip()
+    if not title:
+        return None
+
+    department = (row.get("organ_of_State") or row.get("department") or "").strip() or None
+    row_category = (row.get("category") or "").strip() or None
+    province = (row.get("province") or "").strip() or None
+    closing_date = _parse_date(row.get("closing_Date"))
+    reference = str(row.get("tender_No") or "").strip() or None
+
+    # The single public, working link to the tender: its official document.
+    doc_url = None
+    docs = row.get("supportDocument")
+    docs = docs if isinstance(docs, list) else []
+    for doc in docs:
+        doc_url = _etenders_document_url(doc)
+        if doc_url:
+            break
+
+    # Relevance to the company's categories / keywords.
+    text = f"{title} {row_category or ''} {department or ''}".lower()
+    if terms:
+        matches = sum(1 for t in terms if t in text)
+        if matches >= max(1, len(terms) // 2):
+            relevance = "high"
+        elif matches:
+            relevance = "medium"
+        else:
+            relevance = "low"
+    else:
+        relevance = "medium"
+    loc = (location or "").strip().lower()
+    if loc and loc != "south africa" and province and loc in province.lower():
+        relevance = "high"
+
+    # Enrich the description with official metadata worth surfacing.
+    bits: List[str] = []
+    if department:
+        bits.append(f"Department: {department}")
+    if row_category:
+        bits.append(f"Category: {row_category}")
+    briefing = row.get("compulsory_briefing_session")
+    if briefing:
+        briefing_date = _parse_date(briefing) or str(briefing)[:16]
+        venue = str(row.get("briefingVenue") or "").strip()
+        bits.append(f"Compulsory briefing: {briefing_date}" + (f" ({venue})" if venue else ""))
+    contact_line = " | ".join(
+        str(x).strip()
+        for x in (row.get("contactPerson"), row.get("email"), row.get("telephone"))
+        if x
+    )
+    if contact_line:
+        bits.append(f"Contact: {contact_line}")
+    if row.get("eSubmission"):
+        bits.append("Online submission (eSubmission) available")
+    if doc_url:
+        bits.append("Official tender document available via the link")
+
+    description = title if not bits else title + "\n\n" + " · ".join(bits)
+
+    return {
+        "title": title[:200],
+        "client": department or "Government",
+        "category": category or row_category or "Government Tender",
+        "location": province or (location or "South Africa"),
+        "closing_date": closing_date,
+        "description": description[:2000],
+        "source_site": "etenders.gov.za",
+        "url": doc_url,
+        "reference_number": reference[:255] if reference else None,
+        "estimated_value": None,
+        "relevance": relevance,
+    }
+
+
+def scrape_etenders_opportunities(
+    category: str = "", keywords: str = "", location: str = "South Africa", limit: int = 20
+) -> List[Dict[str, Any]]:
+    """Scrape the official National Treasury eTenders portal (etenders.gov.za).
+
+    This is the primary discovery source: public, authoritative and — unlike
+    members-only portals — every tender it yields carries a working public
+    document link. Rows are ranked by relevance then soonest closing date.
+    """
+    rows = _etenders_active_opportunities()
+    if not rows:
         return []
 
-    soup = BeautifulSoup(html, "lxml")
-    results = []
+    terms = [t.lower() for t in f"{category} {keywords}".split() if len(t) > 2]
 
-    # Look for tender entries in tables or lists
-    # eTenders often uses tables
-    tables = soup.find_all("table")
-    for table in tables[:2]:
-        rows = table.find_all("tr")
-        for row in rows[1:]:  # skip header
-            try:
-                cells = row.find_all(["td", "th"])
-                if len(cells) < 2:
-                    continue
-                cell_texts = [c.get_text(strip=True) for c in cells]
-                # Try to identify columns
-                full_text = " | ".join(cell_texts)
-                if not any(kw in full_text.lower() for kw in ["tender", "bid", "closing", "dept"]):
-                    continue
+    results: List[Dict[str, Any]] = []
+    for row in rows:
+        try:
+            parsed = _etenders_row_to_result(row, category, terms, location)
+        except Exception:
+            parsed = None
+        if parsed:
+            results.append(parsed)
 
-                title = cell_texts[0] if cell_texts else ""
-                if not title or len(title) < 5:
-                    continue
+    rel_order = {"high": 0, "medium": 1, "low": 2}
+    results.sort(
+        key=lambda r: (rel_order.get(r.get("relevance", "medium"), 1), r.get("closing_date") or "9999")
+    )
+    return results[:limit]
 
-                # Find a link in the row
-                link = row.find("a", href=True)
-                detail_url = urljoin(base, link["href"]) if link else url
 
-                # Try to find closing date
-                closing_date = None
-                for ct in cell_texts:
-                    cd = _parse_date(ct)
-                    if cd:
-                        closing_date = cd
-                        break
-
-                results.append({
-                    "title": title[:200],
-                    "client": cell_texts[1] if len(cell_texts) > 1 else "Government",
-                    "category": category or "Government Tender",
-                    "location": location or "South Africa",
-                    "closing_date": closing_date,
-                    "description": full_text[:500],
-                    "source_site": "etenders.gov.za",
-                    "url": detail_url,
-                    "reference_number": None,
-                    "estimated_value": None,
-                    "relevance": "medium",
-                })
-                if len(results) >= limit:
-                    return results
-            except Exception:
-                continue
-
-    return results
+# Backwards-compatible alias (older callers used the search-oriented name).
+scrape_etenders_search = scrape_etenders_opportunities
 
 
 def scrape_all(category: str, keywords: str = "", location: str = "South Africa", limit: int = 20) -> Dict[str, Any]:
@@ -342,7 +475,16 @@ def scrape_all(category: str, keywords: str = "", location: str = "South Africa"
     sources_used: List[str] = []
     errors: List[str] = []
 
-    # 1. security.co.za — most reliable, has 100+ tenders
+    # 1. etenders.gov.za — official, public, and its document links resolve.
+    try:
+        results = scrape_etenders_opportunities(category, keywords, location, limit)
+        if results:
+            all_results.extend(results)
+            sources_used.append(f"etenders.gov.za ({len(results)} tenders)")
+    except Exception as e:
+        errors.append(f"etenders.gov.za: {str(e)[:100]}")
+
+    # 2. security.co.za — content only (its detail pages are members-only).
     try:
         results = scrape_security_co_za(category, keywords, location, limit)
         if results:
@@ -351,7 +493,7 @@ def scrape_all(category: str, keywords: str = "", location: str = "South Africa"
     except Exception as e:
         errors.append(f"security.co.za: {str(e)[:100]}")
 
-    # 2. tenderflow.co.za
+    # 3. tenderflow.co.za
     try:
         results = scrape_tenderflow_co_za(category, keywords, location, limit)
         if results:
@@ -360,22 +502,17 @@ def scrape_all(category: str, keywords: str = "", location: str = "South Africa"
     except Exception as e:
         errors.append(f"tenderflow.co.za: {str(e)[:100]}")
 
-    # 3. etenders.gov.za
-    try:
-        results = scrape_etenders_search(category, keywords, location, limit)
-        if results:
-            all_results.extend(results)
-            sources_used.append(f"etenders.gov.za ({len(results)} tenders)")
-    except Exception as e:
-        errors.append(f"etenders.gov.za: {str(e)[:100]}")
+    # Never surface a login-wall URL, whatever the source.
+    for r in all_results:
+        r["url"] = public_url_or_none(r.get("url"))
 
-    # Deduplicate by title (case-insensitive)
-    seen_titles = set()
+    # Deduplicate: same public link => same tender; otherwise fall back to title.
+    seen_keys = set()
     deduped = []
     for r in all_results:
-        key = r["title"].lower().strip()[:80]
-        if key not in seen_titles:
-            seen_titles.add(key)
+        key = (r.get("url") or "").strip().lower() or r["title"].lower().strip()[:80]
+        if key not in seen_keys:
+            seen_keys.add(key)
             deduped.append(r)
 
     # Sort by relevance (high first), then by closing date (soonest first)
@@ -391,12 +528,12 @@ def scrape_all(category: str, keywords: str = "", location: str = "South Africa"
 
 
 if __name__ == "__main__":
-    # Quick test
-    print("Testing security.co.za scraper...")
-    results = scrape_security_co_za("security guards", "PSIRA", "South Africa", 5)
+    # Quick test against the official eTenders portal.
+    print("Testing etenders.gov.za scraper...")
+    results = scrape_etenders_opportunities("security", "guards PSIRA", "South Africa", 5)
     print(f"Found {len(results)} tenders:")
     for r in results:
         print(f"  - {r['title'][:80]}")
         print(f"    Client: {r['client']}, Location: {r['location']}, Closing: {r['closing_date']}")
-        print(f"    URL: {r['url']}")
+        print(f"    Ref: {r['reference_number']}  URL: {r['url']}")
         print()

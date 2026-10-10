@@ -37,7 +37,7 @@ F2 = {
 def _mock_sources(monkeypatch, tenders, funding, scores):
     monkeypatch.setattr(scraper, "scrape_security_co_za", lambda *a, **k: tenders)
     monkeypatch.setattr(scraper, "scrape_tenderflow_co_za", lambda *a, **k: [])
-    monkeypatch.setattr(scraper, "scrape_etenders_search", lambda *a, **k: [])
+    monkeypatch.setattr(scraper, "scrape_etenders_opportunities", lambda *a, **k: [])
     monkeypatch.setattr(ai_agent.ai_module, "discover_tenders", lambda *a, **k: {"results": []})
     monkeypatch.setattr(ai_agent.ai_module, "discover_funding", lambda *a, **k: funding)
     monkeypatch.setattr(ai_agent.ai_module, "score_opportunities", lambda cs, opps: scores)

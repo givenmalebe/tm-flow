@@ -641,17 +641,18 @@ Return ONLY the JSON array as specified. Exclude non-tender results."""
             pass
 
     # --- Merge & deduplicate ---
+    from scraper import public_url_or_none
+
     all_results = scraped_results + web_search_results
-    seen_urls = set()
-    seen_titles = set()
+    seen_keys = set()
     deduped = []
     for r in all_results:
-        url = r.get("url", "")
-        title = r.get("title", "").lower().strip()[:80]
-        if url in seen_urls or title in seen_titles:
+        # Never surface a login-wall link; dedup by public link when we have one.
+        r["url"] = public_url_or_none(r.get("url"))
+        key = (r.get("url") or "").strip().lower() or (r.get("title") or "").lower().strip()[:80]
+        if not key or key in seen_keys:
             continue
-        seen_urls.add(url)
-        seen_titles.add(title)
+        seen_keys.add(key)
         deduped.append(r)
 
     # Sort by relevance then closing date

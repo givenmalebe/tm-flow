@@ -503,6 +503,28 @@ class AIOpportunity(Base):
     run = relationship("AIResearchRun")
 
 
+def _sanitize_login_wall_urls(db) -> None:
+    """Null out AI-opportunity links that point at members-only login walls.
+
+    Earlier versions stored security.co.za detail URLs, which always redirect
+    to a sign-in page. They can never resolve, so drop them on startup.
+    """
+    try:
+        from scraper import public_url_or_none
+
+        rows = db.query(AIOpportunity).filter(AIOpportunity.url.isnot(None)).all()
+        changed = False
+        for o in rows:
+            safe = public_url_or_none(o.url)
+            if safe != o.url:
+                o.url = safe
+                changed = True
+        if changed:
+            db.commit()
+    except Exception:
+        db.rollback()
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     # Seed default reminder settings
@@ -512,6 +534,7 @@ def init_db():
             for d in [30, 14, 7, 3, 1]:
                 db.add(ReminderSetting(days_before=d, enabled=True))
             db.commit()
+        _sanitize_login_wall_urls(db)
     finally:
         db.close()
 

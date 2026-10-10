@@ -15,6 +15,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import ai_module
+from scraper import public_url_or_none
 from database import (
     AIChatMessage,
     AICompanyMemory,
@@ -677,6 +678,7 @@ def _normalize_result(r: Dict[str, Any], opp_type: str) -> Optional[Dict[str, An
     if not title:
         return None
     url = str(r.get("url") or "").strip() or None
+    url = public_url_or_none(url)
     source_site = str(r.get("source_site") or "").strip() or None
     if not source_site and url:
         try:
@@ -767,7 +769,7 @@ def run_research(db: Session, user: User) -> Dict[str, Any]:
             futures = [
                 pool.submit(scraper.scrape_security_co_za, category, keywords, location, 20),
                 pool.submit(scraper.scrape_tenderflow_co_za, category, keywords, location, 20),
-                pool.submit(scraper.scrape_etenders_search, category, keywords, location, 20),
+                pool.submit(scraper.scrape_etenders_opportunities, category, keywords, location, 20),
             ]
             funding_future = pool.submit(ai_module.discover_funding, summary, location)
             for future in as_completed(futures + [funding_future]):

@@ -31,7 +31,7 @@ export const metadata: Metadata = {
     "South Africa tenders",
   ],
   authors: [{ name: "TM Flow" }],
-  icons: { icon: "/logo.svg" },
+  icons: { icon: "/logo.png" },
   openGraph: {
     title: "TM Flow — AI-Powered Tender Management",
     description:

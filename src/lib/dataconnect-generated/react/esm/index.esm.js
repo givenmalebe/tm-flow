@@ -1,4 +1,4 @@
-import { registerUserRef, createTenderRef, updateTenderRef, deleteTenderRef, meRef, hasOrganisationRef, myOrganisationRef, listTendersRef, getTenderRef, publicIssuedTendersRef, connectorConfig } from '../../esm/index.esm.js';
+import { registerUserRef, createTenderRef, updateTenderRef, deleteTenderRef, completeOnboardingRef, meRef, hasOrganisationRef, myOrganisationRef, listTendersRef, getTenderRef, publicIssuedTendersRef, connectorConfig } from '../../esm/index.esm.js';
 import { validateArgs, CallerSdkTypeEnum } from 'firebase/data-connect';
 import { useDataConnectQuery, useDataConnectMutation, validateReactArgs } from '@tanstack-query-firebase/react/data-connect';
 
@@ -30,6 +30,14 @@ export function useDeleteTender(dcOrOptions, options) {
   const { dc: dcInstance, vars: inputOpts } = validateArgs(connectorConfig, dcOrOptions, options);
   function refFactory(vars) {
     return deleteTenderRef(dcInstance, vars);
+  }
+  return useDataConnectMutation(refFactory, inputOpts, CallerSdkTypeEnum.GeneratedReact);
+}
+
+export function useCompleteOnboarding(dcOrOptions, options) {
+  const { dc: dcInstance, vars: inputOpts } = validateArgs(connectorConfig, dcOrOptions, options);
+  function refFactory() {
+    return completeOnboardingRef(dcInstance);
   }
   return useDataConnectMutation(refFactory, inputOpts, CallerSdkTypeEnum.GeneratedReact);
 }

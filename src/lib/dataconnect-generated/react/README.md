@@ -28,6 +28,7 @@ You can also follow the instructions from the [Data Connect documentation](https
   - [*CreateTender*](#createtender)
   - [*UpdateTender*](#updatetender)
   - [*DeleteTender*](#deletetender)
+  - [*CompleteOnboarding*](#completeonboarding)
 
 # TanStack Query Firebase & TanStack React Query
 This SDK provides [React](https://react.dev/) hooks generated specific to your application, for the operations found in the connector `tmflow`. These hooks are generated using [TanStack Query Firebase](https://react-query-firebase.invertase.dev/) by our partners at Invertase, a library built on top of [TanStack React Query v5](https://tanstack.com/query/v5/docs/framework/react/overview).
@@ -1089,6 +1090,89 @@ export default function DeleteTenderComponent() {
   if (mutation.isSuccess) {
     console.log(mutation.data.targetTender);
     console.log(mutation.data.tender_delete);
+  }
+  return <div>Mutation execution {mutation.isSuccess ? 'successful' : 'failed'}!</div>;
+}
+```
+
+## CompleteOnboarding
+You can execute the `CompleteOnboarding` Mutation using the `UseMutationResult` object returned by the following Mutation hook function (which is defined in [dataconnect-generated/react/index.d.ts](./index.d.ts)):
+```javascript
+useCompleteOnboarding(options?: useDataConnectMutationOptions<CompleteOnboardingData, FirebaseError, void>): UseDataConnectMutationResult<CompleteOnboardingData, undefined>;
+```
+You can also pass in a `DataConnect` instance to the Mutation hook function.
+```javascript
+useCompleteOnboarding(dc: DataConnect, options?: useDataConnectMutationOptions<CompleteOnboardingData, FirebaseError, void>): UseDataConnectMutationResult<CompleteOnboardingData, undefined>;
+```
+
+### Variables
+The `CompleteOnboarding` Mutation has no variables.
+### Return Type
+Recall that calling the `CompleteOnboarding` Mutation hook function returns a `UseMutationResult` object. This object holds the state of your Mutation, including whether the Mutation is loading, has completed, or has succeeded/failed, among other things.
+
+To check the status of a Mutation, use the `UseMutationResult.status` field. You can also check for pending / success / error status using the `UseMutationResult.isPending`, `UseMutationResult.isSuccess`, and `UseMutationResult.isError` fields.
+
+To execute the Mutation, call `UseMutationResult.mutate()`. This function executes the Mutation, but does not return the data from the Mutation.
+
+To access the data returned by a Mutation, use the `UseMutationResult.data` field. The data for the `CompleteOnboarding` Mutation is of type `CompleteOnboardingData`, which is defined in [dataconnect-generated/index.d.ts](../index.d.ts). It has the following fields:
+```javascript
+export interface CompleteOnboardingData {
+  user_update?: User_Key | null;
+}
+```
+
+To learn more about the `UseMutationResult` object, see the [TanStack React Query documentation](https://tanstack.com/query/v5/docs/framework/react/reference/useMutation).
+
+### Using `CompleteOnboarding`'s Mutation hook function
+
+```javascript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig } from '@dataconnect/generated';
+import { useCompleteOnboarding } from '@dataconnect/generated/react'
+
+export default function CompleteOnboardingComponent() {
+  // Call the Mutation hook function to get a `UseMutationResult` object which holds the state of your Mutation.
+  const mutation = useCompleteOnboarding();
+
+  // You can also pass in a `DataConnect` instance to the Mutation hook function.
+  const dataConnect = getDataConnect(connectorConfig);
+  const mutation = useCompleteOnboarding(dataConnect);
+
+  // You can also pass in a `useDataConnectMutationOptions` object to the Mutation hook function.
+  const options = {
+    onSuccess: () => { console.log('Mutation succeeded!'); }
+  };
+  const mutation = useCompleteOnboarding(options);
+
+  // You can also pass both a `DataConnect` instance and a `useDataConnectMutationOptions` object.
+  const dataConnect = getDataConnect(connectorConfig);
+  const options = {
+    onSuccess: () => { console.log('Mutation succeeded!'); }
+  };
+  const mutation = useCompleteOnboarding(dataConnect, options);
+
+  // After calling the Mutation hook function, you must call `UseMutationResult.mutate()` to execute the Mutation.
+  mutation.mutate();
+
+  // You can also pass in a `useDataConnectMutationOptions` object to `UseMutationResult.mutate()`.
+  // Since this Mutation accepts no variables, you must pass `undefined` where you would normally pass the variables.
+  const options = {
+    onSuccess: () => { console.log('Mutation succeeded!'); }
+  };
+  mutation.mutate(undefined, options);
+
+  // Then, you can render your component dynamically based on the status of the Mutation.
+  if (mutation.isPending) {
+    return <div>Loading...</div>;
+  }
+
+  if (mutation.isError) {
+    return <div>Error: {mutation.error.message}</div>;
+  }
+
+  // If the Mutation is successful, you can access the data returned using the `UseMutationResult.data` field.
+  if (mutation.isSuccess) {
+    console.log(mutation.data.user_update);
   }
   return <div>Mutation execution {mutation.isSuccess ? 'successful' : 'failed'}!</div>;
 }

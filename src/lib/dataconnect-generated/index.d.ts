@@ -60,6 +60,10 @@ export interface CompanyProfile_Key {
   __typename?: 'CompanyProfile_Key';
 }
 
+export interface CompleteOnboardingData {
+  user_update?: User_Key | null;
+}
+
 export interface CreateTenderData {
   callerOrg?: {
     user?: {
@@ -353,6 +357,18 @@ export const deleteTenderRef: DeleteTenderRef;
 
 export function deleteTender(vars: DeleteTenderVariables): MutationPromise<DeleteTenderData, DeleteTenderVariables>;
 export function deleteTender(dc: DataConnect, vars: DeleteTenderVariables): MutationPromise<DeleteTenderData, DeleteTenderVariables>;
+
+interface CompleteOnboardingRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (): MutationRef<CompleteOnboardingData, undefined>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect): MutationRef<CompleteOnboardingData, undefined>;
+  operationName: string;
+}
+export const completeOnboardingRef: CompleteOnboardingRef;
+
+export function completeOnboarding(): MutationPromise<CompleteOnboardingData, undefined>;
+export function completeOnboarding(dc: DataConnect): MutationPromise<CompleteOnboardingData, undefined>;
 
 interface MeRef {
   /* Allow users to create refs without passing in DataConnect */

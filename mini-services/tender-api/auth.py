@@ -16,8 +16,9 @@ import firebase_admin
 from firebase_admin import auth as firebase_auth
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy.orm import Session
 
-from database import SessionLocal, User
+from database import User, get_db
 
 _CREDENTIALS_INITIALISED = False
 
@@ -75,13 +76,22 @@ def verify_firebase_token(token: str) -> dict:
         raise _unauthorized()
 
 
-def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> User:
+def get_current_user(
+    token: Optional[str] = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> User:
     """
     Resolve the caller from their Firebase ID token.
 
     Lookup is by email because the local users table predates Firebase Auth and
     is keyed by integer id. Once these REST endpoints are retired in favour of
     SQL Connect, this indirection disappears.
+
+    The request-scoped `db` session must be injected here. Returning an object
+    from a session that is then closed leaves the caller holding a detached
+    instance, and every endpoint that writes to the user — such as
+    /auth/complete-onboarding — fails with "Instance is not persistent within
+    this Session".
     """
     if not token:
         raise _unauthorized()
@@ -91,25 +101,21 @@ def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> User:
     if not email:
         raise _unauthorized()
 
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.email == email).first()
-        if user is None:
-            # A Firebase account with no local row: create one so the existing
-            # endpoints have something to attach records to.
-            user = User(
-                email=email,
-                full_name=claims.get("name") or email.split("@")[0],
-                hashed_password="",
-                role=claims.get("role") or "admin",
-                account_type="applicant",
-            )
-            db.add(user)
-            db.commit()
-            db.refresh(user)
-        return user
-    finally:
-        db.close()
+    user = db.query(User).filter(User.email == email).first()
+    if user is None:
+        # A Firebase account with no local row: create one so the existing
+        # endpoints have something to attach records to.
+        user = User(
+            email=email,
+            full_name=claims.get("name") or email.split("@")[0],
+            hashed_password="",
+            role=claims.get("role") or "admin",
+            account_type="applicant",
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    return user
 
 
 def get_optional_user(token: Optional[str] = Depends(oauth2_scheme)) -> Optional[User]:

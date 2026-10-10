@@ -1,4 +1,4 @@
-const { registerUserRef, createTenderRef, updateTenderRef, deleteTenderRef, meRef, hasOrganisationRef, myOrganisationRef, listTendersRef, getTenderRef, publicIssuedTendersRef, connectorConfig } = require('../index.cjs.js');
+const { registerUserRef, createTenderRef, updateTenderRef, deleteTenderRef, completeOnboardingRef, meRef, hasOrganisationRef, myOrganisationRef, listTendersRef, getTenderRef, publicIssuedTendersRef, connectorConfig } = require('../index.cjs.js');
 const { validateArgs, CallerSdkTypeEnum } = require('firebase/data-connect');
 const { useDataConnectQuery, useDataConnectMutation, validateReactArgs } = require('@tanstack-query-firebase/react/data-connect');
 
@@ -30,6 +30,14 @@ exports.useDeleteTender = function useDeleteTender(dcOrOptions, options) {
   const { dc: dcInstance, vars: inputOpts } = validateArgs(connectorConfig, dcOrOptions, options);
   function refFactory(vars) {
     return deleteTenderRef(dcInstance, vars);
+  }
+  return useDataConnectMutation(refFactory, inputOpts, CallerSdkTypeEnum.GeneratedReact);
+}
+
+exports.useCompleteOnboarding = function useCompleteOnboarding(dcOrOptions, options) {
+  const { dc: dcInstance, vars: inputOpts } = validateArgs(connectorConfig, dcOrOptions, options);
+  function refFactory() {
+    return completeOnboardingRef(dcInstance);
   }
   return useDataConnectMutation(refFactory, inputOpts, CallerSdkTypeEnum.GeneratedReact);
 }

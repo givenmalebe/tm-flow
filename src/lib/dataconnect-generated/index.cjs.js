@@ -63,6 +63,20 @@ exports.deleteTender = function deleteTender(dcOrVars, vars) {
 }
 ;
 
+const completeOnboardingRef = (dc) => {
+  const { dc: dcInstance} = validateArgs(connectorConfig, dc, undefined);
+  dcInstance._useGeneratedSdk();
+  return mutationRef(dcInstance, 'CompleteOnboarding');
+}
+completeOnboardingRef.operationName = 'CompleteOnboarding';
+exports.completeOnboardingRef = completeOnboardingRef;
+
+exports.completeOnboarding = function completeOnboarding(dc) {
+  const { dc: dcInstance, vars: inputVars } = validateArgs(connectorConfig, dc, undefined);
+  return executeMutation(completeOnboardingRef(dcInstance, inputVars));
+}
+;
+
 const meRef = (dc) => {
   const { dc: dcInstance} = validateArgs(connectorConfig, dc, undefined);
   dcInstance._useGeneratedSdk();

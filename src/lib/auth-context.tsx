@@ -60,11 +60,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * Loads the app-level profile from SQL Connect and creates the tenancy layer
    * on first sign-in. RegisterUser is not idempotent, so it only runs when
    * HasOrganisation reports no membership.
+   *
+   * `me` is read with SERVER_ONLY. DataConnect defaults queries to
+   * PREFER_CACHE, and this instance is created without cacheSettings, so the
+   * QueryManager answers from its in-memory subscriptionCache instead of the
+   * server. Mutations do not invalidate it, so after CompleteOnboarding wrote
+   * onboardingCompleted=true the cached pre-mutation row was replayed and the
+   * app stayed on the onboarding screen with a success toast. Callers that run
+   * after a write must always see committed server state.
    */
   const loadProfile = useCallback(async (fbUser: FirebaseUser) => {
     const dc = getDataConnectInstance();
 
-    const existing = await hasOrganisation(dc);
+    const existing = await hasOrganisation(dc, { fetchPolicy: "SERVER_ONLY" });
     const memberships = existing.data.user?.memberships_on_user ?? [];
 
     if (memberships.length === 0) {
@@ -76,7 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
     }
 
-    const res = await me(dc);
+    const res = await me(dc, { fetchPolicy: "SERVER_ONLY" });
     const row = res.data.user;
     if (!row) {
       setUser(null);

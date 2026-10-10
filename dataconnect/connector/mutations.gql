@@ -128,3 +128,13 @@ mutation DeleteTender($id: UUID!) @auth(level: USER) @transaction {
   }
   tender_delete(key: { id: $id })
 }
+
+# The client reads onboardingCompleted from SQL Connect, so completing
+# onboarding has to write it here. The FastAPI backend tracks the same flag in
+# its own SQLite copy; this is the copy the UI actually reads.
+mutation CompleteOnboarding @auth(level: USER) {
+  user_update(
+    id_expr: "auth.uid"
+    data: { onboardingCompleted: true }
+  )
+}

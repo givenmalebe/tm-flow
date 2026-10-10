@@ -12,7 +12,7 @@ For each operation, there is a wrapper hook that can be used to call the operati
 
 Here are all of the hooks that get generated:
 ```ts
-import { useRegisterUser, useCreateTender, useUpdateTender, useDeleteTender, useMe, useHasOrganisation, useMyOrganisation, useListTenders, useGetTender, usePublicIssuedTenders } from '@dataconnect/generated/react';
+import { useRegisterUser, useCreateTender, useUpdateTender, useDeleteTender, useCompleteOnboarding, useMe, useHasOrganisation, useMyOrganisation, useListTenders, useGetTender } from '@dataconnect/generated/react';
 // The types of these hooks are available in react/index.d.ts
 
 const { data, isPending, isSuccess, isError, error } = useRegisterUser(registerUserVars);
@@ -23,6 +23,8 @@ const { data, isPending, isSuccess, isError, error } = useUpdateTender(updateTen
 
 const { data, isPending, isSuccess, isError, error } = useDeleteTender(deleteTenderVars);
 
+const { data, isPending, isSuccess, isError, error } = useCompleteOnboarding();
+
 const { data, isPending, isSuccess, isError, error } = useMe();
 
 const { data, isPending, isSuccess, isError, error } = useHasOrganisation();
@@ -32,8 +34,6 @@ const { data, isPending, isSuccess, isError, error } = useMyOrganisation();
 const { data, isPending, isSuccess, isError, error } = useListTenders();
 
 const { data, isPending, isSuccess, isError, error } = useGetTender(getTenderVars);
-
-const { data, isPending, isSuccess, isError, error } = usePublicIssuedTenders();
 
 ```
 
@@ -72,7 +72,7 @@ If a user is not using a supported framework, they can use the generated SDK dir
 Here's an example of how to use it with the first 5 operations:
 
 ```js
-import { registerUser, createTender, updateTender, deleteTender, me, hasOrganisation, myOrganisation, listTenders, getTender, publicIssuedTenders } from '@dataconnect/generated';
+import { registerUser, createTender, updateTender, deleteTender, completeOnboarding, me, hasOrganisation, myOrganisation, listTenders, getTender } from '@dataconnect/generated';
 
 
 // Operation RegisterUser:  For variables, look at type RegisterUserVars in ../index.d.ts
@@ -86,6 +86,9 @@ const { data } = await UpdateTender(dataConnect, updateTenderVars);
 
 // Operation DeleteTender:  For variables, look at type DeleteTenderVars in ../index.d.ts
 const { data } = await DeleteTender(dataConnect, deleteTenderVars);
+
+// Operation CompleteOnboarding: 
+const { data } = await CompleteOnboarding(dataConnect);
 
 // Operation Me: 
 const { data } = await Me(dataConnect);
@@ -101,9 +104,6 @@ const { data } = await ListTenders(dataConnect);
 
 // Operation GetTender:  For variables, look at type GetTenderVars in ../index.d.ts
 const { data } = await GetTender(dataConnect, getTenderVars);
-
-// Operation PublicIssuedTenders: 
-const { data } = await PublicIssuedTenders(dataConnect);
 
 
 ```

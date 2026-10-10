@@ -21,6 +21,7 @@ This README will guide you through the process of using the generated JavaScript
   - [*CreateTender*](#createtender)
   - [*UpdateTender*](#updatetender)
   - [*DeleteTender*](#deletetender)
+  - [*CompleteOnboarding*](#completeonboarding)
 
 # Accessing the connector
 A connector is a collection of Queries and Mutations. One SDK is generated for each connector - this SDK is generated for the connector `tmflow`. You can find more information about connectors in the [Data Connect documentation](https://firebase.google.com/docs/data-connect#how-does).
@@ -1258,6 +1259,97 @@ executeMutation(ref).then((response) => {
   const data = response.data;
   console.log(data.targetTender);
   console.log(data.tender_delete);
+});
+```
+
+## CompleteOnboarding
+You can execute the `CompleteOnboarding` mutation using the following action shortcut function, or by calling `executeMutation()` after calling the following `MutationRef` function, both of which are defined in [dataconnect-generated/index.d.ts](./index.d.ts):
+```typescript
+completeOnboarding(): MutationPromise<CompleteOnboardingData, undefined>;
+
+interface CompleteOnboardingRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (): MutationRef<CompleteOnboardingData, undefined>;
+}
+export const completeOnboardingRef: CompleteOnboardingRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `MutationRef` function.
+```typescript
+completeOnboarding(dc: DataConnect): MutationPromise<CompleteOnboardingData, undefined>;
+
+interface CompleteOnboardingRef {
+  ...
+  (dc: DataConnect): MutationRef<CompleteOnboardingData, undefined>;
+}
+export const completeOnboardingRef: CompleteOnboardingRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the completeOnboardingRef:
+```typescript
+const name = completeOnboardingRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `CompleteOnboarding` mutation has no variables.
+### Return Type
+Recall that executing the `CompleteOnboarding` mutation returns a `MutationPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `CompleteOnboardingData`, which is defined in [dataconnect-generated/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface CompleteOnboardingData {
+  user_update?: User_Key | null;
+}
+```
+### Using `CompleteOnboarding`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, completeOnboarding } from '@dataconnect/generated';
+
+
+// Call the `completeOnboarding()` function to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await completeOnboarding();
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await completeOnboarding(dataConnect);
+
+console.log(data.user_update);
+
+// Or, you can use the `Promise` API.
+completeOnboarding().then((response) => {
+  const data = response.data;
+  console.log(data.user_update);
+});
+```
+
+### Using `CompleteOnboarding`'s `MutationRef` function
+
+```typescript
+import { getDataConnect, executeMutation } from 'firebase/data-connect';
+import { connectorConfig, completeOnboardingRef } from '@dataconnect/generated';
+
+
+// Call the `completeOnboardingRef()` function to get a reference to the mutation.
+const ref = completeOnboardingRef();
+
+// You can also pass in a `DataConnect` instance to the `MutationRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = completeOnboardingRef(dataConnect);
+
+// Call `executeMutation()` on the reference to execute the mutation.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeMutation(ref);
+
+console.log(data.user_update);
+
+// Or, you can use the `Promise` API.
+executeMutation(ref).then((response) => {
+  const data = response.data;
+  console.log(data.user_update);
 });
 ```
 

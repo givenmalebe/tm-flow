@@ -30,6 +30,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
+import { getDataConnectInstance } from "@/lib/firebase";
+import { completeOnboarding } from "@/lib/dataconnect-generated";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -97,6 +99,10 @@ export function Onboarding() {
     try {
       await api.updateCompanyProfile(form);
       await api.completeOnboarding({ company_name: form.company_name });
+      // The onboarding flag is read from SQL Connect by auth-context, so it has
+      // to be set there too. Without this, refreshUser() still reports
+      // onboarding_completed=false and the app stays on this screen.
+      await completeOnboarding(getDataConnectInstance());
       await refreshUser();
       toast.success("Onboarding complete! Welcome to TM Flow.");
     } catch (e: any) {

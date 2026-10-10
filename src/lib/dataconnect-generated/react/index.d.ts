@@ -1,4 +1,4 @@
-import { RegisterUserData, RegisterUserVariables, CreateTenderData, CreateTenderVariables, UpdateTenderData, UpdateTenderVariables, DeleteTenderData, DeleteTenderVariables, MeData, HasOrganisationData, MyOrganisationData, ListTendersData, GetTenderData, GetTenderVariables, PublicIssuedTendersData } from '../';
+import { RegisterUserData, RegisterUserVariables, CreateTenderData, CreateTenderVariables, UpdateTenderData, UpdateTenderVariables, DeleteTenderData, DeleteTenderVariables, CompleteOnboardingData, MeData, HasOrganisationData, MyOrganisationData, ListTendersData, GetTenderData, GetTenderVariables, PublicIssuedTendersData } from '../';
 import { UseDataConnectQueryResult, useDataConnectQueryOptions, UseDataConnectMutationResult, useDataConnectMutationOptions} from '@tanstack-query-firebase/react/data-connect';
 import { UseQueryResult, UseMutationResult} from '@tanstack/react-query';
 import { DataConnect } from 'firebase/data-connect';
@@ -16,6 +16,9 @@ export function useUpdateTender(dc: DataConnect, options?: useDataConnectMutatio
 
 export function useDeleteTender(options?: useDataConnectMutationOptions<DeleteTenderData, FirebaseError, DeleteTenderVariables>): UseDataConnectMutationResult<DeleteTenderData, DeleteTenderVariables>;
 export function useDeleteTender(dc: DataConnect, options?: useDataConnectMutationOptions<DeleteTenderData, FirebaseError, DeleteTenderVariables>): UseDataConnectMutationResult<DeleteTenderData, DeleteTenderVariables>;
+
+export function useCompleteOnboarding(options?: useDataConnectMutationOptions<CompleteOnboardingData, FirebaseError, void>): UseDataConnectMutationResult<CompleteOnboardingData, undefined>;
+export function useCompleteOnboarding(dc: DataConnect, options?: useDataConnectMutationOptions<CompleteOnboardingData, FirebaseError, void>): UseDataConnectMutationResult<CompleteOnboardingData, undefined>;
 
 export function useMe(options?: useDataConnectQueryOptions<MeData>): UseDataConnectQueryResult<MeData, undefined>;
 export function useMe(dc: DataConnect, options?: useDataConnectQueryOptions<MeData>): UseDataConnectQueryResult<MeData, undefined>;

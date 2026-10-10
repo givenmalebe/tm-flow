@@ -3486,15 +3486,81 @@ def ai_assistant(payload: AIQuestion, db: Session = Depends(get_db), user: User 
     question = payload.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="Question is required")
-    # Build COMPREHENSIVE context: all tenders, all documents (with text), library, etc.
+    import ai_agent
+    scope = ai_agent.resolve_scope(db, user)
+    # Build the context BEFORE saving the question so recent_chat holds the
+    # prior exchange, not a duplicate of the current one.
     context = _build_full_system_context(db, user, tender_id=payload.tender_id)
+    ai_agent.add_chat_message(db, scope, user, "user", question)
     answer = ai_module.assistant_answer(question, context)
+    ai_agent.add_chat_message(
+        db, scope, user, "assistant", answer, context_tenders=len(context["tenders"])
+    )
     return {
         "answer": answer,
         "context_tenders": len(context["tenders"]),
         "context_documents": sum(len(t["documents"]) for t in context["tenders"]),
         "context_library_docs": len(context["compliance_library"]),
     }
+
+
+# ---------------------- AI Agent: chat history + memory ----------------------
+
+@app.get("/api/ai/chat-history")
+def ai_chat_history(
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    import ai_agent
+    scope = ai_agent.resolve_scope(db, user)
+    messages = ai_agent.list_chat_messages(db, scope, limit=limit)
+    return {"items": ai_agent.serialize_chat(db, messages)}
+
+
+@app.delete("/api/ai/chat-history")
+def ai_clear_chat(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Clears the WHOLE TEAM's stored chat for the caller's company."""
+    import ai_agent
+    scope = ai_agent.resolve_scope(db, user)
+    deleted = ai_agent.clear_chat_messages(db, scope)
+    return {"deleted": deleted}
+
+
+@app.get("/api/ai/memory")
+def ai_get_memory(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    import ai_agent
+    scope = ai_agent.resolve_scope(db, user)
+    m = ai_agent.get_or_create_memory(db, scope)
+    return {"mission": m.mission, "goals": m.goals or [], "preferences": m.preferences}
+
+
+@app.put("/api/ai/memory")
+def ai_update_memory(
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    import ai_agent
+    scope = ai_agent.resolve_scope(db, user)
+    m = ai_agent.get_or_create_memory(db, scope)
+    if "mission" in payload:
+        m.mission = str(payload["mission"] or "")
+    if "goals" in payload:
+        goals = payload["goals"]
+        m.goals = [str(g)[:500] for g in goals][:20] if isinstance(goals, list) else []
+    if "preferences" in payload:
+        m.preferences = str(payload["preferences"] or "")
+    db.commit()
+    # The narrative reflects the memory — refresh it in the background budget.
+    try:
+        ai_agent.build_briefing(db, user, force_refresh=True)
+    except Exception:
+        pass
+    return {"mission": m.mission, "goals": m.goals or [], "preferences": m.preferences}
 
 
 # ---------------------- Search/Filter helper ----------------------

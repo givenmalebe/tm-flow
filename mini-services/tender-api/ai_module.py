@@ -488,7 +488,7 @@ def extract_text_from_file(file_path: str, filename: str) -> str:
 
 # ---- AI Tender Discovery (web search) ----
 
-def _gemini_web_search(query: str, num: int = 10) -> List[Dict[str, Any]]:
+def _gemini_web_search(query: str, num: int = 10, timeout: float = 60.0) -> List[Dict[str, Any]]:
     """
     Search the web via Gemini Google Search grounding and return results.
 
@@ -502,7 +502,7 @@ def _gemini_web_search(query: str, num: int = 10) -> List[Dict[str, Any]]:
         "generationConfig": {"maxOutputTokens": 8000},
     }
     try:
-        data = _gemini_post(payload, 60.0)
+        data = _gemini_post(payload, timeout)
     except Exception:
         return []
 
@@ -665,6 +665,151 @@ Return ONLY the JSON array as specified. Exclude non-tender results."""
         "scraped_count": len(scraped_results),
         "web_search_count": len(web_search_results),
     }
+
+
+# ---- AI Agent: briefing narrative / funding discovery / match scoring ----
+
+BRIEFING_SYSTEM = """You are the dedicated procurement success AI for a South African company.
+Write a short, engaging, first-person greeting (3-6 sentences) for the company's dashboard.
+Rules:
+- Address the company by name. State that your mission is to make them win tenders and secure the funding they need.
+- Highlight the most urgent closing tender, the best-matched funding opportunity, and the biggest readiness risk, using ONLY the facts given.
+- Be a coach: end with the single most important next action.
+- Plain text only. No markdown, no headings, no bullet points. Do not invent facts that are not in the data."""
+
+
+def generate_briefing(company_name: str, facts: Dict[str, Any], memory: Dict[str, Any]) -> str:
+    """Write the briefing greeting. Raises RuntimeError on Gemini failure;
+    the caller falls back to a deterministic template."""
+    prompt = f"""Write today's greeting for {company_name or "your company"}.
+
+COMPANY MEMORY:
+{json.dumps(memory, default=str)}
+
+FACTS (use only these):
+{json.dumps(facts, default=str)}
+
+Write the greeting now."""
+    return _gemini_chat(prompt, system=BRIEFING_SYSTEM, max_tokens=1000)
+
+
+FUNDING_DISCOVER_SYSTEM = """You are a South African business funding analyst. You analyze web search results and identify real, currently-open funding opportunities for businesses: grants, loans, incentives and support programmes (e.g. from SEFA, SEDA, IDC, NYDA, NEF, dtic, banks, development agencies) and tender-linked finance (bridging finance, purchase order funding, invoice discounting).
+Respond with ONLY a valid JSON array (no markdown, no code fences). Each element:
+{
+  "title": string,
+  "provider": string (the funder/institution, or "Unknown"),
+  "type": "funding" | "finance"  ("funding" = grants/loans/programmes; "finance" = tender/PO/invoice-linked finance),
+  "category": string (e.g. "Grant", "Loan", "Incentive", "Bridging finance"),
+  "location": string ("South Africa" if national),
+  "closing_date": string|null (ISO YYYY-MM-DD if applications close, else null),
+  "description": string (2-3 sentences: what it funds, amounts, eligibility),
+  "url": string,
+  "source_site": string,
+  "estimated_value": string|null (amount/range if mentioned)
+}
+Only include REAL funding opportunities with a working source URL. Deduplicate by URL. If none, return []."""
+
+
+def discover_funding(profile_summary: str, location: str = "South Africa") -> List[Dict[str, Any]]:
+    """Find business funding programmes + tender finance via web search.
+    Any failure degrades to an empty list — research keeps going."""
+    from datetime import datetime
+
+    year = datetime.now().year
+    queries = [
+        f"South African business funding grants loans incentives open for applications {year} {profile_summary} {location}",
+        f"tender bridging finance purchase order funding SMME South Africa {year}",
+    ]
+    raw: List[Dict[str, Any]] = []
+    for q in queries:
+        raw.extend(_gemini_web_search(q, num=10, timeout=20.0))
+    if not raw:
+        return []
+
+    raw_text = json.dumps(raw, indent=2, default=str)[:20000]
+    prompt = f"""Extract ONLY real, currently-open funding opportunities from these search results.
+
+COMPANY: {profile_summary}
+
+RAW SEARCH RESULTS (JSON):
+{raw_text}
+
+Return ONLY the JSON array as specified."""
+    try:
+        response = _gemini_chat(prompt, system=FUNDING_DISCOVER_SYSTEM)
+        response = response.strip()
+        if response.startswith("```"):
+            response = response.split("\n", 1)[1] if "\n" in response else response[3:]
+            if response.endswith("```"):
+                response = response[:-3]
+            response = response.strip()
+        if response.startswith("json"):
+            response = response[4:].strip()
+        first, last = response.find("["), response.rfind("]")
+        if first >= 0 and last > first:
+            response = response[first:last + 1]
+        items = json.loads(response)
+        return items if isinstance(items, list) else []
+    except (json.JSONDecodeError, RuntimeError):
+        return []
+
+
+def score_opportunities(company_summary: str, opportunities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Score how well each opportunity fits the company — ONE batched call.
+    Returns [{"index": i, "score": 0-100, "reason": str}]; empty list on failure."""
+    if not opportunities:
+        return []
+    listing = []
+    for i, o in enumerate(opportunities):
+        listing.append({
+            "index": i,
+            "title": (o.get("title") or "")[:200],
+            "provider": (o.get("provider") or "")[:100],
+            "type": o.get("type", "tender"),
+            "location": (o.get("location") or "")[:100],
+            "description": (o.get("description") or "")[:400],
+        })
+    prompt = f"""Score how well EACH opportunity below fits this company (0-100) and give a one-sentence reason starting with "You can apply because..." or "Apply with caution because...".
+
+COMPANY:
+{company_summary}
+
+OPPORTUNITIES (JSON):
+{json.dumps(listing)}
+
+Respond with ONLY a JSON array: [{{"index": int, "score": int, "reason": string}}] with one element per opportunity index."""
+    try:
+        response = _gemini_chat(prompt, max_tokens=4000)
+        response = response.strip()
+        if response.startswith("```"):
+            response = response.split("\n", 1)[1] if "\n" in response else response[3:]
+            if response.endswith("```"):
+                response = response[:-3]
+            response = response.strip()
+        if response.startswith("json"):
+            response = response[4:].strip()
+        first, last = response.find("["), response.rfind("]")
+        if first >= 0 and last > first:
+            response = response[first:last + 1]
+        parsed = json.loads(response)
+        scores = {}
+        for item in parsed if isinstance(parsed, list) else []:
+            if not isinstance(item, dict):
+                continue
+            try:
+                idx = int(item.get("index"))
+                score = int(item.get("score", 0))
+                if 0 <= idx < len(opportunities):
+                    scores[idx] = {
+                        "index": idx,
+                        "score": max(0, min(100, score)),
+                        "reason": str(item.get("reason", ""))[:500],
+                    }
+            except (TypeError, ValueError):
+                continue
+        return list(scores.values())
+    except (json.JSONDecodeError, RuntimeError):
+        return []
 
 
 # ---- AI Document Generation (tender-specific documents on company letterhead) ----

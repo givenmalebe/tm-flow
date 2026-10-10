@@ -429,6 +429,80 @@ class BidderMember(Base):
     company = relationship("BidderCompany", back_populates="members")
 
 
+# ============================================================
+# AI AGENT MODELS — company-scoped chat, memory, research, opportunities
+# ============================================================
+
+class AIChatMessage(Base):
+    """Persisted assistant chat, visible to the whole bidder company."""
+    __tablename__ = "ai_chat_messages"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("bidder_companies.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    role = Column(String(20), nullable=False)  # "user" | "assistant"
+    content = Column(Text, nullable=False)
+    error = Column(Boolean, default=False)
+    context_tenders = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class AICompanyMemory(Base):
+    """One row per scope: success profile + cached briefing narrative."""
+    __tablename__ = "ai_company_memory"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("bidder_companies.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    mission = Column(Text, nullable=True)
+    goals = Column(JSON, nullable=True)  # list of strings
+    preferences = Column(Text, nullable=True)
+    last_briefing_text = Column(Text, nullable=True)
+    last_briefing_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AIResearchRun(Base):
+    """Audit trail for research runs; the Phase 2 scheduler reuses this."""
+    __tablename__ = "ai_research_runs"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("bidder_companies.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    query = Column(Text, nullable=True)
+    status = Column(String(20), default="running")  # running | complete | failed
+    tenders_found = Column(Integer, default=0)
+    funding_found = Column(Integer, default=0)
+    finance_found = Column(Integer, default=0)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    finished_at = Column(DateTime, nullable=True)
+
+
+class AIOpportunity(Base):
+    """A researched tender / funding programme / finance option, per scope."""
+    __tablename__ = "ai_opportunities"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("bidder_companies.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    run_id = Column(Integer, ForeignKey("ai_research_runs.id"), nullable=True)
+    type = Column(String(20), nullable=False)  # tender | funding | finance
+    title = Column(String(500), nullable=False)
+    provider = Column(String(500), nullable=True)
+    category = Column(String(255), nullable=True)
+    location = Column(String(255), nullable=True)
+    closing_date = Column(Date, nullable=True)
+    description = Column(Text, nullable=True)
+    url = Column(String(1000), nullable=True)
+    source_site = Column(String(255), nullable=True)
+    reference_number = Column(String(255), nullable=True)
+    estimated_value = Column(String(255), nullable=True)
+    match_score = Column(Integer, nullable=True)
+    match_reason = Column(Text, nullable=True)
+    status = Column(String(20), default="new", index=True)  # new | seen | imported | dismissed
+    imported_tender_id = Column(Integer, ForeignKey("tenders.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    run = relationship("AIResearchRun")
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     # Seed default reminder settings

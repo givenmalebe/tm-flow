@@ -62,6 +62,7 @@ import { SubmissionsTab } from "./tabs/submissions-tab";
 import { ClarificationsTab } from "./tabs/clarifications-tab";
 import { AddendumsTab } from "./tabs/addendums-tab";
 import { AssistantTab } from "./tabs/assistant-tab";
+import { WelcomeModal } from "./welcome-modal";
 import { toast } from "sonner";
 
 interface NavItem {
@@ -364,6 +365,8 @@ export function DashboardShell() {
           </div>
         </main>
       </div>
+
+      <WelcomeModal />
     </div>
   );
 }

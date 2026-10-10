@@ -65,8 +65,20 @@ export interface AIOpportunity {
   status: string;
 }
 
+export interface AINewsItem {
+  kind: "deadline" | "tender" | "funding" | "finance";
+  title: string;
+  body: string | null;
+  days_left: number | null;
+  match_score: number | null;
+  url: string | null;
+  opportunity_id: number | null;
+  tender_id: number | null;
+}
+
 export interface AIBriefing {
   scope: { company_id: number | null; company_name: string | null };
+  user_name: string | null;
   narrative: string | null;
   narrative_generated_at: string | null;
   closing_soon: {
@@ -78,9 +90,13 @@ export interface AIBriefing {
     status: string;
     readiness_pct: number | null;
     expiring_docs: string[];
+    outstanding_items: string[];
   }[];
   opportunities: { tenders: AIOpportunity[]; funding: AIOpportunity[] };
   last_research_at: string | null;
+  research_stale: boolean;
+  news: AINewsItem[];
+  news_count: number;
   memory: AIMemory;
 }
 

@@ -11,7 +11,7 @@ from datetime import datetime, date, timedelta
 from typing import List, Optional, Any
 from pathlib import Path
 
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Query, Header
+from fastapi import FastAPI, Depends, HTTPException, Request, UploadFile, File, Form, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
@@ -3586,6 +3586,41 @@ def ai_research(db: Session = Depends(get_db), user: User = Depends(get_current_
     """Run an on-demand research pass for the caller's company scope."""
     import ai_agent
     return ai_agent.run_research(db, user)
+
+
+# ---------------------- Proactive research (no user prompt) ----------------------
+
+@app.post("/api/ai/cron/research")
+def ai_cron_research(
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+    x_cloudscheduler: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """Periodic sweep that researches tenders + funding for EVERY organisation
+    without any user having to ask.
+
+    Each company is researched inside its own isolated scope, so one
+    organisation's AI never sees another's data.
+
+    Scheduled via Cloud Scheduler, e.g.:
+      gcloud scheduler jobs create http tmflow-research \
+        --uri https://tmflow-api-....run.app/api/ai/cron/research \
+        --http-method POST --schedule "0 */6 * * *" --oidc-service-account-email ... \
+        --headers "Authorization=Bearer $CRON_SECRET"
+
+    When CRON_SECRET is unset, the Cloud Scheduler `X-CloudScheduler: true`
+    header is accepted; with neither present the call is rejected."""
+    import os as _os
+    secret = (_os.environ.get("CRON_SECRET") or "").strip()
+    authorized = (x_cloudscheduler or "").lower() in ("true", "1")
+    if not authorized and secret:
+        authorized = (authorization or "") == f"Bearer {secret}"
+    if not authorized:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    import ai_agent
+    return ai_agent.cron_research_all(db)
 
 
 def _estimated_value_float(value):

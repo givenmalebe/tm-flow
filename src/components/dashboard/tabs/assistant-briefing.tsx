@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, type AIBriefing, type AIOpportunity } from "@/lib/api";
+import { runResearchShared } from "@/lib/ai-research";
 import { useDashboardStore, deadlineColor } from "@/lib/dashboard-store";
 import { cn } from "@/lib/utils";
 
@@ -32,6 +33,19 @@ function scoreBadgeClass(score: number | null): string {
   if (score >= 50)
     return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300";
   return "border-border bg-muted text-muted-foreground";
+}
+
+function relativeTime(iso: string | null): string {
+  if (!iso) return "not yet";
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return "recently";
+  const mins = Math.floor((Date.now() - then) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 function OpportunityRow({
@@ -222,6 +236,7 @@ export function BriefingCard({
   const [loading, setLoading] = useState(true);
   const [researching, setResearching] = useState(false);
   const [error, setError] = useState(false);
+  const autoResearchRef = useRef(false);
 
   const setTab = useDashboardStore((s) => s.setTab);
   const selectTender = useDashboardStore((s) => s.selectTender);
@@ -243,25 +258,44 @@ export function BriefingCard({
     load();
   }, [load]);
 
-  const handleResearch = async () => {
-    setResearching(true);
-    const t = toast.loading("Researching tenders and funding for you…", {
-      description: "This can take up to a minute.",
-    });
-    try {
-      const res = await api.runResearch();
-      await load();
-      refresh();
-      toast.success("Research complete", {
-        id: t,
-        description: `${res.tenders_found} tenders and ${res.funding_found + res.finance_found} funding options found.`,
-      });
-    } catch (e: any) {
-      toast.error("Research failed", { id: t, description: e?.message });
-    } finally {
-      setResearching(false);
-    }
-  };
+  const runResearch = useCallback(
+    async (proactive: boolean) => {
+      setResearching(true);
+      const t = proactive
+        ? toast.loading("Finding fresh tenders and funding for you…", {
+            description: "You didn't have to ask — I'm already on it.",
+          })
+        : toast.loading("Researching tenders and funding for you…", {
+            description: "This can take up to a minute.",
+          });
+      try {
+        const res = await runResearchShared();
+        await load();
+        refresh();
+        toast.success(proactive ? "Fresh opportunities ready" : "Research complete", {
+          id: t,
+          description: `${res.tenders_found} tenders and ${res.funding_found + res.finance_found} funding options found.`,
+        });
+      } catch (e: any) {
+        toast.error("Research failed", { id: t, description: e?.message });
+      } finally {
+        setResearching(false);
+      }
+    },
+    [load, refresh]
+  );
+
+  // Proactive: when the briefing says research is stale (or has never run),
+  // run one pass automatically so the user is greeted with fresh findings
+  // without having to prompt the AI.
+  useEffect(() => {
+    if (!briefing || autoResearchRef.current) return;
+    if (!briefing.research_stale) return;
+    autoResearchRef.current = true;
+    runResearch(true);
+  }, [briefing, runResearch]);
+
+  const handleResearch = () => runResearch(false);
 
   const openTender = (tenderId: number) => {
     setTab("tenders");
@@ -316,9 +350,10 @@ export function BriefingCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold">
+              {briefing.user_name ? `Hi ${briefing.user_name}, ` : ""}
               {briefing.scope.company_name
-                ? `Your briefing for ${briefing.scope.company_name}`
-                : "Your daily briefing"}
+                ? `your briefing for ${briefing.scope.company_name}`
+                : "your daily briefing"}
             </span>
           </div>
           {briefing.narrative && (
@@ -326,6 +361,14 @@ export function BriefingCard({
               {briefing.narrative}
             </p>
           )}
+          <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <RefreshCw
+              className={cn("h-3 w-3", researching && "animate-spin")}
+            />
+            {researching
+              ? "Researching fresh tenders and funding…"
+              : `Last researched ${relativeTime(briefing.last_research_at)}`}
+          </div>
         </div>
         <Button
           size="sm"

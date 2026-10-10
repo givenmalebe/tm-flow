@@ -35,6 +35,10 @@ BRIEFING_TTL_HOURS = 12
 RESEARCH_SOFT_DEADLINE_S = 45.0
 SCRAPER_TIMEOUT_S = 12.0
 
+# Research is considered stale after this long; the briefing auto-triggers a
+# fresh proactive pass and the nightly cron keeps every scope topped up.
+RESEARCH_STALE_HOURS = 12
+
 
 # ---------------------- scope resolution ----------------------
 
@@ -282,6 +286,9 @@ def _closing_soon_facts(db: Session, scope: Dict[str, Any]) -> List[Dict[str, An
                 "status": t.status,
                 "readiness_pct": round(100 * complete / total) if total else None,
                 "expiring_docs": expiring,
+                "outstanding_items": [
+                    c.name for c in t.checklist_items if c.status == "Outstanding"
+                ][:3],
             }
         )
     out.sort(key=lambda x: x["days_left"])
@@ -325,24 +332,94 @@ def _opportunity_facts(db: Session, scope: Dict[str, Any]) -> Dict[str, List[Dic
     return {"tenders": tenders, "funding": funding}
 
 
+def _build_news(
+    closing: List[Dict[str, Any]],
+    opps: Dict[str, List[Dict[str, Any]]],
+    limit: int = 6,
+) -> List[Dict[str, Any]]:
+    """Turn the scope's research results into a short, interesting news feed:
+
+    - upcoming deadlines for the company's own tracked tenders, and
+    - the fresh (not-yet-seen) tender / funding / finance matches.
+
+    Derived purely from already-scoped data, so it costs no extra AI calls and
+    every organisation's feed is private to them."""
+    items: List[Dict[str, Any]] = []
+
+    for c in closing:
+        if c["days_left"] > 7:
+            continue
+        body = c["title"]
+        if c["outstanding_items"]:
+            body += f' — "{c["outstanding_items"][0]}" still outstanding.'
+        items.append(
+            {
+                "kind": "deadline",
+                "title": f"{c['reference_number']} closes in {c['days_left']} day(s)",
+                "body": body,
+                "days_left": c["days_left"],
+                "match_score": None,
+                "url": None,
+                "opportunity_id": None,
+                "tender_id": c["id"],
+            }
+        )
+
+    for group in (opps["tenders"], opps["funding"]):
+        for o in group:
+            if o["status"] != "new":
+                continue
+            items.append(
+                {
+                    "kind": o["type"],
+                    "title": o["title"],
+                    "body": o["match_reason"] or (o["provider"] or None),
+                    "days_left": o["days_left"],
+                    "match_score": o["match_score"],
+                    "url": o["url"],
+                    "opportunity_id": o["id"],
+                    "tender_id": None,
+                }
+            )
+
+    def sort_key(item: Dict[str, Any]):
+        urgency = item["days_left"] if item["days_left"] is not None else 10**6
+        score = -(item["match_score"] or 0)
+        return (item["kind"] != "deadline", urgency, score)
+
+    items.sort(key=sort_key)
+    return items[:limit]
+
+
 def _template_narrative(
     scope: Dict[str, Any],
     closing: List[Dict[str, Any]],
     opps: Dict[str, List[Dict[str, Any]]],
+    user_name: str = "",
 ) -> str:
+    greet = (user_name or "").strip() or "there"
     name = scope["company_name"] or "your company"
-    parts = []
+    parts = [
+        f"Good day, {greet}! I'm the dedicated procurement success AI for {name} — "
+        "my mission is to help your company win tenders and secure the funding it needs."
+    ]
     if closing:
         top = closing[0]
         parts.append(
             f"Your most urgent tender is {top['reference_number']} — {top['title']} — "
             f"closing in {top['days_left']} day(s)."
         )
-        incomplete = [c for c in closing if (c["readiness_pct"] or 0) < 100]
-        if incomplete:
+        if top["outstanding_items"]:
             parts.append(
-                f"{len(incomplete)} of your closing tenders still have outstanding checklist items."
+                f"Your single most important next step: complete "
+                f"\"{top['outstanding_items'][0]}\" on {top['reference_number']}."
             )
+        else:
+            incomplete = [c for c in closing if (c["readiness_pct"] or 0) < 100]
+            if incomplete:
+                parts.append(
+                    f"{len(incomplete)} of your closing tenders still have outstanding checklist items."
+                )
     else:
         parts.append("You have no tracked tenders closing soon.")
     t_count, f_count = len(opps["tenders"]), len(opps["funding"])
@@ -353,11 +430,10 @@ def _template_narrative(
         )
     else:
         parts.append(
-            f"Run your first research below and I'll hunt open tenders and funding for {name}."
+            f"I'm already searching for open tenders and funding for {name} — "
+            "fresh opportunities will appear here automatically."
         )
-    return (
-        f"Hi! I'm your dedicated procurement success AI for {name}. " + " ".join(parts)
-    )
+    return " ".join(parts)
 
 
 def _refresh_narrative(
@@ -367,14 +443,25 @@ def _refresh_narrative(
     memory: AICompanyMemory,
     closing: List[Dict[str, Any]],
     opps: Dict[str, List[Dict[str, Any]]],
+    user_name: str = "",
 ) -> None:
     """Regenerate + cache the narrative; template fallback never fails."""
     try:
+        urgent = closing[0] if closing else None
         facts = {
+            "user_name": (user_name or (user.full_name or "")).strip(),
             "closing_soon": closing[:5],
             "tenders_found": len(opps["tenders"]),
             "funding_found": len(opps["funding"]),
             "top_opportunities": (opps["tenders"][:3] + opps["funding"][:3]),
+            "most_urgent_reference": urgent["reference_number"] if urgent else None,
+            "most_urgent_days_left": urgent["days_left"] if urgent else None,
+            "most_urgent_readiness_pct": urgent["readiness_pct"] if urgent else None,
+            "next_action": (
+                urgent["outstanding_items"][0]
+                if urgent and urgent["outstanding_items"]
+                else None
+            ),
         }
         mem_facts = {
             "mission": memory.mission,
@@ -385,9 +472,31 @@ def _refresh_narrative(
             scope["company_name"] or "", facts, mem_facts
         )
     except Exception:
-        memory.last_briefing_text = _template_narrative(scope, closing, opps)
+        memory.last_briefing_text = _template_narrative(scope, closing, opps, user_name)
     memory.last_briefing_at = datetime.utcnow()
     db.commit()
+
+
+def _first_name(user: User) -> str:
+    if user is None or not user.full_name:
+        return ""
+    return (user.full_name or "").strip().split()[0]
+
+
+def _research_staleness(db: Session, scope: Dict[str, Any]) -> bool:
+    """True when this scope's last research pass is missing or too old."""
+    last_run = (
+        _scope_filter(db.query(AIResearchRun), AIResearchRun, scope)
+        .order_by(AIResearchRun.created_at.desc())
+        .first()
+    )
+    if last_run is None:
+        return True
+    if last_run.status == "complete" and last_run.finished_at:
+        return datetime.utcnow() - last_run.finished_at > timedelta(hours=RESEARCH_STALE_HOURS)
+    if last_run.status == "running" and last_run.created_at:
+        return datetime.utcnow() - last_run.created_at > timedelta(minutes=15)
+    return True
 
 
 def build_briefing(db: Session, user: User, force_refresh: bool = False) -> Dict[str, Any]:
@@ -396,21 +505,24 @@ def build_briefing(db: Session, user: User, force_refresh: bool = False) -> Dict
     closing = _closing_soon_facts(db, scope)
     opps = _opportunity_facts(db, scope)
     memory = get_or_create_memory(db, scope)
+    user_name = _first_name(user)
 
     stale = (
         memory.last_briefing_at is None
         or datetime.utcnow() - memory.last_briefing_at > timedelta(hours=BRIEFING_TTL_HOURS)
     )
     if force_refresh or stale:
-        _refresh_narrative(db, user, scope, memory, closing, opps)
+        _refresh_narrative(db, user, scope, memory, closing, opps, user_name)
 
     last_run = (
         _scope_filter(db.query(AIResearchRun), AIResearchRun, scope)
         .order_by(AIResearchRun.created_at.desc())
         .first()
     )
+    news = _build_news(closing, opps)
     return {
         "scope": {"company_id": scope["company_id"], "company_name": scope["company_name"]},
+        "user_name": user_name,
         "narrative": memory.last_briefing_text,
         "narrative_generated_at": (
             memory.last_briefing_at.isoformat() if memory.last_briefing_at else None
@@ -422,6 +534,9 @@ def build_briefing(db: Session, user: User, force_refresh: bool = False) -> Dict
             if last_run and last_run.created_at
             else None
         ),
+        "research_stale": _research_staleness(db, scope),
+        "news": news,
+        "news_count": len(news),
         "memory": {
             "mission": memory.mission,
             "goals": memory.goals or [],
@@ -460,7 +575,10 @@ def _best_profile(db: Session, user: User, scope: Dict[str, Any]) -> Optional[Co
 
 
 def _company_summary(db: Session, user: User, scope: Dict[str, Any]) -> str:
-    """A compact, honest description of the company for search + match scoring."""
+    """A compact, honest description of the company for search + match scoring.
+
+    Everything here comes from the caller's scope only, so each organisation's
+    AI has its own private company card and no scope ever sees another's."""
     profile = _best_profile(db, user, scope)
     name = (
         (profile.company_name if profile else None)
@@ -471,14 +589,28 @@ def _company_summary(db: Session, user: User, scope: Dict[str, Any]) -> str:
     if profile:
         if profile.registration_number:
             parts.append(f"CIPC registration: {profile.registration_number}")
+        if profile.vat_number:
+            parts.append(f"VAT number: {profile.vat_number}")
         if profile.psira_number:
             parts.append(f"PSIRA registered: {profile.psira_number}")
         if profile.bbbbee_level:
             parts.append(f"B-BBEE: {profile.bbbbee_level}")
         if profile.address:
             parts.append(f"Address: {profile.address}")
+        if profile.phone:
+            parts.append(f"Phone: {profile.phone}")
+        if profile.email:
+            parts.append(f"Email: {profile.email}")
+        if profile.website:
+            parts.append(f"Website: {profile.website}")
+        if profile.director_name:
+            director = profile.director_name
+            if profile.director_title:
+                director = f"{director} ({profile.director_title})"
+            parts.append(f"Director: {director}")
+
     categories = [
-        c[0]
+        str(c[0])
         for c in db.query(Tender.category)
         .filter(Tender.created_by.in_(scope["member_ids"]), Tender.category.isnot(None))
         .distinct()
@@ -486,9 +618,9 @@ def _company_summary(db: Session, user: User, scope: Dict[str, Any]) -> str:
         .all()
     ]
     if categories:
-        parts.append("Past tender categories: " + ", ".join(str(c) for c in categories))
+        parts.append("Past tender categories: " + ", ".join(categories))
     locations = [
-        l[0]
+        str(l[0])
         for l in db.query(Tender.location_site)
         .filter(
             Tender.created_by.in_(scope["member_ids"]),
@@ -499,7 +631,42 @@ def _company_summary(db: Session, user: User, scope: Dict[str, Any]) -> str:
         .all()
     ]
     if locations:
-        parts.append("Tender locations: " + ", ".join(str(l) for l in locations))
+        parts.append("Tender locations: " + ", ".join(locations))
+
+    won = (
+        db.query(Tender)
+        .filter(
+            Tender.created_by.in_(scope["member_ids"]),
+            Tender.outcome == "Awarded",
+        )
+        .count()
+    )
+    if won:
+        parts.append(f"Tenders won to date: {won}")
+
+    library_categories = [
+        str(c[0])
+        for c in db.query(LibraryDocument.category)
+        .filter(
+            LibraryDocument.created_by.in_(scope["member_ids"]),
+            LibraryDocument.category.isnot(None),
+        )
+        .distinct()
+        .limit(8)
+        .all()
+    ]
+    if library_categories:
+        parts.append("Compliance documents held: " + ", ".join(library_categories))
+
+    # The organisation's own stated mission / goals / preferences.
+    memory = get_or_create_memory(db, scope)
+    if memory.mission:
+        parts.append("Company mission: " + str(memory.mission).strip()[:600])
+    if memory.goals:
+        parts.append("Company goals: " + "; ".join(str(g)[:200] for g in memory.goals[:6]))
+    if memory.preferences:
+        parts.append("Preferences: " + str(memory.preferences).strip()[:600])
+
     return "\n".join(parts)
 
 
@@ -724,3 +891,62 @@ def run_research(db: Session, user: User) -> Dict[str, Any]:
         run.finished_at = datetime.utcnow()
         db.commit()
         raise
+
+
+# ---------------------- proactive (unprompted) research ----------------------
+
+def run_research_for_company(db: Session, company: BidderCompany) -> Dict[str, Any]:
+    """Run research for ONE organisation, using one of its approved members.
+
+    Every pass is scoped to the company, so a sweep never blends data
+    between organisations."""
+    members = (
+        db.query(BidderMember)
+        .filter(
+            BidderMember.company_id == company.id,
+            BidderMember.status == "approved",
+        )
+        .all()
+    )
+    if not members:
+        return {"company_id": company.id, "company_name": company.name,
+                "skipped": "no approved members"}
+    members.sort(key=lambda m: (m.role != "admin", m.user_id))
+    user = db.query(User).filter(User.id == members[0].user_id).first()
+    if user is None:
+        return {"company_id": company.id, "company_name": company.name,
+                "skipped": "member user not found"}
+    result = run_research(db, user)
+    result["company_id"] = company.id
+    result["company_name"] = company.name
+    return result
+
+
+def cron_research_all(db: Session, max_companies: Optional[int] = None) -> Dict[str, Any]:
+    """Proactive sweep: research every organisation, one at a time.
+
+    Each company is researched inside its own scope; a failure in one
+    company never aborts the sweep for the others."""
+    companies = db.query(BidderCompany).order_by(BidderCompany.id).all()
+    if max_companies:
+        companies = companies[: max(0, int(max_companies))]
+
+    results: List[Dict[str, Any]] = []
+    succeeded = 0
+    for company in companies:
+        try:
+            item = run_research_for_company(db, company)
+            succeeded += 1
+        except Exception as exc:  # pragma: no cover - defensive sweep guard
+            item = {
+                "company_id": company.id,
+                "company_name": company.name,
+                "error": str(exc)[:300],
+            }
+        results.append(item)
+
+    return {
+        "companies": len(companies),
+        "succeeded": succeeded,
+        "results": results,
+    }

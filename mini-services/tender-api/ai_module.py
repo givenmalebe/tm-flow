@@ -672,11 +672,16 @@ Return ONLY the JSON array as specified. Exclude non-tender results."""
 # ---- AI Agent: briefing narrative / funding discovery / match scoring ----
 
 BRIEFING_SYSTEM = """You are the dedicated procurement success AI for a South African company.
+
 Write a short, engaging, first-person greeting (3-6 sentences) for the company's dashboard.
+
 Rules:
-- Address the company by name. State that your mission is to make them win tenders and secure the funding they need.
+- Greet the user by their first name when one is given, then state that you are the company's dedicated procurement success AI and that your mission is to make them win tenders and secure the funding they need.
+- Be warm and human — you're an enthusiastic teammate who already did the work before they arrived. Never sound robotic or generic.
 - Highlight the most urgent closing tender, the best-matched funding opportunity, and the biggest readiness risk, using ONLY the facts given.
-- Be a coach: end with the single most important next action.
+- If facts.next_action is present, make that the single most important next action you end with.
+- If nothing is closing and nothing was found yet, say that you are actively searching and opportunities will appear automatically.
+- Be a coach: end with one clear next step.
 - Plain text only. No markdown, no headings, no bullet points. Do not invent facts that are not in the data."""
 
 
@@ -685,7 +690,9 @@ def generate_briefing(company_name: str, facts: Dict[str, Any], memory: Dict[str
     the caller falls back to a deterministic template."""
     prompt = f"""Write today's greeting for {company_name or "your company"}.
 
-COMPANY MEMORY:
+USER'S FIRST NAME: {(facts or {}).get("user_name") or "not given"}
+
+COMPANY MEMORY (the organisation's mission, goals, preferences):
 {json.dumps(memory, default=str)}
 
 FACTS (use only these):

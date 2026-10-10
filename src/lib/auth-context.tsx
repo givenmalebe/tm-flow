@@ -18,6 +18,7 @@ import {
 } from "firebase/auth";
 import { getFirebaseAuth, getDataConnectInstance } from "@/lib/firebase";
 import { me, hasOrganisation, registerUser } from "@/lib/dataconnect-generated";
+import { markFreshLogin, clearFreshLogin } from "@/lib/welcome";
 
 /**
  * The app-facing shape is unchanged from the pre-Firebase version: snake_case
@@ -136,6 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string) => {
     await signInWithEmailAndPassword(getFirebaseAuth(), email, password);
+    markFreshLogin();
   };
 
   const register = async (
@@ -147,11 +149,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   ) => {
     const cred = await createUserWithEmailAndPassword(getFirebaseAuth(), email, password);
     await updateProfile(cred.user, { displayName: full_name });
+    markFreshLogin();
     // The profile row and tenancy are written by the onAuthStateChanged
     // handler via loadProfile, so the caller does not write them here.
   };
 
   const logout = () => {
+    clearFreshLogin();
     signOut(getFirebaseAuth());
     setUser(null);
   };

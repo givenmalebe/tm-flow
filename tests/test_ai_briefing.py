@@ -152,3 +152,97 @@ def test_briefing_is_isolated(db, monkeypatch):
     brief = ai_agent.build_briefing(db, bob)
     assert brief["closing_soon"] == []
     assert "Alice" not in brief["narrative"] or brief["narrative"] == "n"
+
+
+def test_closing_soon_exposes_outstanding_items(db, monkeypatch):
+    alice = make_user(db, "alice@example.com", company_name="Acme")
+    make_company(db, "Acme", alice)
+    urgent = make_tender(db, alice, "A-1", "Urgent", closing_date=date.today() + timedelta(days=2))
+    _checklist(db, urgent, "Bank guarantee", status="Outstanding")
+    _checklist(db, urgent, "Done", status="Complete")
+    monkeypatch.setattr(ai_agent.ai_module, "generate_briefing", lambda *a, **k: "n")
+
+    brief = ai_agent.build_briefing(db, alice)
+    assert brief["closing_soon"][0]["outstanding_items"] == ["Bank guarantee"]
+
+
+def test_briefing_reports_research_staleness(db, monkeypatch):
+    import database as dbmod
+    from datetime import datetime
+
+    alice = make_user(db, "alice@example.com", company_name="Acme")
+    make_company(db, "Acme", alice)
+    monkeypatch.setattr(ai_agent.ai_module, "generate_briefing", lambda *a, **k: "n")
+
+    # Never researched -> stale.
+    assert ai_agent.build_briefing(db, alice)["research_stale"] is True
+
+    # A fresh, complete run -> not stale.
+    scope = ai_agent.resolve_scope(db, alice)
+    run = dbmod.AIResearchRun(
+        company_id=scope["company_id"], status="complete", finished_at=datetime.utcnow()
+    )
+    db.add(run)
+    db.commit()
+    assert ai_agent.build_briefing(db, alice)["research_stale"] is False
+
+    # An old run -> stale again.
+    run.finished_at = datetime.utcnow() - timedelta(hours=ai_agent.RESEARCH_STALE_HOURS + 1)
+    db.commit()
+    assert ai_agent.build_briefing(db, alice)["research_stale"] is True
+
+
+def test_briefing_news_feed_from_research_and_deadlines(db, monkeypatch):
+    alice = make_user(db, "alice@example.com", company_name="Acme")
+    make_company(db, "Acme", alice)
+    scope = ai_agent.resolve_scope(db, alice)
+    monkeypatch.setattr(ai_agent.ai_module, "generate_briefing", lambda *a, **k: "n")
+
+    urgent = make_tender(db, alice, "A-1", "Urgent", closing_date=date.today() + timedelta(days=2))
+    _checklist(db, urgent, "Bank guarantee", status="Outstanding")
+    _opp(db, scope, type="tender", title="New tender", match_score=88, status="new")
+    _opp(db, scope, type="funding", title="Seen funding", match_score=95, status="seen")
+    _opp(db, scope, type="funding", title="Fresh grant", match_score=60, status="new")
+
+    brief = ai_agent.build_briefing(db, alice)
+    titles = [n["title"] for n in brief["news"]]
+
+    assert brief["news_count"] == len(brief["news"])
+    # Deadlines come first, then fresh matches; already-seen items are excluded.
+    assert brief["news"][0]["kind"] == "deadline"
+    assert "A-1 closes in 2 day(s)" in titles
+    assert "New tender" in titles
+    assert "Fresh grant" in titles
+    assert "Seen funding" not in titles
+
+
+def test_news_feed_is_isolated(db, monkeypatch):
+    alice = make_user(db, "alice@example.com", company_name="Acme")
+    make_company(db, "Acme", alice)
+    bob = make_user(db, "bob@example.com", company_name="Globex")
+    make_company(db, "Globex", bob)
+    scope_a = ai_agent.resolve_scope(db, alice)
+    _opp(db, scope_a, type="tender", title="Alice only", match_score=90, status="new")
+    make_tender(db, alice, "A-1", "Alice urgent", closing_date=date.today() + timedelta(days=1))
+    monkeypatch.setattr(ai_agent.ai_module, "generate_briefing", lambda *a, **k: "n")
+
+    brief = ai_agent.build_briefing(db, bob)
+    assert brief["news"] == []
+    assert brief["news_count"] == 0
+
+
+def test_template_narrative_greets_user_and_names_next_action(db, monkeypatch):
+    alice = make_user(
+        db, "alice@example.com", full_name="Alice Mokoena", company_name="Acme"
+    )
+    make_company(db, "Acme", alice)
+    urgent = make_tender(db, alice, "A-1", "Urgent", closing_date=date.today() + timedelta(days=2))
+    _checklist(db, urgent, "Bank guarantee", status="Outstanding")
+
+    def boom(*a, **k):
+        raise RuntimeError("quota")
+
+    monkeypatch.setattr(ai_agent.ai_module, "generate_briefing", boom)
+    brief = ai_agent.build_briefing(db, alice)
+    assert "Alice" in brief["narrative"]
+    assert "Bank guarantee" in brief["narrative"]

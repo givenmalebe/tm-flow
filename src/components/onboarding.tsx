@@ -151,7 +151,7 @@ export function Onboarding() {
       <div className="border-b bg-background/80 backdrop-blur">
         <div className="mx-auto max-w-3xl px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <img src="/logo.jpg" alt="TM Flow" className="h-9 w-9 rounded-lg shadow-sm" />
+            <img src="/logo.png" alt="TM Flow" className="h-9 w-9 rounded-lg shadow-sm" />
             <div>
               <div className="text-base font-semibold">TM Flow Onboarding</div>
               <div className="text-[10px] text-muted-foreground">Step {step + 1} of {steps.length}</div>

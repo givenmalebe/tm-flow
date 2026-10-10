@@ -44,7 +44,7 @@ const fadeUp = {
 function Logo() {
   return (
     <div className="flex items-center gap-2">
-      <img src="/logo.jpg" alt="TM Flow" className="size-9 rounded-lg shadow-sm" />
+      <img src="/logo.png" alt="TM Flow" className="size-9 rounded-lg shadow-sm" />
       <span className="text-lg font-semibold tracking-tight text-foreground">
         TM <span className="text-primary">Flow</span>
       </span>

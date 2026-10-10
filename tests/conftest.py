@@ -1,16 +1,24 @@
+"""
+Shared test fixtures for the TM Flow backend.
+
+The live service owns identity via Firebase Auth; tests bypass token
+verification by overriding the get_current_user dependency with whatever
+user the test selects via the `act_as` fixture.
+
+database.py resolves DB_PATH at import time, so a throwaway path is set
+before anything imports `database`.
+"""
 import os
 import sys
 import tempfile
-import uuid
+from datetime import datetime
 
 import pytest
+from fastapi.testclient import TestClient
 
-# Must happen before any import of `database`, which reads this at module scope.
-_TMP_DIR = tempfile.mkdtemp(prefix="tenderflow-test-")
-ACTIVE_DB_PATH = os.path.join(_TMP_DIR, "test.db")
-os.environ["TENDERFLOW_DB"] = ACTIVE_DB_PATH
+_TMP_DIR = tempfile.mkdtemp(prefix="tmflow-test-")
+os.environ["DB_PATH"] = os.path.join(_TMP_DIR, "test.db")
 
-# Make `mini-services/tender-api` importable.
 API_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "mini-services",
@@ -20,9 +28,15 @@ if API_DIR not in sys.path:
     sys.path.insert(0, API_DIR)
 
 
+class AuthState:
+    """The user that get_current_user resolves to during tests."""
+
+    user = None
+
+
 @pytest.fixture
 def db():
-    """A session on the isolated test DB, schema created and torn down per test."""
+    """A session on the isolated test DB; schema per test."""
     import database as dbmod
 
     dbmod.Base.metadata.create_all(bind=dbmod.engine)
@@ -36,35 +50,46 @@ def db():
 
 @pytest.fixture
 def client(db):
-    """TestClient with get_db bound to the isolated session."""
+    """TestClient with get_db + get_current_user bound to this test."""
     import main as mainmod
+    import database as dbmod
+    from fastapi import HTTPException
 
     def override_get_db():
         yield db
 
-    mainmod.app.dependency_overrides[dbmod_get_db()] = override_get_db
+    def override_get_current_user():
+        if AuthState.user is None:
+            raise HTTPException(status_code=401, detail="No test user set — use act_as(user)")
+        return AuthState.user
+
+    mainmod.app.dependency_overrides[dbmod.get_db] = override_get_db
+    mainmod.app.dependency_overrides[mainmod.get_current_user] = override_get_current_user
     with TestClient(mainmod.app) as c:
         yield c
     mainmod.app.dependency_overrides.clear()
 
 
-def dbmod_get_db():
+@pytest.fixture
+def act_as():
+    """act_as(user) makes subsequent client calls authenticate as that user."""
+    def _act_as(user):
+        AuthState.user = user
+    yield _act_as
+    AuthState.user = None
+
+
+# ---------- data factories (importable as `from tests.conftest import ...`) ----------
+
+def make_user(db, email, full_name="Test User", company_name=None, account_type="applicant"):
     import database as dbmod
-
-    return dbmod.get_db
-
-
-from fastapi.testclient import TestClient  # noqa: E402
-
-
-def make_user(db, email, password="pw12345", full_name="Test User"):
-    import database as dbmod
-    from auth import hash_password
 
     user = dbmod.User(
         email=email.lower(),
         full_name=full_name,
-        hashed_password=hash_password(password),
+        hashed_password="",
+        company_name=company_name,
+        account_type=account_type,
     )
     db.add(user)
     db.commit()
@@ -72,25 +97,56 @@ def make_user(db, email, password="pw12345", full_name="Test User"):
     return user
 
 
-def make_org(db, name, account_type="bidder", user=None, role="owner"):
+def make_company(db, name, owner, industry=None):
+    """A BidderCompany with `owner` as an approved admin member."""
     import database as dbmod
 
-    org = dbmod.Organisation(
-        name=name,
-        join_code=uuid.uuid4().hex[:8],
-        account_type=account_type,
+    company = dbmod.BidderCompany(name=name, industry=industry, created_by=owner.id)
+    db.add(company)
+    db.flush()
+    member = dbmod.BidderMember(
+        company_id=company.id,
+        user_id=owner.id,
+        role="admin",
+        status="approved",
+        approved_at=datetime.utcnow(),
     )
-    db.add(org)
+    db.add(member)
     db.commit()
-    db.refresh(org)
-    if user is not None:
-        db.add(dbmod.Membership(user_id=user.id, org_id=org.id, role=role))
-        db.commit()
-    return org
+    db.refresh(company)
+    return company
 
 
-def auth_headers(user, org):
-    from auth import create_access_token
+def add_member(db, company, user, status="approved", role="member"):
+    import database as dbmod
 
-    token = create_access_token({"sub": str(user.id), "org_id": str(org.id)})
-    return {"Authorization": f"Bearer {token}"}
+    member = dbmod.BidderMember(
+        company_id=company.id,
+        user_id=user.id,
+        role=role,
+        status=status,
+        approved_at=datetime.utcnow() if status == "approved" else None,
+    )
+    db.add(member)
+    db.commit()
+    db.refresh(member)
+    return member
+
+
+def make_tender(db, user, ref="T-1", title="Tender", closing_date=None, category=None,
+               status="New Opportunity", client_company="Client"):
+    import database as dbmod
+
+    tender = dbmod.Tender(
+        reference_number=ref,
+        title=title,
+        client_company=client_company,
+        created_by=user.id,
+        closing_date=closing_date,
+        category=category,
+        status=status,
+    )
+    db.add(tender)
+    db.commit()
+    db.refresh(tender)
+    return tender

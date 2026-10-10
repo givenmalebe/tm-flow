@@ -7,6 +7,7 @@ the daily briefing, and orchestrates research.
 
 Pure logic + AI calls only — imports nothing from main to avoid cycles.
 """
+import os
 import time
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -671,6 +672,99 @@ def _company_summary(db: Session, user: User, scope: Dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+# ---------------------- tenant capability profile ----------------------
+
+# How much of the uploaded library we are willing to read, and for how long.
+# Research runs behind a ~60s Hosting proxy, so this stays deliberately small.
+CAPABILITY_MAX_DOCS = 6
+CAPABILITY_MAX_DOC_CHARS = 1400
+CAPABILITY_TIME_BUDGET_S = 8.0
+
+
+def _library_paths(db: Session, scope: Dict[str, Any]):
+    """This scope's uploaded library documents, real files first."""
+    docs = (
+        db.query(LibraryDocument)
+        .filter(LibraryDocument.created_by.in_(scope["member_ids"]))
+        .all()
+    )
+    # Deterministic ordering so the same docs drive every run.
+    return sorted(docs, key=lambda d: (d.category or "", d.name or ""))[:CAPABILITY_MAX_DOCS]
+
+
+def _read_doc_excerpt(path: Optional[str], filename: Optional[str], deadline: float) -> str:
+    """Extract a short text excerpt from an uploaded document, time-boxed."""
+    if not path:
+        return ""
+    try:
+        if time.monotonic() > deadline:
+            return ""
+    except Exception:
+        return ""
+    full = os.path.join(os.environ.get("UPLOAD_DIR", "uploads"), path)
+    if not os.path.isfile(full):
+        # Fall back to the app's uploads dir when the env var is unset.
+        alt = os.path.join(os.path.dirname(__file__), path)
+        full = alt if os.path.isfile(alt) else None
+    if not full:
+        return ""
+    try:
+        import ai_module
+
+        text = ai_module.extract_text_from_file(full, filename or os.path.basename(full))
+    except Exception:
+        return ""
+    if not text or text.startswith("[PDF extraction error"):
+        return ""
+    text = " ".join(str(text).split())
+    return text[:CAPABILITY_MAX_DOC_CHARS]
+
+
+def _capability_profile(db: Session, user: User, scope: Dict[str, Any]) -> str:
+    """A deep, private description of THIS tenant for search + match scoring.
+
+    Unlike _company_summary (structured fields only) this actually opens the
+    organisation's uploaded documents — company profile, organogram, capability
+    statements, certificates — so the AI searches for what the tenant can really
+    do, not just their name. Scoped to the caller; bounded in time and size.
+    """
+    parts: List[str] = [_company_summary(db, user, scope)]
+    deadline = time.monotonic() + CAPABILITY_TIME_BUDGET_S
+
+    # 1. Any AI-extracted organogram / structure text already on the profile.
+    profile = _best_profile(db, user, scope)
+    if profile is not None:
+        if getattr(profile, "letterhead_tagline", None):
+            parts.append("Tagline: " + str(profile.letterhead_tagline).strip()[:200])
+        if getattr(profile, "organogram_text", None):
+            organ = " ".join(str(profile.organogram_text).split())
+            if organ:
+                parts.append("Organisation structure (from organogram): " + organ[:800])
+
+    # 2. Read the organisation's own uploaded documents.
+    docs = _library_paths(db, scope)
+    excerpts: List[str] = []
+    labels: List[str] = []
+    for doc in docs:
+        excerpt = _read_doc_excerpt(doc.file_path, doc.filename, deadline)
+        if not excerpt:
+            continue
+        label = f"{doc.category or 'Document'} — {doc.name or doc.filename}"
+        if doc.description:
+            label += f": {' '.join(str(doc.description).split())[:120]}"
+        excerpts.append(f"[{label}] {excerpt}")
+        labels.append(doc.category or doc.name or "document")
+    if excerpts:
+        parts.append(
+            "What this organisation can do (from its own uploaded documents):\n"
+            + "\n".join(excerpts)
+        )
+    if labels:
+        parts.append("Documents the organisation holds: " + ", ".join(dict.fromkeys(labels)))
+
+    return "\n".join(p for p in parts if p)
+
+
 def _normalize_result(r: Dict[str, Any], opp_type: str) -> Optional[Dict[str, Any]]:
     if not isinstance(r, dict):
         return None
@@ -734,7 +828,10 @@ def run_research(db: Session, user: User) -> Dict[str, Any]:
     import scraper
 
     scope = resolve_scope(db, user)
-    summary = _company_summary(db, user, scope)
+    # The tenant's deep capability profile (its own uploaded documents) drives
+    # both what we search for and how we score matches.
+    capability = _capability_profile(db, user, scope)
+    summary = capability or _company_summary(db, user, scope)
     profile = _best_profile(db, user, scope)
     location = "South Africa"
     if profile and profile.address:
@@ -784,12 +881,13 @@ def run_research(db: Session, user: User) -> Dict[str, Any]:
                     if is_funding:
                         funding_raw = []
 
-        # Top up with AI web search only if the scrapers were thin and we have time.
-        if len(tender_raw) < 15 and (time.monotonic() - started) < RESEARCH_SOFT_DEADLINE_S - 25:
+        # Tenant-specific AI web search (Google grounding) — now that we know the
+        # organisation, this is the main source of matched tenders with real pages.
+        if (time.monotonic() - started) < RESEARCH_SOFT_DEADLINE_S - 22:
             try:
                 web = ai_module.discover_tenders(
                     category, keywords, location, num_results=15,
-                    skip_scrapers=True, search_timeout=15,
+                    skip_scrapers=True, search_timeout=15, capability=capability,
                 )
                 tender_raw.extend(web.get("results", []) or [])
             except Exception:
@@ -807,6 +905,34 @@ def run_research(db: Session, user: User) -> Dict[str, Any]:
             item = _normalize_result(r, opp_type)
             if item:
                 candidates.setdefault(_dedup_key(item), item)
+
+        # Verify every tender link actually opens before we store it, so the
+        # tenant is never shown a dead page or a login wall.
+        remaining = max(0.0, RESEARCH_SOFT_DEADLINE_S - (time.monotonic() - started) - 8)
+        if remaining > 3:
+            try:
+                from linkcheck import verify_links, apply_verdicts
+
+                items = list(candidates.values())
+                linked = [i for i in items if i.get("url")]
+                verdicts = verify_links(
+                    [i.get("url") for i in linked], deadline_s=min(remaining, 12)
+                )
+                keep = apply_verdicts([dict(i) for i in linked], verdicts)
+                by_key = {_dedup_key(k): k for k in keep}
+                dropped = 0
+                for key, item in list(candidates.items()):
+                    if not item.get("url"):
+                        item["link_kind"] = "none"
+                        continue
+                    new_item = by_key.get(key)
+                    if new_item is None:
+                        candidates.pop(key, None)
+                        dropped += 1
+                    else:
+                        candidates[key] = new_item
+            except Exception:
+                pass
 
         # Score all candidates in one batched call.
         ordered = list(candidates.values())

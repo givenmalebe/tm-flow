@@ -8,6 +8,7 @@ Uses the Google Gemini API (gemini-flash-latest) via httpx for:
 """
 import os
 import json
+import re
 import time
 from typing import Optional, Dict, Any, List
 
@@ -559,6 +560,53 @@ If no results are actual tenders, return an empty array [].
 Deduplicate by URL."""
 
 
+_STOPWORDS = {
+    "the", "and", "for", "with", "that", "this", "from", "have", "has", "our",
+    "company", "organisation", "organization", "services", "service", "limited",
+    "south", "africa", "document", "documents", "profile", "tender", "tenders",
+    "what", "can", "does", "they", "their", "which", "were", "been", "into",
+    "also", "about", "holds", "organises", "organisation", "capability",
+}
+
+
+def _capability_terms(capability: str) -> List[str]:
+    """Pick the tenant's distinctive service phrases out of their capability text.
+
+    The capability profile is free text (their own documents), so we surface the
+    most repeated service-like phrases — e.g. a cleaning company's documents
+    yield "office cleaning" and "deep cleaning". N-grams are only formed within a
+    single clause so we never invent phrases across sentence boundaries.
+    """
+    if not capability:
+        return []
+    text = " ".join(str(capability).split()).lower()
+    phrases: Dict[str, int] = {}
+    for segment in re.split(r"[,.;:()\[\]\n/]+", text):
+        words = re.findall(r"[a-z][a-z\-]+", segment)
+        for n in (3, 2):
+            for i in range(len(words) - n + 1):
+                gram = words[i: i + n]
+                if any(w in _STOPWORDS for w in gram):
+                    continue
+                if not any(len(w) > 4 for w in gram):
+                    continue
+                key = " ".join(gram)
+                phrases[key] = phrases.get(key, 0) + 1
+    # Most repeated first, then the most specific (longest) phrase.
+    ranked = sorted(phrases.items(), key=lambda kv: (-kv[1], -len(kv[0].split())))
+    out: List[str] = []
+    for phrase, count in ranked:
+        if count < 2:
+            continue
+        # Skip phrases nested inside one we already kept, and vice versa.
+        if any(phrase in kept or kept in phrase for kept in out):
+            continue
+        out.append(phrase)
+        if len(out) >= 5:
+            break
+    return out
+
+
 def discover_tenders(
     category: str,
     keywords: str = "",
@@ -566,23 +614,37 @@ def discover_tenders(
     num_results: int = 15,
     skip_scrapers: bool = False,
     search_timeout: float = 60.0,
+    capability: str = "",
 ) -> Dict[str, Any]:
     """
     Find real open tenders matching the given criteria.
+
+    `capability` is the tenant's own capability profile (their uploaded
+    documents, profile and history). When present it drives the search, so a
+    cleaning company surfaces cleaning tenders rather than generic ones.
     Uses Python scrapers to directly fetch real tender listings from SA portals,
     then falls back to AI web search for broader coverage.
     Returns a dict with 'query', 'results', 'sources', 'raw_count'.
     """
-    parts = []
-    if category:
-        parts.append(category)
-    if keywords:
-        parts.append(keywords)
-    parts.append("tender")
-    parts.append("open")
-    if location:
-        parts.append(location)
-    query = " ".join(parts)
+    # Derive the search terms from the organisation's own capability text so the
+    # search reflects what this tenant can actually deliver.
+    service_terms = _capability_terms(capability)
+    if service_terms:
+        query = (
+            " OR ".join(f'"{t}" tender' for t in service_terms[:5])
+            + f" South Africa open {location} 2026 site:gov.za OR site:etenders.gov.za"
+        )
+    else:
+        parts = []
+        if category:
+            parts.append(category)
+        if keywords:
+            parts.append(keywords)
+        parts.append("tender")
+        parts.append("open")
+        if location:
+            parts.append(location)
+        query = " ".join(parts)
 
     # --- Step 1: Python scrapers (direct fetch from real tender portals) ---
     scraped_results: List[Dict[str, Any]] = []
@@ -608,9 +670,13 @@ def discover_tenders(
                 # Use AI to structure the raw web search results
                 raw_text = json.dumps(raw_results, indent=2, default=str)[:20000]
                 prompt = f"""Analyze these web search results and extract ONLY actual tender opportunities.
-If a result is a news article, blog post, or generic page (not an actual tender listing), EXCLUDE it.
+If a result is a news article, blog page, PDF of unrelated content, or generic page (not an actual tender listing), EXCLUDE it.
+Only keep a result if its `url` is the page where that specific tender is published.
 
-The user is looking for: {category} {keywords} in {location}
+THE ORGANISATION WE ARE SEARCHING FOR (its own profile and uploaded documents):
+{capability[:4000] if capability else f"{category} {keywords} company in {location}"}
+
+Find tenders this specific organisation could actually bid on — match its services, sectors and size.
 
 RAW SEARCH RESULTS (JSON):
 {raw_text}
@@ -668,6 +734,71 @@ Return ONLY the JSON array as specified. Exclude non-tender results."""
         "scraped_count": len(scraped_results),
         "web_search_count": len(web_search_results),
     }
+
+
+def discover_tenders_verified(
+    category: str,
+    keywords: str = "",
+    location: str = "South Africa",
+    num_results: int = 15,
+    capability: str = "",
+    skip_scrapers: bool = False,
+    search_timeout: float = 60.0,
+    verify_timeout: float = 9.0,
+) -> Dict[str, Any]:
+    """discover_tenders + live link verification.
+
+    Every candidate URL is actually fetched. Anything that 404s, times out or
+    lands on a sign-in page is removed, so the tenant only ever receives
+    tenders whose page they can open.
+    """
+    from linkcheck import verify_links, apply_verdicts
+
+    data = discover_tenders(
+        category,
+        keywords=keywords,
+        location=location,
+        num_results=num_results,
+        skip_scrapers=skip_scrapers,
+        search_timeout=search_timeout,
+        capability=capability,
+    )
+    candidates = data.get("results") or []
+    linked = [c for c in candidates if c.get("url")]
+    verdicts = verify_links([c.get("url") for c in linked], timeout=verify_timeout)
+    verified = apply_verdicts([dict(c) for c in linked], verdicts)
+
+    # Results that legitimately have no link (members-only sources) are kept but
+    # flagged, so the UI can hide the "Open" button rather than show a dead one.
+    kept_originals = {
+        original
+        for original, v in verdicts.items()
+        if v.get("kind") in ("page", "pdf")
+    }
+    verified_originals = set()
+    for item in verified:
+        verified_originals.add(item.get("_orig_url") or item.get("url"))
+    for c in candidates:
+        original = c.get("url")
+        if original and original in kept_originals and original in verified_originals:
+            continue
+        if not original:
+            c.setdefault("link_kind", "none")
+            verified.append(c)
+
+    verified.sort(
+        key=lambda r: (
+            {"high": 0, "medium": 1, "low": 2}.get(r.get("relevance", "medium"), 1),
+            0 if r.get("link_kind") in ("page", "pdf") else 1,
+            r.get("closing_date") or "9999",
+        )
+    )
+    data["results"] = verified[:num_results]
+    data["links_checked"] = len(linked)
+    data["links_kept"] = sum(1 for v in verdicts.values() if v.get("kind") in ("page", "pdf"))
+    data["links_dropped"] = len(linked) - data["links_kept"]
+    data["raw_count"] = len(verified)
+    return data
 
 
 # ---- AI Agent: briefing narrative / funding discovery / match scoring ----

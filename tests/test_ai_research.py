@@ -2,6 +2,7 @@
 from datetime import date, timedelta
 
 import ai_agent
+import linkcheck
 import scraper
 from tests.conftest import make_company, make_user
 
@@ -34,7 +35,7 @@ F2 = {
 }
 
 
-def _mock_sources(monkeypatch, tenders, funding, scores):
+def _mock_sources(monkeypatch, tenders, funding, scores, verify=True):
     monkeypatch.setattr(scraper, "scrape_security_co_za", lambda *a, **k: tenders)
     monkeypatch.setattr(scraper, "scrape_tenderflow_co_za", lambda *a, **k: [])
     monkeypatch.setattr(scraper, "scrape_etenders_opportunities", lambda *a, **k: [])
@@ -42,6 +43,17 @@ def _mock_sources(monkeypatch, tenders, funding, scores):
     monkeypatch.setattr(ai_agent.ai_module, "discover_funding", lambda *a, **k: funding)
     monkeypatch.setattr(ai_agent.ai_module, "score_opportunities", lambda cs, opps: scores)
     monkeypatch.setattr(ai_agent.ai_module, "generate_briefing", lambda *a, **k: "fresh narrative")
+    if verify:
+        monkeypatch.setattr(linkcheck, "verify_links", _all_pages)
+
+
+def _all_pages(urls, **kwargs):
+    """Default: every candidate link resolves to a real page."""
+    return {
+        u: {"url": u, "final_url": u, "kind": "page", "status": 200,
+            "content_type": "text/html", "reason": "ok"}
+        for u in urls
+    }
 
 
 def test_research_stores_scored_opportunities(db, monkeypatch):

@@ -3085,14 +3085,25 @@ def discover_tenders_api(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """AI-powered tender discovery. Searches the web for open tenders matching the criteria."""
+    """AI-powered tender discovery. Searches the web for open tenders matching the criteria.
+
+    Uses the caller's own capability profile so results suit this organisation,
+    and verifies every link so the user only sees tenders they can open.
+    """
     if not payload.category or not payload.category.strip():
         raise HTTPException(status_code=400, detail="Category is required")
-    result = ai_module.discover_tenders(
+
+    import ai_agent
+
+    scope = ai_agent.resolve_scope(db, user)
+    capability = ai_agent._capability_profile(db, user, scope)
+
+    result = ai_module.discover_tenders_verified(
         category=payload.category.strip(),
         keywords=(payload.keywords or "").strip(),
         location=(payload.location or "South Africa").strip(),
         num_results=min(max(payload.num_results, 5), 30),
+        capability=capability,
     )
     return result
 

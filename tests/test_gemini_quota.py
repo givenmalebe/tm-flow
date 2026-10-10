@@ -11,7 +11,7 @@ import ai_agent
 import ai_module
 import linkcheck
 import scraper
-from tests.conftest import make_company, make_user
+from tests.conftest import make_company, make_tender, make_user
 
 
 def _reset_breaker():
@@ -95,6 +95,7 @@ def test_funding_discovery_is_cached_for_24_hours(db, monkeypatch):
 
     alice = make_user(db, "f@example.com", company_name="Acme")
     make_company(db, "Acme", alice)
+    make_tender(db, alice, ref="H-1", title="History", category="Cleaning Services")
     scope = ai_agent.resolve_scope(db, alice)
 
     calls = []

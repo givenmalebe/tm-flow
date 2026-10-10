@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Sparkles,
   Target,
+  Upload,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -291,6 +292,9 @@ export function BriefingCard({
   useEffect(() => {
     if (!briefing || autoResearchRef.current) return;
     if (!briefing.research_stale) return;
+    // With an empty knowledge base there is nothing to search on yet — research
+    // would only ask for documents, so don't fire a pointless pass.
+    if (briefing.knowledge?.needs_documents) return;
     autoResearchRef.current = true;
     runResearch(true);
   }, [briefing, runResearch]);
@@ -367,7 +371,9 @@ export function BriefingCard({
             />
             {researching
               ? "Researching fresh tenders and funding…"
-              : `Last researched ${relativeTime(briefing.last_research_at)}`}
+              : briefing.knowledge?.needs_documents
+                ? "Waiting for your company documents"
+                : `Last researched ${relativeTime(briefing.last_research_at)}`}
           </div>
         </div>
         <Button
@@ -387,6 +393,42 @@ export function BriefingCard({
           </span>
         </Button>
       </div>
+
+      {/* Knowledge base: what the AI reads to find matching tenders */}
+      {briefing.knowledge?.needs_documents && (
+        <div className="rounded-lg border border-dashed border-emerald-300 bg-emerald-50/50 p-3 dark:border-emerald-800 dark:bg-emerald-950/20">
+          <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+            <Upload className="h-3.5 w-3.5 text-emerald-600" />
+            Upload your documents so I can find you matching tenders
+          </div>
+          <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+            I read your knowledge base — company profile, certificates and capability
+            documents — to learn what your business can do, then search for tenders that
+            match. Without it I won&apos;t guess. Add your company profile and any
+            B-BBEE, PSIRA or CIPC certificates to the Library.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="mt-2 h-7 gap-1.5 border-emerald-300 bg-background text-xs text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
+            onClick={() => {
+              setTab("library");
+              refresh();
+            }}
+          >
+            <Upload className="h-3 w-3" />
+            Go to Library
+          </Button>
+        </div>
+      )}
+      {briefing.knowledge?.ready && briefing.knowledge.services.length > 0 && (
+        <p className="text-[11px] text-muted-foreground">
+          Matching on your knowledge base:{" "}
+          <span className="font-medium text-foreground">
+            {briefing.knowledge.services.join(", ")}
+          </span>
+        </p>
+      )}
 
       {/* Closing soon */}
       {closing_soon.length > 0 && (

@@ -4,7 +4,7 @@ from datetime import date, timedelta
 import ai_agent
 import linkcheck
 import scraper
-from tests.conftest import make_company, make_user
+from tests.conftest import make_company, make_tender, make_user
 
 
 T1 = {
@@ -35,6 +35,12 @@ F2 = {
 }
 
 
+def _seed_knowledge(db, user):
+    """Research now reads the tenant's knowledge base, so give the scope some
+    history for the AI to work from before it will search."""
+    make_tender(db, user, ref="H-1", title="Historical cleaning tender", category="Cleaning Services")
+
+
 def _mock_sources(monkeypatch, tenders, funding, scores, verify=True):
     monkeypatch.setattr(scraper, "scrape_security_co_za", lambda *a, **k: tenders)
     monkeypatch.setattr(scraper, "scrape_tenderflow_co_za", lambda *a, **k: [])
@@ -59,6 +65,7 @@ def _all_pages(urls, **kwargs):
 def test_research_stores_scored_opportunities(db, monkeypatch):
     alice = make_user(db, "alice@example.com", company_name="Acme")
     make_company(db, "Acme", alice)
+    _seed_knowledge(db, alice)
     _mock_sources(
         monkeypatch,
         tenders=[T1, T2],
@@ -100,6 +107,7 @@ def test_research_stores_scored_opportunities(db, monkeypatch):
 def test_research_dedups_and_preserves_statuses(db, monkeypatch):
     alice = make_user(db, "alice@example.com", company_name="Acme")
     make_company(db, "Acme", alice)
+    _seed_knowledge(db, alice)
     _mock_sources(monkeypatch, tenders=[T1], funding=[], scores=[])
 
     ai_agent.run_research(db, alice)
@@ -132,6 +140,7 @@ def test_research_dedups_and_preserves_statuses(db, monkeypatch):
 def test_research_with_empty_sources_completes_cleanly(db, monkeypatch):
     alice = make_user(db, "alice@example.com", company_name="Acme")
     make_company(db, "Acme", alice)
+    _seed_knowledge(db, alice)
     _mock_sources(monkeypatch, tenders=[], funding=[], scores=[])
 
     result = ai_agent.run_research(db, alice)
@@ -146,8 +155,10 @@ def test_research_with_empty_sources_completes_cleanly(db, monkeypatch):
 def test_research_is_isolated_per_scope(db, monkeypatch):
     alice = make_user(db, "alice@example.com", company_name="Acme")
     make_company(db, "Acme", alice)
+    _seed_knowledge(db, alice)
     bob = make_user(db, "bob@example.com", company_name="Globex")
     make_company(db, "Globex", bob)
+    _seed_knowledge(db, bob)
     _mock_sources(monkeypatch, tenders=[T1], funding=[F1], scores=[])
 
     ai_agent.run_research(db, alice)

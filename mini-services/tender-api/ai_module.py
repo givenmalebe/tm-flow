@@ -604,20 +604,92 @@ _STOPWORDS = {
     "company", "organisation", "organization", "services", "service", "limited",
     "south", "africa", "document", "documents", "profile", "tender", "tenders",
     "what", "can", "does", "they", "their", "which", "were", "been", "into",
-    "also", "about", "holds", "organises", "organisation", "capability",
+    "also", "about", "holds", "organises", "capability", "provides", "provide",
+    "provides", "offers", "offer", "specialises", "specialize", "specializes",
+    "specialisation", "undertakes", "supplies", "delivers", "focused", "focuses",
+    "own", "its", "us", "uploaded", "including", "include", "across", "various",
+    "core", "work", "includes", "include", "activities", "activity", "business",
+    "group", "holdings", "solutions", "solution", "management", "limited", "ltd",
+    "pty", "registered", "registration", "number", "level", "based",
 }
 
 
-def _capability_terms(capability: str) -> List[str]:
-    """Pick the tenant's distinctive service phrases out of their capability text.
+def _company_name_phrases(capability: str) -> set:
+    """Normalised words of the organisation's own name, so we never treat
+    "Sparkle Cleaning" as one of its service offerings."""
+    names = set()
+    for line in str(capability or "").splitlines():
+        low = line.strip().lower()
+        if not low.startswith("company:"):
+            continue
+        # The name is only the first clause after the label — anything after a
+        # sentence break is description, not part of the name.
+        name = re.split(r"[.,;:\(\)\[\]\n]", low.split(":", 1)[1])[0].strip()
+        for w in re.findall(r"[a-z][a-z\-]+", name):
+            names.add(w)
+        if name:
+            names.add(name)
+    return names
 
-    The capability profile is free text (their own documents), so we surface the
-    most repeated service-like phrases — e.g. a cleaning company's documents
-    yield "office cleaning" and "deep cleaning". N-grams are only formed within a
-    single clause so we never invent phrases across sentence boundaries.
+
+_SERVICE_INTRO = re.compile(
+    r"(?:provides?|offers?|speciali[sz]es?\s+in|undertakes?|supplies|delivers?|"
+    r"focus(?:es)?\s+on|focused\s+on|core\s+work\s+is|work\s+includes?)\s+"
+    r"(?:the\s+|a\s+|an\s+)?([^.;\n]{3,220})",
+    re.I,
+)
+
+
+def _clean_phrase(text: str, own_words: set) -> Optional[str]:
+    """Trim a raw fragment down to a tidy 1-3 word service phrase."""
+    tokens = [w for w in re.findall(r"[a-z][a-z\-]+", str(text).lower())]
+    # Drop leading filler such as "in", "our", "the".
+    while tokens and tokens[0] in _STOPWORDS:
+        tokens.pop(0)
+    tokens = tokens[:3]
+    while tokens and tokens[-1] in _STOPWORDS:
+        tokens.pop()
+    if not tokens:
+        return None
+    if not any(len(w) > 4 for w in tokens):
+        return None
+    phrase = " ".join(tokens)
+    if phrase in own_words or all(w in own_words for w in tokens):
+        return None
+    return phrase
+
+
+def _capability_terms(capability: str) -> List[str]:
+    """Pick the tenant's service offerings out of their knowledge base.
+
+    Their uploaded documents are free text, so we look for the lists companies
+    write when describing themselves — "provides office cleaning, deep cleaning
+    and window cleaning" — and keep those service phrases. The organisation's own
+    name is never treated as a service.
     """
     if not capability:
         return []
+    own_words = _company_name_phrases(capability)
+
+    out: List[str] = []
+
+    def _add(phrase: Optional[str]) -> None:
+        if not phrase or len(out) >= 5:
+            return
+        if any(phrase in kept or kept in phrase for kept in out):
+            return
+        out.append(phrase)
+
+    # 1. Explicit service lists ("provides X, Y and Z").
+    for match in _SERVICE_INTRO.finditer(str(capability)):
+        tail = match.group(1)
+        for fragment in re.split(r",| and | & |/|;|\bor\b", tail):
+            _add(_clean_phrase(fragment, own_words))
+
+    if out:
+        return out
+
+    # 2. Fallback: repeated phrases anywhere in the documents.
     text = " ".join(str(capability).split()).lower()
     phrases: Dict[str, int] = {}
     for segment in re.split(r"[,.;:()\[\]\n/]+", text):
@@ -627,22 +699,18 @@ def _capability_terms(capability: str) -> List[str]:
                 gram = words[i: i + n]
                 if any(w in _STOPWORDS for w in gram):
                     continue
+                if all(w in own_words for w in gram):
+                    continue
                 if not any(len(w) > 4 for w in gram):
                     continue
                 key = " ".join(gram)
                 phrases[key] = phrases.get(key, 0) + 1
-    # Most repeated first, then the most specific (longest) phrase.
-    ranked = sorted(phrases.items(), key=lambda kv: (-kv[1], -len(kv[0].split())))
-    out: List[str] = []
-    for phrase, count in ranked:
+    for phrase, count in sorted(
+        phrases.items(), key=lambda kv: (-kv[1], -len(kv[0].split()))
+    ):
         if count < 2:
-            continue
-        # Skip phrases nested inside one we already kept, and vice versa.
-        if any(phrase in kept or kept in phrase for kept in out):
-            continue
-        out.append(phrase)
-        if len(out) >= 5:
             break
+        _add(phrase)
     return out
 
 
@@ -851,6 +919,8 @@ Rules:
 - Be warm and human — you're an enthusiastic teammate who already did the work before they arrived. Never sound robotic or generic.
 - Highlight the most urgent closing tender, the best-matched funding opportunity, and the biggest readiness risk, using ONLY the facts given.
 - If facts.next_action is present, make that the single most important next action you end with.
+- If facts.knowledge_base_empty is true, explain plainly that you find tenders by reading the company's knowledge base (profile, certificates, capability documents), that it is currently empty, and ask them to upload it. Do not pretend to have found relevant tenders.
+- If facts.services_known is non-empty, mention the services you learned from their documents so they can see you understood their business.
 - If nothing is closing and nothing was found yet, say that you are actively searching and opportunities will appear automatically.
 - Be a coach: end with one clear next step.
 - Plain text only. No markdown, no headings, no bullet points. Do not invent facts that are not in the data."""

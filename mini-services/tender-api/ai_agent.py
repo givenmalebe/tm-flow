@@ -393,11 +393,37 @@ def _build_news(
     return items[:limit]
 
 
+def _knowledge_state(
+    db: Session, scope: Dict[str, Any], capability: str, service_terms: List[str],
+    has_history_categories: bool,
+) -> Dict[str, Any]:
+    """What the AI currently knows about this organisation.
+
+    The knowledge base (library documents + company profile + history) is the
+    only thing that lets us match tenders to this specific tenant. When it is
+    empty we must not guess: we say so and ask for documents instead.
+    """
+    docs = (
+        db.query(LibraryDocument)
+        .filter(LibraryDocument.created_by.in_(scope["member_ids"]))
+        .count()
+    )
+    services = [t for t in (service_terms or []) if t]
+    ready = bool(services or has_history_categories)
+    return {
+        "documents": docs,
+        "services": services[:5],
+        "ready": ready,
+        "needs_documents": not ready,
+    }
+
+
 def _template_narrative(
     scope: Dict[str, Any],
     closing: List[Dict[str, Any]],
     opps: Dict[str, List[Dict[str, Any]]],
     user_name: str = "",
+    knowledge: Optional[Dict[str, Any]] = None,
 ) -> str:
     greet = (user_name or "").strip() or "there"
     name = scope["company_name"] or "your company"
@@ -405,6 +431,22 @@ def _template_narrative(
         f"Good day, {greet}! I'm the dedicated procurement success AI for {name} — "
         "my mission is to help your company win tenders and secure the funding it needs."
     ]
+
+    knowledge = knowledge or {}
+    needs_documents = bool(knowledge.get("needs_documents"))
+    if needs_documents:
+        parts.append(
+            "I find your tenders by reading your knowledge base — your company "
+            "profile, certificates and capability documents — so I only bring you "
+            f"work {name} can actually bid on. That knowledge base is still empty, "
+            "so I have not guessed at anything for you yet."
+        )
+    elif knowledge.get("services"):
+        parts.append(
+            "From your knowledge base I understand you do "
+            + ", ".join(knowledge["services"][:4])
+            + " — so that is what I search for."
+        )
     if closing:
         top = closing[0]
         parts.append(
@@ -435,6 +477,14 @@ def _template_narrative(
             f"I'm already searching for open tenders and funding for {name} — "
             "fresh opportunities will appear here automatically."
         )
+    if needs_documents:
+        # This is the one thing that unlocks matching tenders, so it ends the note.
+        parts.append(
+            "Please upload your company profile and any certificates (for example "
+            "B-BBEE, PSIRA or CIPC) into the knowledge base. As soon as you do I "
+            "will read them and start finding you tenders that match your work, "
+            "each with a working link."
+        )
     return " ".join(parts)
 
 
@@ -446,10 +496,12 @@ def _refresh_narrative(
     closing: List[Dict[str, Any]],
     opps: Dict[str, List[Dict[str, Any]]],
     user_name: str = "",
+    knowledge: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Regenerate + cache the narrative; template fallback never fails."""
     try:
         urgent = closing[0] if closing else None
+        knowledge = knowledge or {}
         facts = {
             "user_name": (user_name or (user.full_name or "")).strip(),
             "closing_soon": closing[:5],
@@ -464,7 +516,16 @@ def _refresh_narrative(
                 if urgent and urgent["outstanding_items"]
                 else None
             ),
+            "knowledge_base_empty": bool(knowledge.get("needs_documents")),
+            "documents_held": knowledge.get("documents"),
+            "services_known": knowledge.get("services"),
         }
+        if knowledge.get("needs_documents"):
+            # No knowledge base means we cannot match tenders to this company yet.
+            facts["next_action"] = (
+                "Upload your company profile and certificates to the knowledge base "
+                "so I can find tenders that match your work"
+            )
         mem_facts = {
             "mission": memory.mission,
             "goals": memory.goals,
@@ -474,7 +535,9 @@ def _refresh_narrative(
             scope["company_name"] or "", facts, mem_facts
         )
     except Exception:
-        memory.last_briefing_text = _template_narrative(scope, closing, opps, user_name)
+        memory.last_briefing_text = _template_narrative(
+            scope, closing, opps, user_name, knowledge
+        )
     memory.last_briefing_at = datetime.utcnow()
     db.commit()
 
@@ -498,6 +561,10 @@ def _research_staleness(db: Session, scope: Dict[str, Any]) -> bool:
         return datetime.utcnow() - last_run.finished_at > timedelta(hours=RESEARCH_STALE_HOURS)
     if last_run.status == "running" and last_run.created_at:
         return datetime.utcnow() - last_run.created_at > timedelta(minutes=15)
+    # A pass that stopped to ask for documents is still a fresh answer: re-running
+    # it would find nothing more until the knowledge base changes.
+    if last_run.status == "needs_documents" and last_run.created_at:
+        return datetime.utcnow() - last_run.created_at > timedelta(hours=RESEARCH_STALE_HOURS)
     return True
 
 
@@ -509,12 +576,26 @@ def build_briefing(db: Session, user: User, force_refresh: bool = False) -> Dict
     memory = get_or_create_memory(db, scope)
     user_name = _first_name(user)
 
+    # What the AI knows about this organisation, so the UI can prompt for the
+    # documents that unlock matching tenders.
+    capability = _capability_profile(db, user, scope)
+    service_terms = ai_module._capability_terms(capability)
+    history_categories = [
+        str(c[0])
+        for c in db.query(Tender.category)
+        .filter(Tender.created_by.in_(scope["member_ids"]), Tender.category.isnot(None))
+        .distinct()
+        .limit(1)
+        .all()
+    ]
+    knowledge = _knowledge_state(db, scope, capability, service_terms, bool(history_categories))
+
     stale = (
         memory.last_briefing_at is None
         or datetime.utcnow() - memory.last_briefing_at > timedelta(hours=BRIEFING_TTL_HOURS)
     )
     if force_refresh or stale:
-        _refresh_narrative(db, user, scope, memory, closing, opps, user_name)
+        _refresh_narrative(db, user, scope, memory, closing, opps, user_name, knowledge)
 
     last_run = (
         _scope_filter(db.query(AIResearchRun), AIResearchRun, scope)
@@ -537,6 +618,7 @@ def build_briefing(db: Session, user: User, force_refresh: bool = False) -> Dict
             else None
         ),
         "research_stale": _research_staleness(db, scope),
+        "knowledge": knowledge,
         "news": news,
         "news_count": len(news),
         "memory": {
@@ -853,6 +935,31 @@ def run_research(db: Session, user: User) -> Dict[str, Any]:
     if service_terms:
         category = service_terms[0]
         keywords = " ".join(service_terms)
+
+    knowledge = _knowledge_state(db, scope, capability, service_terms, bool(category))
+
+    # Without the knowledge base we cannot tell which tenders belong to this
+    # organisation, so we do not guess and flood the tenant with unrelated work.
+    if knowledge["needs_documents"]:
+        run = AIResearchRun(
+            company_id=scope["company_id"],
+            user_id=_scope_user_id(scope),
+            query=summary[:2000],
+            status="needs_documents",
+        )
+        db.add(run)
+        db.commit()
+        return {
+            "run_id": run.id,
+            "status": "needs_documents",
+            "tenders_found": 0,
+            "funding_found": 0,
+            "finance_found": 0,
+            "new_count": 0,
+            "updated_count": 0,
+            "needs_documents": True,
+            "knowledge": knowledge,
+        }
 
     # Funding programmes change slowly, so re-discovering them on every pass
     # wastes scarce AI quota. Only refresh when this scope has none, or its last

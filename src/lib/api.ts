@@ -76,6 +76,16 @@ export interface AINewsItem {
   tender_id: number | null;
 }
 
+export interface AIKnowledge {
+  /** How many documents the tenant has in their knowledge base. */
+  documents: number;
+  /** The service phrases the AI learned from their documents. */
+  services: string[];
+  ready: boolean;
+  /** True when we cannot match tenders until documents are uploaded. */
+  needs_documents: boolean;
+}
+
 export interface AIBriefing {
   scope: { company_id: number | null; company_name: string | null };
   user_name: string | null;
@@ -95,6 +105,7 @@ export interface AIBriefing {
   opportunities: { tenders: AIOpportunity[]; funding: AIOpportunity[] };
   last_research_at: string | null;
   research_stale: boolean;
+  knowledge: AIKnowledge;
   news: AINewsItem[];
   news_count: number;
   memory: AIMemory;

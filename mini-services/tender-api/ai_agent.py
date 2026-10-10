@@ -242,3 +242,188 @@ def recent_opportunity_summaries(
         }
         for o in list_opportunities(db, scope, limit=limit)
     ]
+
+
+# ---------------------- briefing ----------------------
+
+def _closing_soon_facts(db: Session, scope: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The scope's own tenders with a future closing date, soonest first."""
+    today = date.today()
+    libs = (
+        db.query(LibraryDocument)
+        .filter(LibraryDocument.created_by.in_(scope["member_ids"]))
+        .all()
+    )
+    rows = (
+        db.query(Tender)
+        .filter(Tender.created_by.in_(scope["member_ids"]), Tender.closing_date.isnot(None))
+        .all()
+    )
+    out: List[Dict[str, Any]] = []
+    for t in rows:
+        days = (t.closing_date - today).days
+        if days < 0:
+            continue
+        total = len(t.checklist_items)
+        complete = len([c for c in t.checklist_items if c.status == "Complete"])
+        expiring = [
+            d.name
+            for d in libs
+            if d.expiry_date and 0 <= (d.expiry_date - today).days <= days
+        ]
+        out.append(
+            {
+                "id": t.id,
+                "reference_number": t.reference_number,
+                "title": t.title,
+                "closing_date": t.closing_date.isoformat(),
+                "days_left": days,
+                "status": t.status,
+                "readiness_pct": round(100 * complete / total) if total else None,
+                "expiring_docs": expiring,
+            }
+        )
+    out.sort(key=lambda x: x["days_left"])
+    return out
+
+
+def _serialize_opportunity(o: AIOpportunity, today: date) -> Dict[str, Any]:
+    days = (o.closing_date - today).days if o.closing_date else None
+    return {
+        "id": o.id,
+        "type": o.type,
+        "title": o.title,
+        "provider": o.provider,
+        "category": o.category,
+        "location": o.location,
+        "closing_date": o.closing_date.isoformat() if o.closing_date else None,
+        "days_left": days if (days is None or days >= 0) else None,
+        "match_score": o.match_score,
+        "match_reason": o.match_reason,
+        "url": o.url,
+        "source_site": o.source_site,
+        "status": o.status,
+    }
+
+
+def _opportunity_facts(db: Session, scope: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+    """Open (new/seen, not-yet-closed) opportunities, best match first."""
+    today = date.today()
+    opps = list_opportunities(db, scope, statuses=("new", "seen"), limit=100)
+    tenders, funding = [], []
+    for o in opps:
+        if o.closing_date and o.closing_date < today:
+            continue
+        item = _serialize_opportunity(o, today)
+        if o.type == "tender":
+            tenders.append(item)
+        elif o.type in ("funding", "finance"):
+            funding.append(item)
+    tenders.sort(key=lambda x: (x["match_score"] is None, -(x["match_score"] or 0)))
+    funding.sort(key=lambda x: (x["match_score"] is None, -(x["match_score"] or 0)))
+    return {"tenders": tenders, "funding": funding}
+
+
+def _template_narrative(
+    scope: Dict[str, Any],
+    closing: List[Dict[str, Any]],
+    opps: Dict[str, List[Dict[str, Any]]],
+) -> str:
+    name = scope["company_name"] or "your company"
+    parts = []
+    if closing:
+        top = closing[0]
+        parts.append(
+            f"Your most urgent tender is {top['reference_number']} — {top['title']} — "
+            f"closing in {top['days_left']} day(s)."
+        )
+        incomplete = [c for c in closing if (c["readiness_pct"] or 0) < 100]
+        if incomplete:
+            parts.append(
+                f"{len(incomplete)} of your closing tenders still have outstanding checklist items."
+            )
+    else:
+        parts.append("You have no tracked tenders closing soon.")
+    t_count, f_count = len(opps["tenders"]), len(opps["funding"])
+    if t_count or f_count:
+        parts.append(
+            f"I've found {t_count} open tender(s) and {f_count} funding option(s) "
+            f"matching {name} — review them below and ask me about any of them."
+        )
+    else:
+        parts.append(
+            f"Run your first research below and I'll hunt open tenders and funding for {name}."
+        )
+    return (
+        f"Hi! I'm your dedicated procurement success AI for {name}. " + " ".join(parts)
+    )
+
+
+def _refresh_narrative(
+    db: Session,
+    user: User,
+    scope: Dict[str, Any],
+    memory: AICompanyMemory,
+    closing: List[Dict[str, Any]],
+    opps: Dict[str, List[Dict[str, Any]]],
+) -> None:
+    """Regenerate + cache the narrative; template fallback never fails."""
+    try:
+        facts = {
+            "closing_soon": closing[:5],
+            "tenders_found": len(opps["tenders"]),
+            "funding_found": len(opps["funding"]),
+            "top_opportunities": (opps["tenders"][:3] + opps["funding"][:3]),
+        }
+        mem_facts = {
+            "mission": memory.mission,
+            "goals": memory.goals,
+            "preferences": memory.preferences,
+        }
+        memory.last_briefing_text = ai_module.generate_briefing(
+            scope["company_name"] or "", facts, mem_facts
+        )
+    except Exception:
+        memory.last_briefing_text = _template_narrative(scope, closing, opps)
+    memory.last_briefing_at = datetime.utcnow()
+    db.commit()
+
+
+def build_briefing(db: Session, user: User, force_refresh: bool = False) -> Dict[str, Any]:
+    """The full greeting payload. No Gemini on the hot path when cached."""
+    scope = resolve_scope(db, user)
+    closing = _closing_soon_facts(db, scope)
+    opps = _opportunity_facts(db, scope)
+    memory = get_or_create_memory(db, scope)
+
+    stale = (
+        memory.last_briefing_at is None
+        or datetime.utcnow() - memory.last_briefing_at > timedelta(hours=BRIEFING_TTL_HOURS)
+    )
+    if force_refresh or stale:
+        _refresh_narrative(db, user, scope, memory, closing, opps)
+
+    last_run = (
+        _scope_filter(db.query(AIResearchRun), AIResearchRun, scope)
+        .order_by(AIResearchRun.created_at.desc())
+        .first()
+    )
+    return {
+        "scope": {"company_id": scope["company_id"], "company_name": scope["company_name"]},
+        "narrative": memory.last_briefing_text,
+        "narrative_generated_at": (
+            memory.last_briefing_at.isoformat() if memory.last_briefing_at else None
+        ),
+        "closing_soon": closing,
+        "opportunities": opps,
+        "last_research_at": (
+            last_run.created_at.isoformat()
+            if last_run and last_run.created_at
+            else None
+        ),
+        "memory": {
+            "mission": memory.mission,
+            "goals": memory.goals or [],
+            "preferences": memory.preferences,
+        },
+    }

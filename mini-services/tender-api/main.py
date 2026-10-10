@@ -3563,6 +3563,16 @@ def ai_update_memory(
     return {"mission": m.mission, "goals": m.goals or [], "preferences": m.preferences}
 
 
+# ---------------------- AI Agent: the daily briefing ----------------------
+
+@app.get("/api/ai/briefing")
+def ai_briefing(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Everything the AI greets the user with when they open the tab:
+    closing-soon tenders, researched funding/tenders, and the cached narrative."""
+    import ai_agent
+    return ai_agent.build_briefing(db, user)
+
+
 # ---------------------- Search/Filter helper ----------------------
 
 @app.get("/api/tenders/search")

@@ -49,6 +49,67 @@ interface RequestOptions {
   skipAuth?: boolean;
 }
 
+export interface AIOpportunity {
+  id: number;
+  type: "tender" | "funding" | "finance";
+  title: string;
+  provider: string | null;
+  category: string | null;
+  location: string | null;
+  closing_date: string | null;
+  days_left: number | null;
+  match_score: number | null;
+  match_reason: string | null;
+  url: string | null;
+  source_site: string | null;
+  status: string;
+}
+
+export interface AIBriefing {
+  scope: { company_id: number | null; company_name: string | null };
+  narrative: string | null;
+  narrative_generated_at: string | null;
+  closing_soon: {
+    id: number;
+    reference_number: string;
+    title: string;
+    closing_date: string;
+    days_left: number;
+    status: string;
+    readiness_pct: number | null;
+    expiring_docs: string[];
+  }[];
+  opportunities: { tenders: AIOpportunity[]; funding: AIOpportunity[] };
+  last_research_at: string | null;
+  memory: AIMemory;
+}
+
+export interface AIMemory {
+  mission: string | null;
+  goals: string[];
+  preferences: string | null;
+}
+
+export interface AIResearchResult {
+  run_id: number;
+  status: string;
+  tenders_found: number;
+  funding_found: number;
+  finance_found: number;
+  new_count: number;
+  updated_count: number;
+}
+
+export interface AIChatMessage {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  error: boolean;
+  context_tenders: number | null;
+  user_name: string | null;
+  created_at: string | null;
+}
+
 async function request<T = any>(
   path: string,
   options: RequestOptions = {}
@@ -621,6 +682,45 @@ export const api = {
       method: "POST",
       body: { question, tender_id: tenderId },
     });
+  },
+
+  // ---- AI Agent (company-scoped procurement assistant) ----
+  async getBriefing() {
+    return request<AIBriefing>(`/ai/briefing`);
+  },
+
+  async runResearch() {
+    return request<AIResearchResult>(`/ai/research`, { method: "POST" });
+  },
+
+  async getChatHistory(limit = 50) {
+    return request<{ items: AIChatMessage[] }>(`/ai/chat-history?limit=${limit}`);
+  },
+
+  async clearChatHistory() {
+    return request<{ cleared: number }>(`/ai/chat-history`, { method: "DELETE" });
+  },
+
+  async getMemory() {
+    return request<AIMemory>(`/ai/memory`);
+  },
+
+  async updateMemory(payload: Partial<AIMemory>) {
+    return request<AIMemory>(`/ai/memory`, { method: "PUT", body: payload });
+  },
+
+  async importOpportunity(oppId: number) {
+    return request<{ tender_id: number; opportunity_id: number }>(
+      `/ai/opportunities/${oppId}/import`,
+      { method: "POST" }
+    );
+  },
+
+  async dismissOpportunity(oppId: number) {
+    return request<{ opportunity_id: number; status: string }>(
+      `/ai/opportunities/${oppId}/dismiss`,
+      { method: "POST" }
+    );
   },
 
   // ---- Reminders ----

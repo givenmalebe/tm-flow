@@ -44,6 +44,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { api } from "@/lib/api";
+import { BriefingCard } from "@/components/dashboard/tabs/assistant-briefing";
 import { useDashboardStore } from "@/lib/dashboard-store";
 import { cn } from "@/lib/utils";
 
@@ -564,6 +565,7 @@ export function AssistantTab() {
   const [totalLibraryDocs, setTotalLibraryDocs] = useState<number | null>(null);
   const [showEmptyBanner, setShowEmptyBanner] = useState(false);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -590,6 +592,34 @@ export function AssistantTab() {
       })
       .finally(() => {
         if (mounted) setTendersLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Load the team-shared chat history so conversations persist across visits.
+  useEffect(() => {
+    let mounted = true;
+    api
+      .getChatHistory(50)
+      .then((res) => {
+        if (!mounted) return;
+        const restored = (res.items || []).map((m) => ({
+          id: String(m.id),
+          role: m.role,
+          content: m.content,
+          error: m.error,
+          contextTenders: m.context_tenders ?? undefined,
+          createdAt: m.created_at ? Date.parse(m.created_at) : Date.now(),
+        })) as ChatMessage[];
+        setMessages(restored);
+      })
+      .catch(() => {
+        /* history is best-effort */
+      })
+      .finally(() => {
+        if (mounted) setHistoryLoaded(true);
       });
     return () => {
       mounted = false;
@@ -710,6 +740,7 @@ export function AssistantTab() {
   const handleClearChat = () => {
     setMessages([]);
     setShowEmptyBanner(false);
+    api.clearChatHistory().catch(() => {});
     toast.success("Chat cleared");
   };
 
@@ -854,8 +885,12 @@ export function AssistantTab() {
         >
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-card via-transparent to-card" />
           <div className="relative min-h-full px-3 py-4 sm:px-5">
+            <div className="mb-4">
+              <BriefingCard onFocusTender={handleFocusChange} />
+            </div>
+
             <AnimatePresence initial={false}>
-              {!hasMessages && !loading && (
+              {!hasMessages && !loading && historyLoaded && (
                 <EmptyHero key="empty" onPick={handlePickQuestion} />
               )}
             </AnimatePresence>

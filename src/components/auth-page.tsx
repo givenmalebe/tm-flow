@@ -219,9 +219,7 @@ export function AuthPage({
           <Card className="rounded-2xl border-border/60 shadow-lg shadow-emerald-900/5">
             <CardHeader className="space-y-3">
               <div className="flex items-center gap-2.5">
-                <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
-                  <FileText className="size-5" />
-                </div>
+                <img src="/logo.svg" alt="TM Flow" className="size-9 rounded-lg shadow-sm" />
                 <span className="text-lg font-semibold tracking-tight">
                   Tender<span className="text-primary">Flow</span>
                 </span>
@@ -716,9 +714,7 @@ function LeftPanel() {
       <div className="relative z-10 flex min-h-screen flex-col">
         {/* Logo */}
         <div className="flex items-center gap-2.5">
-          <div className="flex size-10 items-center justify-center rounded-xl bg-white/15 ring-1 ring-white/30 backdrop-blur-sm">
-            <FileText className="size-5" />
-          </div>
+          <img src="/logo.svg" alt="TM Flow" className="size-10 rounded-xl shadow-sm" />
           <span className="text-xl font-semibold tracking-tight">TM Flow</span>
         </div>
 

@@ -172,9 +172,7 @@ export function DashboardShell() {
             <SheetContent side="left" className="w-72 p-0">
               <SheetHeader className="px-4 py-4 border-b">
                 <SheetTitle className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
-                    <FileStack className="h-4 w-4 text-primary-foreground" />
-                  </div>
+                  <img src="/logo.svg" alt="TM Flow" className="h-8 w-8 rounded-lg" />
                   TM Flow
                 </SheetTitle>
               </SheetHeader>
@@ -200,9 +198,7 @@ export function DashboardShell() {
 
           {/* Logo / brand */}
           <div className="flex items-center gap-2 lg:gap-3">
-            <div className="h-9 w-9 rounded-lg bg-primary flex items-center justify-center shadow-sm">
-              <FileStack className="h-5 w-5 text-primary-foreground" />
-            </div>
+            <img src="/logo.svg" alt="TM Flow" className="h-9 w-9 rounded-lg shadow-sm" />
             <div className="hidden sm:block">
               <div className="text-base font-semibold leading-tight">TM Flow</div>
               <div className="text-[10px] text-muted-foreground leading-tight">

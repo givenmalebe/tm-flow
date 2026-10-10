@@ -854,6 +854,22 @@ def run_research(db: Session, user: User) -> Dict[str, Any]:
         category = service_terms[0]
         keywords = " ".join(service_terms)
 
+    # Funding programmes change slowly, so re-discovering them on every pass
+    # wastes scarce AI quota. Only refresh when this scope has none, or its last
+    # successful funding pass is over a day old. (Read before we insert today's
+    # run, otherwise we would always match the empty run we just created.)
+    prev_run = (
+        _scope_filter(db.query(AIResearchRun), AIResearchRun, scope)
+        .order_by(AIResearchRun.created_at.desc())
+        .first()
+    )
+    funding_is_fresh = bool(
+        prev_run
+        and prev_run.funding_found
+        and prev_run.created_at
+        and (datetime.utcnow() - prev_run.created_at) < timedelta(hours=24)
+    )
+
     run = AIResearchRun(
         company_id=scope["company_id"],
         user_id=_scope_user_id(scope),
@@ -869,14 +885,18 @@ def run_research(db: Session, user: User) -> Dict[str, Any]:
         # Scrapers and funding discovery run concurrently to fit the proxy budget.
         tender_raw: List[Dict[str, Any]] = []
         funding_raw: List[Dict[str, Any]] = []
+
         with ThreadPoolExecutor(max_workers=4) as pool:
             futures = [
                 pool.submit(scraper.scrape_security_co_za, category, keywords, location, 20),
                 pool.submit(scraper.scrape_tenderflow_co_za, category, keywords, location, 20),
                 pool.submit(scraper.scrape_etenders_opportunities, category, keywords, location, 20),
             ]
-            funding_future = pool.submit(ai_module.discover_funding, summary, location)
-            for future in as_completed(futures + [funding_future]):
+            funding_future = None
+            if not funding_is_fresh and ai_module.gemini_available():
+                funding_future = pool.submit(ai_module.discover_funding, summary, location)
+            all_futures = futures + ([funding_future] if funding_future else [])
+            for future in as_completed(all_futures):
                 is_funding = future is funding_future
                 try:
                     result = future.result(timeout=SCRAPER_TIMEOUT_S + 5)
@@ -890,7 +910,9 @@ def run_research(db: Session, user: User) -> Dict[str, Any]:
 
         # Tenant-specific AI web search (Google grounding) — now that we know the
         # organisation, this is the main source of matched tenders with real pages.
-        if (time.monotonic() - started) < RESEARCH_SOFT_DEADLINE_S - 22:
+        # Skipped when the AI quota is spent; the portal scrapers still return
+        # real, verified tenders in that case.
+        if ai_module.gemini_available() and (time.monotonic() - started) < RESEARCH_SOFT_DEADLINE_S - 22:
             try:
                 web = ai_module.discover_tenders(
                     category, keywords, location, num_results=15,
@@ -944,7 +966,7 @@ def run_research(db: Session, user: User) -> Dict[str, Any]:
         # Score all candidates in one batched call.
         ordered = list(candidates.values())
         scores = {}
-        if ordered:
+        if ordered and ai_module.gemini_available():
             try:
                 scores = {
                     s["index"]: s

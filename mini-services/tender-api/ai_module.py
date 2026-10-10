@@ -55,13 +55,46 @@ GEMINI_TIMEOUT = 120.0
 # spikes; retrying transient statuses clears most of those failures.
 GEMINI_RETRIES = 2
 GEMINI_RETRY_DELAY = 5.0
-GEMINI_RETRY_STATUS = {429, 500, 502, 503, 504}
+GEMINI_RETRY_STATUS = {500, 502, 503, 504}
+
+# The Gemini free tier allows only a small number of requests per model per day.
+# Once we are throttled, every further call fails, so we stop calling entirely
+# until the quota resets instead of making each feature fail slowly. The scrapers
+# keep working meanwhile, so research still returns real tenders.
+_QUOTA_COOLDOWN_UNTIL = 0.0
+_DEFAULT_QUOTA_COOLDOWN_S = 3600.0
+
+
+def _parse_retry_seconds(text: str) -> Optional[float]:
+    """Pull 'retry in 10h34m2.9s' out of a quota error message."""
+    m = re.search(r"retry in\s*([0-9hms.]+)", text or "", re.I)
+    if not m:
+        return None
+    total = 0.0
+    for num, unit in re.findall(r"([0-9.]+)([hms])", m.group(1), re.I):
+        total += float(num) * {"h": 3600.0, "m": 60.0, "s": 1.0}[unit.lower()]
+    return total or None
+
+
+def gemini_available() -> bool:
+    """False while the daily quota is known to be exhausted."""
+    return time.monotonic() >= _QUOTA_COOLDOWN_UNTIL
+
+
+def _trip_quota_cooldown(body: str) -> None:
+    global _QUOTA_COOLDOWN_UNTIL
+    wait = _parse_retry_seconds(body) or _DEFAULT_QUOTA_COOLDOWN_S
+    _QUOTA_COOLDOWN_UNTIL = time.monotonic() + max(60.0, wait)
 
 
 def _gemini_post(payload: Dict[str, Any], timeout: float) -> Dict[str, Any]:
     """POST to the Gemini generateContent endpoint, retrying transient failures."""
     if not GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY is not set")
+    if not gemini_available():
+        raise RuntimeError(
+            "Gemini daily quota reached — AI features are paused until the quota resets."
+        )
     url = f"{GEMINI_BASE_URL}/models/{GEMINI_MODEL}:generateContent"
     headers = {"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"}
 
@@ -70,6 +103,12 @@ def _gemini_post(payload: Dict[str, Any], timeout: float) -> Dict[str, Any]:
         response = httpx.post(url, headers=headers, json=payload, timeout=timeout)
         if response.status_code == 200:
             return response.json()
+        # A quota 429 will not clear by retrying; stop the whole service instead.
+        if response.status_code == 429:
+            _trip_quota_cooldown(response.text)
+            raise RuntimeError(
+                "Gemini daily quota reached — AI features are paused until the quota resets."
+            )
         last_error = f"HTTP {response.status_code}: {response.text[:500]}"
         if response.status_code in GEMINI_RETRY_STATUS and attempt < GEMINI_RETRIES:
             time.sleep(GEMINI_RETRY_DELAY * (attempt + 1))

@@ -3507,6 +3507,17 @@ def ai_assistant(payload: AIQuestion, db: Session = Depends(get_db), user: User 
     try:
         answer = ai_module.assistant_answer(question, context)
     except Exception as exc:
+        if not ai_module.gemini_available():
+            # Daily AI quota spent — say so plainly instead of leaking a raw
+            # provider error. Nothing is saved, and we never fake a reply.
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "The AI assistant has reached its daily free usage limit and is "
+                    "paused until the quota resets. Your tenders, documents and "
+                    "opportunities are all still available."
+                ),
+            )
         raise HTTPException(
             status_code=502,
             detail=f"The AI is unavailable right now. Please try again. ({exc})",

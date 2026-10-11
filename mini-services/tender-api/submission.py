@@ -29,6 +29,41 @@ STATUS_FAIL = "fail"
 STATUS_WARN = "warn"
 
 
+def _writable_type_for(requirement_name: str) -> Optional[str]:
+    """Map a checklist requirement to a document the AI can write.
+
+    A checklist item like "Methodology" or "Pricing schedule" is not a
+    certificate we must hold - it is something we must produce. Recognising
+    that here keeps a genuinely missing certificate from being confused with a
+    document the AI can simply write for this bid.
+    """
+    name = (requirement_name or "").lower()
+    mapping = (
+        ("methodology", "method_statement"),
+        ("method statement", "method_statement"),
+        ("implementation", "implementation_plan"),
+        ("technical", "technical_proposal"),
+        ("pricing schedule", "pricing_schedule"),
+        ("pricing", "pricing_schedule"),
+        ("organogram", "organogram"),
+        ("risk assessment", "risk_assessment"),
+        ("risk", "risk_assessment"),
+        ("sop", "sops"),
+        ("reference", "references"),
+        ("method_statement", "method_statement"),
+        ("business plan", "business_plan"),
+        ("company profile", "company_profile"),
+        ("cover letter", "cover_letter"),
+        ("declaration", "signed_declarations"),
+        ("appendix", "appendices"),
+        ("table of contents", "table_of_contents"),
+    )
+    for needle, doc_type in mapping:
+        if needle in name:
+            return doc_type
+    return None
+
+
 def _check(key: str, label: str, status: str, detail: str,
            blocking: bool = True, items: Optional[List[str]] = None) -> Dict[str, Any]:
     return {
@@ -109,7 +144,24 @@ def build_submission_readiness(
         }
         for c in tender.checklist_items
     ]
-    pack = ai_module.build_document_pack(checklist, library_docs, generated_docs, [])
+    generated_types = {g.get("doc_type") for g in generated_docs}
+    # Checklist items that describe something to WRITE (not a certificate to
+    # hold) join the pack as content documents, so a missing methodology is
+    # reported honestly as "we can write this" rather than "you must supply it".
+    writable = []
+    seen_writable = set()
+    for item in checklist:
+        doc_type = _writable_type_for(item.get("name", ""))
+        if not doc_type or doc_type in seen_writable or doc_type in generated_types:
+            continue
+        seen_writable.add(doc_type)
+        writable.append({
+            "doc_type": doc_type,
+            "reason": f"Required by this tender: {item.get('name')}",
+            "priority": "essential" if item.get("mandatory", True) else "recommended",
+        })
+
+    pack = ai_module.build_document_pack(checklist, library_docs, generated_docs, writable)
 
     # ---- 1. Tender documents uploaded -------------------------------------
     tender_docs = _tender_documents(tender)

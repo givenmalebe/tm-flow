@@ -12,6 +12,7 @@ from typing import List, Optional, Any
 from pathlib import Path
 
 from fastapi import FastAPI, Depends, HTTPException, Request, UploadFile, File, Form, Query, Header
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
@@ -3387,7 +3388,7 @@ def submit_bid(
         "submitted": True,
         "bid_id": bid.id,
         "status": bid.status,
-        "reference_number": bid.confirmation_reference,
+        "reference_number": sub.confirmation_reference,
         "issued_tender_id": issued.id,
         "issuer": issuer.name if issuer else None,
         "documents_attached": len(bid.documents) if bid.documents else 0,

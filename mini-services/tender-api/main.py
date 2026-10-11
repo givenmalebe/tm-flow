@@ -649,16 +649,50 @@ def complete_onboarding(
     # Update user's company name
     if payload.get("company_name"):
         user.company_name = payload["company_name"]
+
+    # Declaring how the organisation uses the platform: it bids for work, or it
+    # issues tenders. Without this every account defaulted to "applicant" and
+    # the issuer portal could never be reached.
+    requested_type = str(payload.get("account_type") or "").strip().lower()
+    if requested_type in ("issuer", "applicant"):
+        user.account_type = requested_type
+
     user.onboarding_completed = True
     db.commit()
     db.refresh(user)
-    # Every real user gets a bidder company scope from day one.
+
+    # Bidder companies are bootstrapped here; issuer accounts get their issuing
+    # scope from /api/issuer/register-company instead.
     try:
         import ai_agent
         ai_agent.ensure_company_bootstrap(db, user)
     except Exception:
         pass
     return {"onboarding_completed": True, "user": UserOut.model_validate(user).model_dump()}
+
+
+@app.post("/api/auth/account-type")
+def set_account_type(
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Record how this organisation uses the platform: bidder or issuer.
+
+    Called straight after Firebase sign-up, because the backend user row is
+    created on the first authenticated request and would otherwise always be
+    an applicant — leaving the issuer portal unreachable.
+    """
+    requested = str((payload or {}).get("account_type") or "").strip().lower()
+    if requested not in ("issuer", "applicant"):
+        raise HTTPException(
+            status_code=400, detail="account_type must be 'applicant' or 'issuer'"
+        )
+    if user.account_type != requested:
+        user.account_type = requested
+        db.commit()
+        db.refresh(user)
+    return {"account_type": user.account_type, "user": UserOut.model_validate(user).model_dump()}
 
 
 @app.post("/api/company-profile/company-profile-doc")

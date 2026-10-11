@@ -98,7 +98,12 @@ export function Onboarding() {
     setSaving(true);
     try {
       await api.updateCompanyProfile(form);
-      await api.completeOnboarding({ company_name: form.company_name });
+      // Carry the bidder/issuer choice through, so an issuing organisation is
+      // never forced into the bidder scope.
+      await api.completeOnboarding({
+        company_name: form.company_name,
+        account_type: user?.account_type ?? "applicant",
+      });
       // The onboarding flag is read from SQL Connect by auth-context, so it has
       // to be set there too. Without this, refreshUser() still reports
       // onboarding_completed=false and the app stays on this screen.

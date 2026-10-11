@@ -150,6 +150,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const cred = await createUserWithEmailAndPassword(getFirebaseAuth(), email, password);
     await updateProfile(cred.user, { displayName: full_name });
     markFreshLogin();
+
+    // Record bidder vs issuer on the backend. The backend user row is created on
+    // this very request, so without this every account stayed an applicant and
+    // the issuer portal could never be reached.
+    const type = _account_type === "issuer" ? "issuer" : "applicant";
+    try {
+      const idToken = await cred.user.getIdToken();
+      const res = await fetch("/api/auth/account-type", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ account_type: type }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.user) {
+          localStorage.setItem("tenderflow_user", JSON.stringify(data.user));
+        }
+      }
+    } catch {
+      // A failed preference must never block sign-up; the account still works.
+    }
     // The profile row and tenancy are written by the onAuthStateChanged
     // handler via loadProfile, so the caller does not write them here.
   };

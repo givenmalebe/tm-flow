@@ -692,6 +692,14 @@ export const api = {
     });
   },
 
+  /** Tell the backend whether this account bids for work or issues tenders. */
+  async setAccountType(accountType: "applicant" | "issuer") {
+    return request<{ account_type: string; user: any }>(`/auth/account-type`, {
+      method: "POST",
+      body: { account_type: accountType },
+    });
+  },
+
   async uploadCompanyProfileDoc(file: File) {
     const form = new FormData();
     form.append("file", file);

@@ -111,6 +111,41 @@ export interface AIBriefing {
   memory: AIMemory;
 }
 
+/** One document this tender needs, with its real status. */
+export interface PackItem {
+  key: string;
+  doc_type?: string;
+  title: string;
+  kind: "compliance" | "content";
+  mandatory: boolean;
+  requirement_reason: string;
+  priority: string;
+  editable: boolean;
+  /** ready = we hold it, generated = we wrote it, missing/expired = outstanding */
+  status: "ready" | "generated" | "missing" | "expired" | "expiring";
+  generated_id: number | null;
+  library_document_id: number | null;
+  library_status: string | null;
+  library_expiry: string | null;
+}
+
+export interface DocumentPackResponse {
+  tender_id: number;
+  items: PackItem[];
+  summary: {
+    total: number;
+    ready: number;
+    generated: number;
+    missing: number;
+    expired: number;
+    expiring: number;
+    outstanding: number;
+  };
+  library_documents?: any[];
+  written?: any[];
+  failed?: any[];
+}
+
 export interface AIMemory {
   mission: string | null;
   goals: string[];
@@ -674,6 +709,27 @@ export const api = {
       method: "PUT",
       body: payload,
     });
+  },
+
+  /** The documents this tender actually needs, each resolved to a real status. */
+  async getDocumentPack(tenderId: number) {
+    return request<DocumentPackResponse>(`/tenders/${tenderId}/documents/pack`);
+  },
+
+  /** Link library documents, write the ones we can, and report what is missing. */
+  async prepareDocuments(tenderId: number, docTypes?: string[]) {
+    return request<DocumentPackResponse & { written: any[]; failed: any[] }>(
+      `/tenders/${tenderId}/documents/prepare`,
+      { method: "POST", body: { doc_types: docTypes } }
+    );
+  },
+
+  /** Ask the AI to revise a prepared document; you review and edit afterwards. */
+  async aiEditDocument(tenderId: number, docId: number, instruction: string) {
+    return request<{ id: number; content: string; updated: boolean; message?: string }>(
+      `/tenders/${tenderId}/documents/generated/${docId}/ai-edit`,
+      { method: "POST", body: { instruction } }
+    );
   },
 
   async generateDocumentByPrompt(tenderId: number, prompt: string, title?: string) {

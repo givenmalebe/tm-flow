@@ -2756,24 +2756,14 @@ def generate_document(
     if not tender:
         raise HTTPException(status_code=404, detail="Tender not found")
 
-    # Get company profile
-    profile = db.query(CompanyProfile).filter(CompanyProfile.user_id == user.id).first()
-    company = {
-        "company_name": profile.company_name if profile else (user.company_name or user.full_name),
-        "registration_number": profile.registration_number if profile else None,
-        "vat_number": profile.vat_number if profile else None,
-        "psira_number": profile.psira_number if profile else None,
-        "bbbbee_level": profile.bbbbee_level if profile else None,
-        "address": profile.address if profile else None,
-        "phone": profile.phone if profile else None,
-        "email": profile.email if profile else user.email,
-        "website": profile.website if profile else None,
-        "director_name": profile.director_name if profile else user.full_name,
-        "director_title": profile.director_title if profile else "Director",
-        "organogram_text": profile.organogram_text if profile else None,
-        "signature_url": f"/uploads/{profile.signature_path}?XTransformPort=8000" if profile and profile.signature_path else None,
-        "letterhead_url": f"/uploads/{profile.letterhead_path}?XTransformPort=8000" if profile and profile.letterhead_path else None,
-    }
+    # Get company profile (+ what the AI knows from the knowledge base)
+    company = _company_for_generation(db, user)
+    company.setdefault("signature_url",
+        f"/uploads/{profile.signature_path}?XTransformPort=8000"
+        if profile and profile.signature_path else None)
+    company.setdefault("letterhead_url",
+        f"/uploads/{profile.letterhead_path}?XTransformPort=8000"
+        if profile and profile.letterhead_path else None)
 
     tender_data = {
         "reference_number": tender.reference_number,
@@ -2858,6 +2848,266 @@ def delete_generated_document(tender_id: int, doc_id: int, db: Session = Depends
     db.delete(doc)
     db.commit()
     return {"deleted": True}
+
+
+def _scoped_library_docs(db: Session, user: User) -> list:
+    """The caller's compliance library, with expiry status resolved."""
+    import ai_agent as _agent
+
+    scope = _agent.resolve_scope(db, user)
+    today = date.today()
+    out = []
+    for d in db.query(LibraryDocument).filter(
+        LibraryDocument.created_by.in_(scope["member_ids"])
+    ).all():
+        days_to_expiry = None
+        doc_status = "Active"
+        if d.expiry_date:
+            days_to_expiry = (d.expiry_date - today).days
+            if days_to_expiry < 0:
+                doc_status = "Expired"
+            elif days_to_expiry <= 30:
+                doc_status = "Expiring Soon"
+        out.append({
+            "id": d.id, "name": d.name, "category": d.category,
+            "filename": d.filename, "file_path": d.file_path, "file_type": d.file_type,
+            "expiry_date": d.expiry_date.isoformat() if d.expiry_date else None,
+            "days_to_expiry": days_to_expiry, "status": doc_status,
+        })
+    return out
+
+
+def _tender_for_pack(tender_id: int, db: Session):
+    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not tender:
+        raise HTTPException(status_code=404, detail="Tender not found")
+    return tender
+
+
+def _pack_inputs(tender, db: Session, user: User):
+    checklist = [
+        {
+            "name": c.name, "status": c.status, "category": c.category,
+            "mandatory": c.mandatory, "description": c.description,
+            "library_category": c.library_category,
+            "linked_library_doc_id": c.linked_library_doc_id,
+        }
+        for c in tender.checklist_items
+    ]
+    library_docs = _scoped_library_docs(db, user)
+    generated = [
+        {"id": g.id, "doc_type": g.doc_type, "title": g.title}
+        for g in db.query(GeneratedDocument).filter(
+            GeneratedDocument.tender_id == tender.id
+        ).all()
+    ]
+    return checklist, library_docs, generated
+
+
+def _company_for_generation(db: Session, user: User) -> dict:
+    """Company facts + what the AI knows from the knowledge base, for writing docs."""
+    import ai_agent as _agent
+
+    profile = db.query(CompanyProfile).filter(CompanyProfile.user_id == user.id).first()
+    company = {
+        "company_name": profile.company_name if profile else (user.company_name or user.full_name),
+        "registration_number": profile.registration_number if profile else None,
+        "vat_number": profile.vat_number if profile else None,
+        "psira_number": profile.psira_number if profile else None,
+        "bbbbee_level": profile.bbbbee_level if profile else None,
+        "address": profile.address if profile else None,
+        "phone": profile.phone if profile else None,
+        "email": profile.email if profile else user.email,
+        "website": profile.website if profile else None,
+        "director_name": profile.director_name if profile else user.full_name,
+        "director_title": profile.director_title if profile else "Director",
+        "organogram_text": profile.organogram_text if profile else None,
+    }
+    scope = _agent.resolve_scope(db, user)
+    try:
+        company["knowledge_base"] = _agent._capability_profile(db, user, scope)[:6000]
+    except Exception:
+        company["knowledge_base"] = ""
+    return company
+
+
+@app.get("/api/tenders/{tender_id}/documents/pack")
+def get_document_pack(
+    tender_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """The documents this tender actually needs, each resolved to its real status.
+
+    Compliance items (CIPC, B-BBEE, PSIRA, tax clearance...) are matched against
+    the tenant's library; documents we can write are matched against what has
+    already been generated. Anything unmatched is reported as MISSING.
+    """
+    tender = _tender_for_pack(tender_id, db)
+    checklist, library_docs, generated = _pack_inputs(tender, db, user)
+
+    extracted = tender.ai_extracted_info or {}
+    smart_docs = []
+    if extracted and not extracted.get("_error"):
+        try:
+            smart_docs = ai_module.analyze_required_documents(extracted, {
+                "reference_number": tender.reference_number,
+                "title": tender.title,
+                "client_company": tender.client_company,
+                "scope_of_work": tender.scope_of_work,
+            })
+        except Exception:
+            smart_docs = []
+
+    pack = ai_module.build_document_pack(checklist, library_docs, generated, smart_docs)
+    return {
+        "tender_id": tender_id,
+        "items": pack,
+        "summary": ai_module.document_pack_summary(pack),
+        "library_documents": library_docs,
+    }
+
+
+@app.post("/api/tenders/{tender_id}/documents/prepare")
+def prepare_documents(
+    tender_id: int,
+    payload: dict = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Bring together every document this tender needs, in one action.
+
+    - compliance documents are linked from the library (never invented);
+    - documents we can write are generated from the tenant's knowledge base;
+    - anything that cannot be produced is reported as missing so the user
+      knows exactly what they must still obtain.
+    """
+    payload = payload or {}
+    only = payload.get("doc_types")
+    tender = _tender_for_pack(tender_id, db)
+    checklist, library_docs, generated = _pack_inputs(tender, db, user)
+
+    extracted = tender.ai_extracted_info or {}
+    smart_docs = []
+    if extracted and not extracted.get("_error"):
+        try:
+            smart_docs = ai_module.analyze_required_documents(extracted, {
+                "reference_number": tender.reference_number,
+                "title": tender.title,
+                "client_company": tender.client_company,
+                "scope_of_work": tender.scope_of_work,
+            })
+        except Exception:
+            smart_docs = []
+
+    pack = ai_module.build_document_pack(checklist, library_docs, generated, smart_docs)
+
+    tender_data = {
+        "reference_number": tender.reference_number,
+        "title": tender.title,
+        "client_company": tender.client_company,
+        "location_site": tender.location_site,
+        "contract_period": tender.contract_period,
+        "scope_of_work": tender.scope_of_work,
+        "estimated_value": tender.estimated_value,
+    }
+    company = _company_for_generation(db, user)
+
+    written, failed = [], []
+    for entry in pack:
+        if entry["kind"] != "content" or entry.get("status") == "generated":
+            continue
+        if only and entry.get("doc_type") not in only:
+            continue
+        doc_type = entry["doc_type"]
+        try:
+            generator = ai_module.DOCUMENT_GENERATORS[doc_type]
+            content = generator(tender_data, extracted, company)
+        except Exception as exc:
+            failed.append({"doc_type": doc_type, "title": entry["title"],
+                           "error": str(exc)[:160]})
+            continue
+        if not content or content.startswith("Document generation failed") \
+                or content.startswith("[AI edit unavailable"):
+            failed.append({"doc_type": doc_type, "title": entry["title"],
+                           "error": "AI unavailable"})
+            continue
+
+        info = ai_module.DOCUMENT_TYPE_INFO[doc_type]
+        title = f"{info['title']} — {tender.reference_number}"
+        existing = db.query(GeneratedDocument).filter(
+            GeneratedDocument.tender_id == tender_id,
+            GeneratedDocument.doc_type == doc_type,
+        ).first()
+        if existing:
+            existing.title = title
+            existing.content = content
+            existing.updated_at = datetime.utcnow()
+        else:
+            db.add(GeneratedDocument(tender_id=tender_id, doc_type=doc_type,
+                                     title=title, content=content))
+        written.append({"doc_type": doc_type, "title": entry["title"]})
+    db.commit()
+
+    checklist, library_docs, generated = _pack_inputs(tender, db, user)
+    pack = ai_module.build_document_pack(checklist, library_docs, generated, smart_docs)
+    return {
+        "tender_id": tender_id,
+        "written": written,
+        "failed": failed,
+        "items": pack,
+        "summary": ai_module.document_pack_summary(pack),
+    }
+
+
+@app.post("/api/tenders/{tender_id}/documents/generated/{doc_id}/ai-edit")
+def ai_edit_document(
+    tender_id: int,
+    doc_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Let the AI revise a prepared document; the user reviews and edits afterwards."""
+    doc = db.query(GeneratedDocument).filter(
+        GeneratedDocument.id == doc_id,
+        GeneratedDocument.tender_id == tender_id,
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    instruction = (payload or {}).get("instruction")
+    if not instruction or not str(instruction).strip():
+        raise HTTPException(status_code=400, detail="An edit instruction is required")
+
+    tender = _tender_for_pack(tender_id, db)
+    tender_data = {
+        "reference_number": tender.reference_number,
+        "title": tender.title,
+        "client_company": tender.client_company,
+        "location_site": tender.location_site,
+        "contract_period": tender.contract_period,
+        "scope_of_work": tender.scope_of_work,
+        "estimated_value": tender.estimated_value,
+    }
+    company = _company_for_generation(db, user)
+    revised = ai_module.ai_edit_document(doc.content, instruction, tender_data, company)
+
+    if not revised or revised.startswith("[AI edit unavailable"):
+        # Leave the user's document untouched rather than damaging it.
+        return {
+            "id": doc.id, "doc_type": doc.doc_type, "title": doc.title,
+            "content": doc.content, "updated": False,
+            "message": "The AI could not edit this document right now. Your version is unchanged.",
+        }
+
+    doc.content = revised
+    doc.updated_at = datetime.utcnow()
+    db.commit()
+    return {
+        "id": doc.id, "doc_type": doc.doc_type, "title": doc.title,
+        "content": doc.content, "updated": True,
+    }
 
 
 @app.put("/api/tenders/{tender_id}/documents/generated/{doc_id}")

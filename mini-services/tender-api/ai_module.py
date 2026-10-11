@@ -1822,6 +1822,54 @@ Generate at least 1500 words. Be specific to this tender's requirements."""
         return f"Document generation failed: {e}"
 
 
+def generate_business_plan(tender: Dict[str, Any], extracted: Dict[str, Any], company: Dict[str, Any]) -> str:
+    """Write a business plan for the organisation, grounded in its knowledge base.
+
+    Used when a tender asks for a business plan: the content is built from what
+    we actually know about the company (profile, capabilities, documents) and
+    tailored to this tender, with placeholders wherever facts are missing.
+    """
+    header = _build_company_header(company)
+    knowledge = company.get("knowledge_base") or company.get("capability") or ""
+    prompt = f"""Generate a BUSINESS PLAN for the following tender.
+
+COMPANY PROFILE:
+{header}
+
+WHAT WE KNOW ABOUT THIS COMPANY (from its own profile and uploaded documents — this is the source of truth):
+{str(knowledge)[:6000] if knowledge else "No uploaded documents yet — write the plan using the company profile only and mark anything unknown as [INSERT X]."}
+
+TENDER DETAILS:
+- Reference: {tender.get('reference_number', 'N/A')}
+- Title: {tender.get('title', 'N/A')}
+- Client: {tender.get('client_company', 'N/A')}
+- Scope: {extracted.get('scope_of_work', 'N/A') or tender.get('scope_of_work', 'N/A')}
+- Contract period: {tender.get('contract_period', 'N/A')}
+
+The business plan must contain these sections, in this order:
+1. EXECUTIVE SUMMARY
+2. COMPANY OVERVIEW (history, registration, structure, size)
+3. VISION AND MISSION
+4. SERVICES AND CAPABILITIES (what we can deliver)
+5. MARKET AND CLIENTS WE SERVE
+6. COMPETITIVE ADVANTAGES
+7. OPERATIONAL CAPACITY (people, equipment, systems, quality controls)
+8. GROWTH STRATEGY
+9. FINANCIAL OVERVIEW (use placeholders if no figures are known)
+10. HEALTH, SAFETY AND QUALITY COMMITMENT
+11. CONCLUSION
+
+Rules:
+- Ground every claim in the company information above. Never invent numbers, certificates or clients.
+- Where a fact is not known, write [INSERT X] rather than guessing.
+- Keep it relevant to this tender: this is being submitted TO this client.
+- Formal South African business English. Plain text/markdown only, no code fences."""
+    try:
+        return _gemini_chat(prompt, system=DOC_GEN_SYSTEM, max_tokens=5000)
+    except RuntimeError as e:
+        return f"Document generation failed: {e}"
+
+
 # Map doc types to their generator functions
 DOCUMENT_GENERATORS = {
     "cover_letter": generate_cover_letter,
@@ -1838,6 +1886,7 @@ DOCUMENT_GENERATORS = {
     "signed_declarations": generate_signed_declarations,
     "appendices": generate_appendices,
     "table_of_contents": generate_table_of_contents,
+    "business_plan": generate_business_plan,
 }
 
 DOCUMENT_TYPE_INFO = {
@@ -1855,6 +1904,7 @@ DOCUMENT_TYPE_INFO = {
     "signed_declarations": {"title": "Signed Declarations", "description": "Formal declarations of compliance and accuracy"},
     "appendices": {"title": "Appendices", "description": "Training programs, sample forms, equipment specs"},
     "table_of_contents": {"title": "Table of Contents", "description": "Full submission package table of contents"},
+    "business_plan": {"title": "Business Plan", "description": "Organisation strategy, capabilities and growth plan"},
 }
 
 
@@ -2636,3 +2686,226 @@ Write the full document now:"""
         return result.strip()
     except Exception as e:
         return f"Error generating document: {e}\n\nPlease try again."
+
+
+# ===================== Document Pack (what this tender actually needs) =====================
+
+# Documents we can WRITE from the tenant's knowledge base, vs documents that
+# are evidence the tenant must hold (certificates) and can only attach.
+WRITABLE_DOC_TYPES = {
+    "cover_letter", "company_profile", "compliance_docs", "technical_proposal",
+    "method_statement", "implementation_plan", "risk_assessment", "sops",
+    "organogram", "pricing_schedule", "references", "signed_declarations",
+    "appendices", "table_of_contents", "business_plan",
+}
+
+
+def _norm(s: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(s or "").lower()).strip()
+
+
+def _match_library_doc(requirement: Dict[str, Any],
+                       library: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Find the best matching document the tenant already holds.
+
+    Preference order: an explicitly linked document, then a category match,
+    then a loose name match. Active documents beat expiring ones; expired
+    documents still count as "held but not usable".
+    """
+    if not library:
+        return None
+
+    linked_id = requirement.get("linked_library_doc_id")
+    if linked_id:
+        for d in library:
+            if d.get("id") == linked_id:
+                return d
+
+    want = _norm(requirement.get("library_category") or requirement.get("category"))
+    name = _norm(requirement.get("name") or requirement.get("title"))
+
+    def score(d: Dict[str, Any]) -> int:
+        cat = _norm(d.get("category"))
+        doc_name = _norm(d.get("name"))
+        if want and cat and cat == want:
+            return 3
+        if want and cat and (want in cat or cat in want):
+            return 2
+        if name and doc_name and (name in doc_name or doc_name in name):
+            return 1
+        return 0
+
+    def status_rank(d: Dict[str, Any]) -> int:
+        return {"Active": 0, "Expiring Soon": 1, "Expired": 2}.get(d.get("status"), 3)
+
+    # Best score first; among equals prefer the healthiest document.
+    best = sorted(library, key=lambda d: (-score(d), status_rank(d), _norm(d.get("name"))))[0]
+    if score(best) <= 0:
+        return None  # nothing in the library actually matches this requirement
+    return best
+
+
+def build_document_pack(
+    checklist: List[Dict[str, Any]],
+    library_docs: List[Dict[str, Any]],
+    generated_docs: List[Dict[str, Any]],
+    smart_docs: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """The exact set of documents this tender needs, each with its real status.
+
+    Two kinds of requirement are merged:
+      * compliance/evidence items that come from the tender's checklist
+        (CIPC, B-BBEE, PSIRA, tax clearance, COIDA...) - these can only be
+        ATTACHED from the tenant's library, never invented;
+      * documents we can WRITE from their knowledge base (method statement,
+        business plan, cover letter...).
+
+    Every entry is resolved to one of: linked (we hold it), generated (we
+    wrote it), or missing - so the user always knows what is outstanding.
+    """
+    generated_by_type = {g.get("doc_type"): g for g in (generated_docs or [])}
+    pack: List[Dict[str, Any]] = []
+    seen_keys = set()
+
+    # 1. Compliance / evidence documents from the checklist.
+    for item in checklist or []:
+        name = (item.get("name") or "").strip()
+        if not name:
+            continue
+        key = "checklist:" + _norm(name)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        held = _match_library_doc(item, library_docs)
+        entry = {
+            "key": key,
+            "title": name,
+            "kind": "compliance",
+            "mandatory": bool(item.get("mandatory", True)),
+            "requirement_reason": item.get("description") or "Required by the tender",
+            "priority": "essential" if item.get("mandatory", True) else "recommended",
+            "editable": False,
+            "generated_id": None,
+            "library_document_id": held.get("id") if held else None,
+            "library_status": held.get("status") if held else None,
+            "library_expiry": held.get("expiry_date") if held else None,
+        }
+        if held:
+            entry["status"] = (
+                "expired" if str(held.get("status")) == "Expired"
+                else ("expiring" if str(held.get("status")) == "Expiring Soon" else "ready")
+            )
+        else:
+            entry["status"] = "missing"
+        pack.append(entry)
+
+    # 2. Documents the AI says this tender needs, that we can write.
+    for item in smart_docs or []:
+        doc_type = item.get("doc_type")
+        if not doc_type or doc_type not in DOCUMENT_GENERATORS:
+            continue
+        key = "doc:" + doc_type
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        generated = generated_by_type.get(doc_type)
+        pack.append({
+            "key": key,
+            "doc_type": doc_type,
+            "title": DOCUMENT_TYPE_INFO.get(doc_type, {}).get("title", doc_type),
+            "kind": "content",
+            "mandatory": item.get("priority") == "essential",
+            "requirement_reason": item.get("reason") or DOCUMENT_TYPE_INFO.get(doc_type, {}).get("description", ""),
+            "priority": item.get("priority", "recommended"),
+            "editable": True,
+            "status": "generated" if generated else "missing",
+            "generated_id": generated.get("id") if generated else None,
+            "library_document_id": None,
+            "library_status": None,
+            "library_expiry": None,
+        })
+
+    # Documents already written but no longer flagged as required are still shown
+    # so nothing the user prepared silently disappears.
+    for doc_type, generated in generated_by_type.items():
+        key = "doc:" + doc_type
+        if key in seen_keys or doc_type not in DOCUMENT_GENERATORS:
+            continue
+        seen_keys.add(key)
+        pack.append({
+            "key": key,
+            "doc_type": doc_type,
+            "title": DOCUMENT_TYPE_INFO.get(doc_type, {}).get("title", doc_type),
+            "kind": "content",
+            "mandatory": False,
+            "requirement_reason": "You prepared this for an earlier run of this tender",
+            "priority": "optional",
+            "editable": True,
+            "status": "generated",
+            "generated_id": generated.get("id"),
+            "library_document_id": None,
+            "library_status": None,
+            "library_expiry": None,
+        })
+
+    def sort_key(e: Dict[str, Any]):
+        status_rank = {"missing": 0, "expired": 1, "expiring": 2, "generated": 3, "ready": 4}
+        return (
+            0 if e.get("mandatory") else 1,
+            status_rank.get(e.get("status"), 5),
+            e.get("title", "").lower(),
+        )
+
+    pack.sort(key=sort_key)
+    return pack
+
+
+def document_pack_summary(pack: List[Dict[str, Any]]) -> Dict[str, Any]:
+    counts = {"total": len(pack), "ready": 0, "generated": 0, "missing": 0,
+              "expired": 0, "expiring": 0}
+    for e in pack or []:
+        status = e.get("status")
+        if status in counts:
+            counts[status] += 1
+    counts["outstanding"] = counts["missing"] + counts["expired"]
+    return counts
+
+
+# ===================== AI document editing =====================
+
+DOC_EDIT_SYSTEM = """You are a senior tender bid writer editing a document on behalf of a South African company.
+
+You rewrite the document the user asked you to change, following their instruction exactly.
+
+Rules:
+- Keep everything that is still correct and relevant; change only what the instruction requires.
+- Keep the same document format and section headings unless asked to change them.
+- Never invent facts (registration numbers, certificates, figures, references) that are not in the document or the company information provided.
+- If the instruction asks for something and there is no supporting information, write a clear, professional placeholder such as [INSERT X] rather than making something up.
+- Use formal South African business English. Plain text/markdown only, no code fences.
+- Return the complete revised document, not a summary or a diff."""
+
+
+def ai_edit_document(content: str, instruction: str, tender_data: Dict[str, Any],
+                     company: Dict[str, Any]) -> str:
+    """Revise an existing document according to the user's instruction."""
+    prompt = f"""EDIT THIS TENDER DOCUMENT.
+
+DOCUMENT TO EDIT:
+{str(content or "")[:20000]}
+
+EDIT INSTRUCTION FROM THE USER:
+{str(instruction or "")[:2000]}
+
+TENDER DETAILS:
+{json.dumps(tender_data or {}, indent=2, default=str)[:2000]}
+
+COMPANY INFORMATION:
+{json.dumps(company or {}, indent=2, default=str)[:1500]}
+
+Return the complete revised document."""
+    try:
+        return _gemini_chat(prompt, system=DOC_EDIT_SYSTEM, max_tokens=6000).strip()
+    except RuntimeError as e:
+        # The user keeps their own version; we never destroy their work.
+        return f"[AI edit unavailable: {e}]\n\n{content or ''}"

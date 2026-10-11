@@ -78,7 +78,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Switch } from "@/components/ui/switch";
-import { api, TENDER_STATUSES, TENDER_OUTCOMES, CHECKLIST_STATUSES, LIBRARY_CATEGORIES } from "@/lib/api";
+import { api, TENDER_STATUSES, TENDER_OUTCOMES, CHECKLIST_STATUSES, LIBRARY_CATEGORIES, type PackItem, type DocumentPackResponse } from "@/lib/api";
 import {
   useDashboardStore,
   formatDate,
@@ -2999,12 +2999,101 @@ function GeneratedDocumentsSection({ tender, onChanged }: { tender: any; onChang
       const data = await api.smartAnalyzeDocuments(tender.id);
       setSmartDocs(data.required || []);
       setAnalyzed(data.analyzed);
+      await loadPack();
       toast.success("AI re-analyzed required documents");
     } catch (e: any) {
       toast.error(e.message || "Analysis failed");
     } finally {
       setAnalyzing(false);
     }
+  };
+
+  // --- Document pack: what this tender needs, and where each one stands ---
+  const [pack, setPack] = useState<PackItem[]>([]);
+  const [packSummary, setPackSummary] = useState<DocumentPackResponse["summary"] | null>(null);
+  const [packLibraryDocs, setPackLibraryDocs] = useState<any[]>([]);
+  const [preparing, setPreparing] = useState(false);
+  const [aiEditOpen, setAiEditOpen] = useState(false);
+  const [aiInstruction, setAiInstruction] = useState("");
+  const [aiEditing, setAiEditing] = useState(false);
+
+  const loadPack = useCallback(async () => {
+    try {
+      const data = await api.getDocumentPack(tender.id);
+      setPack(data.items || []);
+      setPackSummary(data.summary || null);
+      setPackLibraryDocs(data.library_documents || []);
+    } catch {
+      // The pack is an enhancement; the document list below still works.
+    }
+  }, [tender.id]);
+
+  useEffect(() => {
+    loadPack();
+  }, [loadPack]);
+
+  const handlePrepareAll = async () => {
+    setPreparing(true);
+    toast.info("Bringing together the documents this tender needs…", {
+      description: "Linking your library documents and writing the rest from your knowledge base.",
+    });
+    try {
+      const res = await api.prepareDocuments(tender.id);
+      setPack(res.items || []);
+      setPackSummary(res.summary || null);
+      setGenerated((arr) => {
+        const merged = [...arr];
+        for (const d of res.items || []) {
+          if (d.doc_type && d.generated_id) {
+            const i = merged.findIndex((x) => x.doc_type === d.doc_type);
+            const stub = { id: d.generated_id, doc_type: d.doc_type, title: d.title };
+            if (i >= 0) merged[i] = { ...merged[i], ...stub };
+            else merged.push(stub);
+          }
+        }
+        return merged;
+      });
+      onChanged();
+      const written = (res.written || []).length;
+      const missing = res.summary?.missing ?? 0;
+      toast.success(written ? `${written} document(s) prepared` : "Everything possible is already in place", {
+        description: missing
+          ? `${missing} document(s) you must still obtain yourself — they are marked Missing.`
+          : "Your tender pack is complete.",
+      });
+    } catch (e: any) {
+      toast.error(e.message || "Could not prepare documents");
+    } finally {
+      setPreparing(false);
+    }
+  };
+
+  const handleAiEdit = async () => {
+    if (!viewing || !aiInstruction.trim()) return;
+    setAiEditing(true);
+    try {
+      const res = await api.aiEditDocument(tender.id, viewing.id, aiInstruction);
+      if (!res.updated) {
+        toast.error(res.message || "The AI could not edit this document right now");
+        return;
+      }
+      // Hand the revised draft straight to the editor so the user reviews it.
+      setEditTitle(viewing.title || "");
+      setEditContent(res.content || "");
+      setEditing(true);
+      setAiEditOpen(false);
+      setAiInstruction("");
+      toast.success("AI revised the document — review and edit before saving");
+    } catch (e: any) {
+      toast.error(e.message || "AI edit failed");
+    } finally {
+      setAiEditing(false);
+    }
+  };
+
+  const openLibrary = (filePath?: string | null) => {
+    if (!filePath) return;
+    window.open(`/uploads/${filePath}`, "_blank", "noopener,noreferrer");
   };
 
   const handleStartEdit = () => {
@@ -3114,6 +3203,160 @@ function GeneratedDocumentsSection({ tender, onChanged }: { tender: any; onChang
     );
   };
 
+  const STATUS_META: Record<string, { label: string; className: string; icon: any }> = {
+    ready: {
+      label: "From your library",
+      className: "border-emerald-300 text-emerald-700 dark:border-emerald-800 dark:text-emerald-300",
+      icon: CheckCircle2,
+    },
+    generated: {
+      label: "Written by AI",
+      className: "border-emerald-300 text-emerald-700 dark:border-emerald-800 dark:text-emerald-300",
+      icon: Sparkles,
+    },
+    expiring: {
+      label: "Expiring soon",
+      className: "border-amber-300 text-amber-700 dark:border-amber-800 dark:text-amber-300",
+      icon: AlertTriangle,
+    },
+    expired: {
+      label: "Expired",
+      className: "border-rose-300 text-rose-700 dark:border-rose-800 dark:text-rose-300",
+      icon: AlertTriangle,
+    },
+    missing: {
+      label: "Missing",
+      className: "border-rose-300 text-rose-700 dark:border-rose-800 dark:text-rose-300",
+      icon: X,
+    },
+  };
+
+  const renderPackItem = (item: PackItem) => {
+    const meta = STATUS_META[item.status] ?? STATUS_META.missing;
+    const Icon = meta.icon;
+    const isGenerating = item.doc_type ? generating === item.doc_type : false;
+    const existing = item.generated_id
+      ? generated.find((d) => d.id === item.generated_id) ||
+        (item.doc_type ? generated.find((d) => d.doc_type === item.doc_type) : undefined)
+      : item.doc_type
+        ? generated.find((d) => d.doc_type === item.doc_type)
+        : undefined;
+    const libraryDoc =
+      item.library_document_id != null
+        ? (tender?.id && packLibraryDocs.find((d: any) => d.id === item.library_document_id))
+        : undefined;
+
+    return (
+      <Card
+        key={item.key}
+        className={cn(
+          "transition-all",
+          (item.status === "ready" || item.status === "generated") &&
+            "border-emerald-300 dark:border-emerald-800",
+          item.status === "missing" && item.mandatory && "border-rose-300 dark:border-rose-800"
+        )}
+      >
+        <CardContent className="p-4">
+          <div className="mb-2 flex items-start gap-2">
+            <div
+              className={cn(
+                "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
+                item.status === "ready" || item.status === "generated"
+                  ? "bg-emerald-100 dark:bg-emerald-950"
+                  : item.status === "missing" || item.status === "expired"
+                    ? "bg-rose-100 dark:bg-rose-950"
+                    : "bg-amber-100 dark:bg-amber-950"
+              )}
+            >
+              <Icon className="h-4 w-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium">{item.title}</div>
+              <div className="text-xs text-muted-foreground">
+                {item.kind === "compliance" ? "Certificate / compliance document" : "Document written for this tender"}
+              </div>
+            </div>
+            <Badge variant="outline" className={cn("shrink-0 text-[11px]", meta.className)}>
+              {meta.label}
+            </Badge>
+          </div>
+
+          {item.requirement_reason && (
+            <div className="mb-2 rounded-lg bg-muted/30 p-2 text-xs italic text-muted-foreground">
+              <Sparkles className="mr-1 inline h-3 w-3 text-primary" />
+              {item.requirement_reason}
+            </div>
+          )}
+
+          {item.status === "expired" && libraryDoc?.expiry_date && (
+            <div className="mb-2 text-xs text-rose-600">
+              Expired {item.library_expiry} — renew it before you bid.
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            {item.kind === "compliance" ? (
+              libraryDoc ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => openLibrary(libraryDoc.file_path)}
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  View document
+                </Button>
+              ) : (
+                <div className="flex-1">
+                  <Badge variant="outline" className="border-rose-300 text-rose-700 dark:border-rose-800 dark:text-rose-300">
+                    Not in your library — upload it
+                  </Badge>
+                </div>
+              )
+            ) : existing ? (
+              <>
+                <Button size="sm" variant="outline" className="flex-1" onClick={() => setViewing(existing)}>
+                  <FileText className="h-3.5 w-3.5" />
+                  View &amp; edit
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => handleGenerate(item.doc_type!)}
+                  disabled={isGenerating}
+                  title="Rewrite with AI"
+                >
+                  {isGenerating ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="sm"
+                className="w-full"
+                onClick={() => handleGenerate(item.doc_type!)}
+                disabled={isGenerating}
+              >
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Writing…
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-3.5 w-3.5" /> Write it for me
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
+
   const renderPriorityGroup = (docs: any[], label: string, color: string) => {
     if (docs.length === 0) return null;
     const generatedCount = docs.filter((d) => getGenerated(d.doc_type)).length;
@@ -3144,22 +3387,76 @@ function GeneratedDocumentsSection({ tender, onChanged }: { tender: any; onChang
               <FileSignature className="h-5 w-5 text-primary" />
             </div>
             <div className="flex-1">
-              <h3 className="font-semibold text-sm">Smart AI-Generated Tender Documents</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {analyzed
-                  ? "The AI analyzed your tender and identified the documents required for submission. Each document is generated specifically for this tender on your company letterhead."
-                  : analyzing
-                  ? "AI is analyzing your tender to determine which documents are required…"
-                  : "Upload and run AI extraction on the tender document for a smart list of required documents."}
+              <h3 className="text-sm font-semibold">Documents this tender needs</h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Certificates are pulled from your Compliance Library, and anything the AI can
+                write is written for you from your knowledge base. Anything it cannot source
+                is clearly marked Missing.
               </p>
+              {packSummary && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <Badge variant="secondary" className="text-[11px]">
+                    {packSummary.total} required
+                  </Badge>
+                  {(packSummary.ready + packSummary.generated) > 0 && (
+                    <Badge
+                      variant="outline"
+                      className="border-emerald-300 text-[11px] text-emerald-700 dark:border-emerald-800 dark:text-emerald-300"
+                    >
+                      {packSummary.ready + packSummary.generated} in hand
+                    </Badge>
+                  )}
+                  {packSummary.outstanding > 0 && (
+                    <Badge
+                      variant="outline"
+                      className="border-rose-300 text-[11px] text-rose-700 dark:border-rose-800 dark:text-rose-300"
+                    >
+                      {packSummary.outstanding} outstanding
+                    </Badge>
+                  )}
+                </div>
+              )}
             </div>
-            <Button size="sm" variant="outline" onClick={handleReanalyze} disabled={analyzing}>
-              {analyzing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              Re-analyze
-            </Button>
+            <div className="flex shrink-0 flex-col gap-1.5">
+              <Button size="sm" onClick={handlePrepareAll} disabled={preparing}>
+                {preparing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="h-3.5 w-3.5" />
+                )}
+                {preparing ? "Preparing…" : "Prepare all documents"}
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleReanalyze} disabled={analyzing}>
+                <RefreshCw className={cn("h-3.5 w-3.5", analyzing && "animate-spin")} />
+                Re-analyze
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
+
+      {/* Smart document pack */}
+      {!analyzing && pack.length > 0 && (
+        <div className="space-y-6">
+          {(["Compliance & certificates", "Documents to write"] as const).map((label, idx) => {
+            const items = pack.filter((p) => (idx === 0 ? p.kind === "compliance" : p.kind === "content"));
+            if (items.length === 0) return null;
+            return (
+              <div key={label} className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-xs font-medium">
+                    {label}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">{items.length} item(s)</span>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {items.map(renderPackItem)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Analyzing state */}
       {analyzing && (
@@ -3171,8 +3468,8 @@ function GeneratedDocumentsSection({ tender, onChanged }: { tender: any; onChang
         </Card>
       )}
 
-      {/* Smart document groups */}
-      {!analyzing && sortedDocs.length > 0 && (
+      {/* Legacy smart list (kept as a fallback when the pack is unavailable) */}
+      {!analyzing && pack.length === 0 && sortedDocs.length > 0 && (
         <div className="space-y-6">
           {renderPriorityGroup(essential, "Essential", PRIORITY_CONFIG.essential.color)}
           {renderPriorityGroup(recommended, "Recommended", PRIORITY_CONFIG.recommended.color)}
@@ -3256,6 +3553,15 @@ function GeneratedDocumentsSection({ tender, onChanged }: { tender: any; onChang
                   <Pencil className="h-3.5 w-3.5" />
                   Edit
                 </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setAiEditOpen((o) => !o)}
+                  title="Ask the AI to revise this document"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Ask AI to edit
+                </Button>
                 <Button variant="outline" size="sm" onClick={handleCopy}>
                   {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
                   {copied ? "Copied" : "Copy"}
@@ -3274,6 +3580,33 @@ function GeneratedDocumentsSection({ tender, onChanged }: { tender: any; onChang
               </>
             )}
           </div>
+          {aiEditOpen && (
+            <div className="space-y-2 rounded-lg border border-primary/30 bg-primary/5 p-3">
+              <div className="flex items-center gap-1.5 text-xs font-semibold">
+                <Sparkles className="h-3.5 w-3.5 text-primary" />
+                Tell the AI what to change
+              </div>
+              <Input
+                value={aiInstruction}
+                onChange={(e) => setAiInstruction(e.target.value)}
+                placeholder="e.g. Shorten this to two pages and add a quality-control section"
+                className="text-xs"
+              />
+              <div className="flex items-center gap-2">
+                <Button size="sm" onClick={handleAiEdit} disabled={aiEditing || !aiInstruction.trim()}>
+                  {aiEditing ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5" />
+                  )}
+                  {aiEditing ? "Revising…" : "Revise with AI"}
+                </Button>
+                <span className="text-[11px] text-muted-foreground">
+                  You review and edit the result before it is saved.
+                </span>
+              </div>
+            </div>
+          )}
           <div className="flex-1 overflow-y-auto scrollbar-thin">
             {editing ? (
               <Textarea

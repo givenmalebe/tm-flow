@@ -60,6 +60,84 @@ def test_gemini_post_trips_breaker_on_quota_429(monkeypatch):
     assert ai_module.gemini_available() is True
 
 
+def test_gemini_post_falls_back_to_another_model_on_429(monkeypatch):
+    """Each model has its own quota, so a 429 should move to the next model."""
+    _reset_breaker()
+
+    class _Resp:
+        def __init__(self, code, text="quota"):
+            self.status_code = code
+            self.text = text
+
+        def json(self):
+            return {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+
+    tried = []
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        tried.append(url)
+        # The first model is out of quota; the second answers.
+        if "first-model" in url:
+            return _Resp(429, "Please retry in 1h0m0s.")
+        return _Resp(200)
+
+    monkeypatch.setattr(ai_module.httpx, "post", fake_post)
+    monkeypatch.setattr(ai_module, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        ai_module, "GEMINI_MODELS", ["first-model", "second-model"]
+    )
+
+    data = ai_module._gemini_post({}, 1.0)
+
+    assert "candidates" in data
+    assert len(tried) == 2, "should have tried the fallback model"
+    # A single model being out of quota must NOT pause the whole service.
+    assert ai_module.gemini_available() is True
+
+
+def test_gemini_post_pauses_only_when_every_model_is_out(monkeypatch):
+    _reset_breaker()
+
+    class _Resp:
+        status_code = 429
+        text = "Please retry in 2h0m0s."
+
+        def json(self):
+            return {}
+
+    monkeypatch.setattr(ai_module.httpx, "post", lambda *a, **k: _Resp())
+    monkeypatch.setattr(ai_module, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(ai_module, "GEMINI_MODELS", ["m1", "m2", "m3"])
+
+    with pytest.raises(RuntimeError) as exc:
+        ai_module._gemini_post({}, 1.0)
+    assert "quota" in str(exc.value).lower()
+    assert ai_module.gemini_available() is False
+    _reset_breaker()
+
+
+def test_search_does_not_pause_the_whole_service(monkeypatch):
+    """Grounding quota is separate; losing search must not disable chat/reports."""
+    _reset_breaker()
+
+    class _Resp:
+        status_code = 429
+        text = "Please retry in 3h0m0s."
+
+    monkeypatch.setattr(ai_module.httpx, "post", lambda *a, **k: _Resp())
+    monkeypatch.setattr(ai_module, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(ai_module, "GEMINI_MODELS", ["m1", "m2"])
+
+    assert ai_module._gemini_web_search("cleaning tenders", timeout=1) == []
+    assert ai_module.gemini_available() is True, "search failure must not pause AI"
+
+
+def test_model_chain_prefers_configured_order():
+    # The primary model leads, and the chain has no duplicates.
+    assert ai_module.GEMINI_MODELS[0] == ai_module.GEMINI_MODEL
+    assert len(ai_module.GEMINI_MODELS) == len(set(ai_module.GEMINI_MODELS))
+
+
 def test_gemini_post_still_retries_server_errors(monkeypatch):
     _reset_breaker()
 

@@ -47,6 +47,27 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
+# The free tier caps each model separately, so when one model's daily quota is
+# spent we can often still be served by another. GEMINI_MODELS is an ordered
+# fallback chain: the first model that can answer wins, and the whole chain is
+# only considered exhausted once every model has refused.
+def _model_chain() -> list:
+    raw = os.environ.get("GEMINI_MODELS", "").strip()
+    models = [m.strip() for m in raw.split(",") if m.strip()]
+    if not models:
+        models = [GEMINI_MODEL]
+    elif GEMINI_MODEL and GEMINI_MODEL not in models:
+        models.insert(0, GEMINI_MODEL)
+    seen, ordered = set(), []
+    for m in models:
+        if m not in seen:
+            seen.add(m)
+            ordered.append(m)
+    return ordered
+
+
+GEMINI_MODELS = _model_chain()
+
 # 120s per call so two sequential AI calls (extraction + summary)
 # fit within the 300s Next.js proxy timeout.
 GEMINI_TIMEOUT = 120.0
@@ -87,34 +108,57 @@ def _trip_quota_cooldown(body: str) -> None:
     _QUOTA_COOLDOWN_UNTIL = time.monotonic() + max(60.0, wait)
 
 
-def _gemini_post(payload: Dict[str, Any], timeout: float) -> Dict[str, Any]:
-    """POST to the Gemini generateContent endpoint, retrying transient failures."""
+def _gemini_post(payload: Dict[str, Any], timeout: float, allow_model_fallback: bool = True,
+                 trip_breaker: bool = True) -> Dict[str, Any]:
+    """POST to Gemini, walking the model chain until one can answer.
+
+    Each model's free-tier quota is separate, so a 429 on one model is treated
+    as "try the next model" rather than "stop everything". Only when every model
+    in the chain refuses do we pause the whole service.
+    """
     if not GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY is not set")
     if not gemini_available():
         raise RuntimeError(
             "Gemini daily quota reached — AI features are paused until the quota resets."
         )
-    url = f"{GEMINI_BASE_URL}/models/{GEMINI_MODEL}:generateContent"
+
     headers = {"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"}
-
+    models = GEMINI_MODELS if allow_model_fallback else GEMINI_MODELS[:1]
     last_error = ""
-    for attempt in range(GEMINI_RETRIES + 1):
-        response = httpx.post(url, headers=headers, json=payload, timeout=timeout)
-        if response.status_code == 200:
-            return response.json()
-        # A quota 429 will not clear by retrying; stop the whole service instead.
-        if response.status_code == 429:
-            _trip_quota_cooldown(response.text)
-            raise RuntimeError(
-                "Gemini daily quota reached — AI features are paused until the quota resets."
-            )
-        last_error = f"HTTP {response.status_code}: {response.text[:500]}"
-        if response.status_code in GEMINI_RETRY_STATUS and attempt < GEMINI_RETRIES:
-            time.sleep(GEMINI_RETRY_DELAY * (attempt + 1))
-            continue
-        break
+    quota_body = ""
 
+    for model in models:
+        url = f"{GEMINI_BASE_URL}/models/{model}:generateContent"
+        for attempt in range(GEMINI_RETRIES + 1):
+            response = httpx.post(url, headers=headers, json=payload, timeout=timeout)
+            if response.status_code == 200:
+                return response.json()
+            # Out of quota for THIS model — a different model may still serve us.
+            if response.status_code == 429:
+                quota_body = response.text
+                last_error = f"HTTP 429 ({model}): {response.text[:300]}"
+                break
+            last_error = f"HTTP {response.status_code} ({model}): {response.text[:300]}"
+            if response.status_code in GEMINI_RETRY_STATUS and attempt < GEMINI_RETRIES:
+                time.sleep(GEMINI_RETRY_DELAY * (attempt + 1))
+                continue
+            # A model that does not exist / cannot serve this request: move on.
+            break
+
+    if quota_body:
+        # Every model in the chain is out of quota. Only a caller that cannot
+        # degrade (chat, reports) pauses the whole service; research/search
+        # simply gets no results.
+        if trip_breaker:
+            _trip_quota_cooldown(quota_body)
+            raise RuntimeError(
+                "Gemini daily quota reached on every configured model — AI features are "
+                "paused until the quota resets."
+            )
+        raise RuntimeError(
+            "Gemini quota reached on every configured model (search unavailable)."
+        )
     raise RuntimeError(f"Gemini request failed: {last_error}")
 
 
@@ -541,7 +585,11 @@ def _gemini_web_search(query: str, num: int = 10, timeout: float = 60.0) -> List
         "generationConfig": {"maxOutputTokens": 8000},
     }
     try:
-        data = _gemini_post(payload, timeout)
+        # Grounding has its own quota. Let the model chain handle the fallback,
+        # but do NOT pause the whole service — if search is unavailable the
+        # portal scrapers still return real tenders, while chat, summaries and
+        # reports must keep working.
+        data = _gemini_post(payload, timeout, trip_breaker=False)
     except Exception:
         return []
 

@@ -6,10 +6,7 @@ import {
   FileStack,
   FolderCheck,
   MapPin,
-  Calculator,
   Send,
-  MessageSquare,
-  FileDiff,
   Bot,
   LogOut,
   Menu,
@@ -57,10 +54,7 @@ import { CompanyTab } from "./tabs/company-tab";
 import { TeamTab } from "./tabs/team-tab";
 import { DeadlinesTab } from "./tabs/deadlines-tab";
 import { BriefingsTab } from "./tabs/briefings-tab";
-import { PricingTab } from "./tabs/pricing-tab";
 import { SubmissionsTab } from "./tabs/submissions-tab";
-import { ClarificationsTab } from "./tabs/clarifications-tab";
-import { AddendumsTab } from "./tabs/addendums-tab";
 import { AssistantTab } from "./tabs/assistant-tab";
 import { WelcomeModal } from "./welcome-modal";
 import { toast } from "sonner";
@@ -80,13 +74,10 @@ const NAV_ITEMS: NavItem[] = [
   { id: "reader", label: "AI Document Reader", icon: ScanText, description: "Read & extract tenders" },
   { id: "deadlines", label: "Deadlines", icon: CalendarClock, description: "Track & remind" },
   { id: "briefings", label: "Briefings", icon: FileSignature, description: "Briefings & site visits" },
-  { id: "pricing", label: "Pricing", icon: Calculator, description: "Pricing versions" },
   { id: "library", label: "Compliance Library", icon: FolderCheck, description: "Company documents" },
   { id: "company", label: "Company Profile", icon: Building, description: "Branding & letterhead" },
   { id: "team", label: "Team", icon: Users, description: "Manage team members" },
   { id: "submissions", label: "Submissions", icon: Send, description: "Submitted tenders" },
-  { id: "clarifications", label: "Clarifications", icon: MessageSquare, description: "Comms & clarifications" },
-  { id: "addendums", label: "Addendums", icon: FileDiff, description: "Tender addendums" },
   { id: "assistant", label: "AI Assistant", icon: Bot, description: "Ask about tenders" },
 ];
 
@@ -354,13 +345,10 @@ export function DashboardShell() {
             {activeTab === "reader" && <ReaderTab />}
             {activeTab === "deadlines" && <DeadlinesTab />}
             {activeTab === "briefings" && <BriefingsTab />}
-            {activeTab === "pricing" && <PricingTab />}
             {activeTab === "library" && <LibraryTab />}
             {activeTab === "company" && <CompanyTab />}
             {activeTab === "team" && <TeamTab />}
             {activeTab === "submissions" && <SubmissionsTab />}
-            {activeTab === "clarifications" && <ClarificationsTab />}
-            {activeTab === "addendums" && <AddendumsTab />}
             {activeTab === "assistant" && <AssistantTab />}
           </div>
         </main>

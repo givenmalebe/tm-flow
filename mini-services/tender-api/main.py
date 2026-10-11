@@ -52,7 +52,15 @@ app.add_middleware(
 )
 
 # Serve uploaded files
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+# Uploaded documents are served from Firebase Storage (see fire_store), falling
+# back to the container disk for anything still stored locally.
+@app.get("/uploads/{file_path:path}")
+def serve_upload(file_path: str):
+    found = _read_uploaded(file_path)
+    if not found:
+        raise HTTPException(status_code=404, detail="File not found")
+    content, ctype = found
+    return Response(content=content, media_type=ctype)
 
 # Available tender statuses
 TENDER_STATUSES = [
@@ -486,14 +494,46 @@ def _parse_datetime(s: Optional[str]):
 
 
 def _save_upload(upload: UploadFile, subdir: str = "") -> str:
-    """Save an uploaded file to UPLOAD_DIR/subdir and return relative path."""
-    target_dir = os.path.join(UPLOAD_DIR, subdir) if subdir else UPLOAD_DIR
-    os.makedirs(target_dir, exist_ok=True)
-    safe_name = f"{uuid.uuid4().hex}_{Path(upload.filename).name}"
-    target_path = os.path.join(target_dir, safe_name)
-    with open(target_path, "wb") as out:
-        shutil.copyfileobj(upload.file, out)
-    return os.path.relpath(target_path, UPLOAD_DIR)
+    """Save an uploaded file to Firebase Storage and return its reference.
+
+    Falls back to the container's disk if the bucket is unreachable, so an
+    upload is never lost outright.
+    """
+    import fire_store
+
+    return fire_store.save_fileobj(
+        upload.file,
+        upload.filename or "upload",
+        subdir,
+        content_type=getattr(upload, "content_type", None),
+    )
+
+
+def _read_uploaded(reference: str):
+    """Read a stored upload back as (bytes, content_type)."""
+    import fire_store
+
+    return fire_store.read_bytes(reference)
+
+
+def _upload_local_path(reference: str) -> Optional[str]:
+    """Materialise a stored upload on local disk so file-based libraries (PDF
+    extraction, zip bundling) can open it. Returns None if it cannot be written."""
+    found = _read_uploaded(reference)
+    if not found:
+        return None
+    content, _ctype = found
+    cache_dir = os.path.join(UPLOAD_DIR, "_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    target = os.path.join(cache_dir, os.path.basename(reference.replace("gs://", "")) or "file")
+    with open(target, "wb") as fh:
+        fh.write(content)
+    return target
+
+
+def _upload_size(reference: str) -> Optional[int]:
+    found = _read_uploaded(reference)
+    return len(found[0]) if found else None
 
 
 def _build_default_checklist(tender_id: int, db: Session):
@@ -1079,7 +1119,7 @@ async def upload_tender_document(
     if not t:
         raise HTTPException(status_code=404, detail="Tender not found")
     rel_path = _save_upload(file, subdir=f"tenders/{tender_id}")
-    file_size = os.path.getsize(os.path.join(UPLOAD_DIR, rel_path))
+    file_size = _upload_size(rel_path) or 0
     doc = TenderDocument(
         tender_id=tender_id,
         filename=rel_path,
@@ -1127,10 +1167,10 @@ def ai_extract_tender(tender_id: int, db: Session = Depends(get_db), user: User 
     # Concatenate text from all documents
     combined_text = ""
     for doc in tender.documents:
-        full_path = os.path.join(UPLOAD_DIR, doc.file_path)
-        if os.path.exists(full_path):
+        local = _upload_local_path(doc.file_path)
+        if local:
             combined_text += f"\n\n=== {doc.original_filename} ===\n"
-            combined_text += ai_module.extract_text_from_file(full_path, doc.original_filename)
+            combined_text += ai_module.extract_text_from_file(local, doc.original_filename)
     if len(combined_text.strip()) < 50:
         raise HTTPException(status_code=400, detail="Could not extract text from documents")
     extracted = ai_module.extract_tender_info(combined_text, tender.reference_number)
@@ -1191,19 +1231,22 @@ async def ai_read_document(
     and get back the full AI extraction + summary — without needing to create
     a tender first.
     """
-    # Save the uploaded file temporarily
+    # Save the uploaded file and make a local copy for text extraction.
     rel_path = _save_upload(file, subdir="ai_reader")
-    full_path = os.path.join(UPLOAD_DIR, rel_path)
-    file_size = os.path.getsize(full_path)
+    full_path = _upload_local_path(rel_path)
+    file_size = _upload_size(rel_path) or 0
 
     # Extract text
-    document_text = ai_module.extract_text_from_file(full_path, file.filename)
+    document_text = (
+        ai_module.extract_text_from_file(full_path, file.filename) if full_path else ""
+    )
     if not document_text or len(document_text.strip()) < 50:
-        # Clean up the file
-        try:
-            os.unlink(full_path)
-        except OSError:
-            pass
+        # Clean up the local copy
+        if full_path:
+            try:
+                os.unlink(full_path)
+            except OSError:
+                pass
         raise HTTPException(
             status_code=400,
             detail="Could not extract text from this document. Please ensure it is a valid PDF, DOCX, or text file with readable content.",
@@ -1592,7 +1635,7 @@ async def upload_library_document(
     user: User = Depends(get_current_user),
 ):
     rel_path = _save_upload(file, subdir="library")
-    file_size = os.path.getsize(os.path.join(UPLOAD_DIR, rel_path))
+    file_size = _upload_size(rel_path) or 0
     doc = LibraryDocument(
         name=name, category=category, description=description,
         filename=rel_path, file_path=rel_path,

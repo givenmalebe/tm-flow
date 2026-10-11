@@ -347,6 +347,26 @@ def _safe_name(name: str) -> str:
     return (keep.strip() or "file")[:120]
 
 
+def _stored_bytes(reference: str, upload_dir: str = ""):
+    """Read a stored upload (Firebase Storage reference or local path)."""
+    if not reference:
+        return None
+    try:
+        import fire_store
+
+        found = fire_store.read_bytes(reference)
+        if found:
+            return found[0]
+    except Exception:
+        pass
+    base = upload_dir or os.environ.get("UPLOAD_DIR", "uploads")
+    full = os.path.join(base, reference)
+    if os.path.isfile(full):
+        with open(full, "rb") as fh:
+            return fh.read()
+    return None
+
+
 def build_submission_bundle(
     readiness: Dict[str, Any],
     upload_dir: str,
@@ -377,23 +397,20 @@ def build_submission_bundle(
 
         # 1. Compliance certificates from the library.
         for d in readiness.get("documents", {}).get("library", []):
-            path = d.get("file_path")
-            if not path:
+            data = _stored_bytes(d.get("file_path"), upload_dir)
+            if data is None:
                 continue
-            full = os.path.join(upload_dir, path)
-            if os.path.isfile(full):
-                # Prefer the real filename so the archive keeps file extensions.
-                label = d.get("filename") or d.get("name") or os.path.basename(path)
-                zf.write(full, _unique(f"1_compliance/{_safe_name(label)}"))
+            # Prefer the real filename so the archive keeps file extensions.
+            label = d.get("filename") or d.get("name") or os.path.basename(d.get("file_path") or "file")
+            zf.writestr(_unique(f"1_compliance/{_safe_name(label)}"), data)
 
         # 2. Tender document, for reference.
         for d in readiness.get("documents", {}).get("tender", []):
-            path = d.get("file_path")
-            if not path:
+            data = _stored_bytes(d.get("file_path"), upload_dir)
+            if data is None:
                 continue
-            full = os.path.join(upload_dir, path)
-            if os.path.isfile(full):
-                zf.write(full, _unique(f"2_tender_document/{_safe_name(d.get('original_filename') or path)}"))
+            label = d.get("original_filename") or d.get("filename") or "tender-document"
+            zf.writestr(_unique(f"2_tender_document/{_safe_name(label)}"), data)
 
         # 3. Documents the AI wrote for this bid.
         for g in readiness.get("documents", {}).get("generated", []):

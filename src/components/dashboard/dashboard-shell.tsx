@@ -16,7 +16,6 @@ import {
   Radar,
   ScanText,
   Building,
-  FileSignature,
   CalendarClock,
   ClipboardCheck,
   Users,
@@ -53,7 +52,6 @@ import { LibraryTab } from "./tabs/library-tab";
 import { CompanyTab } from "./tabs/company-tab";
 import { TeamTab } from "./tabs/team-tab";
 import { DeadlinesTab } from "./tabs/deadlines-tab";
-import { BriefingsTab } from "./tabs/briefings-tab";
 import { SubmissionsTab } from "./tabs/submissions-tab";
 import { AssistantTab } from "./tabs/assistant-tab";
 import { WelcomeModal } from "./welcome-modal";
@@ -73,7 +71,6 @@ const NAV_ITEMS: NavItem[] = [
   { id: "discover", label: "Discover Tenders", icon: Radar, description: "AI tender finder" },
   { id: "reader", label: "AI Document Reader", icon: ScanText, description: "Read & extract tenders" },
   { id: "deadlines", label: "Deadlines", icon: CalendarClock, description: "Track & remind" },
-  { id: "briefings", label: "Briefings", icon: FileSignature, description: "Briefings & site visits" },
   { id: "library", label: "Compliance Library", icon: FolderCheck, description: "Company documents" },
   { id: "company", label: "Company Profile", icon: Building, description: "Branding & letterhead" },
   { id: "team", label: "Team", icon: Users, description: "Manage team members" },
@@ -344,7 +341,6 @@ export function DashboardShell() {
             {activeTab === "discover" && <DiscoverTab />}
             {activeTab === "reader" && <ReaderTab />}
             {activeTab === "deadlines" && <DeadlinesTab />}
-            {activeTab === "briefings" && <BriefingsTab />}
             {activeTab === "library" && <LibraryTab />}
             {activeTab === "company" && <CompanyTab />}
             {activeTab === "team" && <TeamTab />}

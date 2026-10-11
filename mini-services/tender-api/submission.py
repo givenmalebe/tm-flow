@@ -64,6 +64,32 @@ def _writable_type_for(requirement_name: str) -> Optional[str]:
     return None
 
 
+def writable_requirements_from_checklist(
+    checklist: List[Dict[str, Any]],
+    generated_docs: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """The documents this checklist implies we must WRITE for the bid.
+
+    Derived from the checklist itself rather than the AI analyser, so
+    "Prepare all documents" still produces the bid documents when the AI is
+    unavailable or out of quota.
+    """
+    generated_types = {g.get("doc_type") for g in (generated_docs or [])}
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for item in checklist or []:
+        doc_type = _writable_type_for(item.get("name", ""))
+        if not doc_type or doc_type in seen or doc_type in generated_types:
+            continue
+        seen.add(doc_type)
+        out.append({
+            "doc_type": doc_type,
+            "reason": f"Required by this tender: {item.get('name')}",
+            "priority": "essential" if item.get("mandatory", True) else "recommended",
+        })
+    return out
+
+
 def _check(key: str, label: str, status: str, detail: str,
            blocking: bool = True, items: Optional[List[str]] = None) -> Dict[str, Any]:
     return {
@@ -148,18 +174,7 @@ def build_submission_readiness(
     # Checklist items that describe something to WRITE (not a certificate to
     # hold) join the pack as content documents, so a missing methodology is
     # reported honestly as "we can write this" rather than "you must supply it".
-    writable = []
-    seen_writable = set()
-    for item in checklist:
-        doc_type = _writable_type_for(item.get("name", ""))
-        if not doc_type or doc_type in seen_writable or doc_type in generated_types:
-            continue
-        seen_writable.add(doc_type)
-        writable.append({
-            "doc_type": doc_type,
-            "reason": f"Required by this tender: {item.get('name')}",
-            "priority": "essential" if item.get("mandatory", True) else "recommended",
-        })
+    writable = writable_requirements_from_checklist(checklist, generated_docs)
 
     pack = ai_module.build_document_pack(checklist, library_docs, generated_docs, writable)
 

@@ -3001,6 +3001,13 @@ def prepare_documents(
         except Exception:
             smart_docs = []
 
+    # The AI analyser may be unavailable; the checklist always tells us which
+    # documents this bid needs written, so prepare never comes up empty.
+    import submission as _submission
+    for item in _submission.writable_requirements_from_checklist(checklist, generated):
+        if not any(s.get("doc_type") == item["doc_type"] for s in smart_docs):
+            smart_docs.append(item)
+
     pack = ai_module.build_document_pack(checklist, library_docs, generated, smart_docs)
 
     tender_data = {

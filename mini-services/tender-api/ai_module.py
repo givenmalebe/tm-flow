@@ -1933,10 +1933,203 @@ You produce a READINESS REPORT in plain text with these exact sections (use the 
 Keep it factual, specific, and actionable. Reference the tender by its reference number. Do not add markdown formatting."""
 
 
+def build_readiness_report_offline(
+    tender_data: Dict[str, Any],
+    extracted: Dict[str, Any],
+    checklist: List[Dict[str, Any]],
+    library_docs: List[Dict[str, Any]],
+    company: Dict[str, Any],
+) -> str:
+    """A complete readiness report computed from the tender's own data.
+
+    Used when the AI is unavailable (e.g. the daily free quota is spent) so the
+    user always gets a real, actionable report instead of an error. Same seven
+    sections as the AI version, computed deterministically.
+    """
+    tender_data = tender_data or {}
+    checklist = checklist or []
+    library_docs = library_docs or []
+    company = company or {}
+
+    complete = [c for c in checklist if str(c.get("status", "")).lower() == "complete"]
+    outstanding = [c for c in checklist if str(c.get("status", "")).lower() != "complete"]
+    mandatory_out = [c for c in outstanding if c.get("mandatory")]
+    optional_out = [c for c in outstanding if not c.get("mandatory")]
+
+    total = len(checklist)
+    pct = round(100 * len(complete) / total) if total else 0
+
+    closing = tender_data.get("closing_date")
+    days_left = tender_data.get("days_until_close")
+    if days_left is not None and days_left < 0:
+        closing_line = f"CLOSED — the closing date ({closing}) has passed."
+    elif days_left is not None:
+        closing_line = f"Closes {closing} ({days_left} day(s) remaining)."
+    else:
+        closing_line = "No closing date recorded yet — set one so deadlines can be tracked."
+
+    expired = [d for d in library_docs if str(d.get("status")) == "Expired"]
+    expiring = [d for d in library_docs if str(d.get("status")) == "Expiring Soon"]
+    active_docs = [d for d in library_docs if str(d.get("status")) == "Active"]
+
+    # ---- Score: completion, penalised by expired/soon-expiring compliance ----
+    score = pct
+    score -= min(30, 10 * len(expired))
+    score -= min(15, 5 * len(expiring))
+    if days_left is not None and days_left < 0:
+        score = 0
+    score = max(0, min(100, score))
+    if score >= 85:
+        verdict = "READY TO SUBMIT"
+    elif score >= 60:
+        verdict = "ALMOST READY"
+    elif score >= 30:
+        verdict = "NOT READY"
+    else:
+        verdict = "BARELY STARTED"
+
+    lines: List[str] = []
+    a = lines.append
+
+    a(f"READINESS REPORT — {tender_data.get('reference_number') or 'Tender'}: "
+      f"{tender_data.get('title') or 'Untitled tender'}")
+    a(f"Client: {tender_data.get('client_company') or 'Not recorded'}")
+    a(f"Company: {company.get('company_name') or 'Not recorded'}")
+    a("")
+
+    a("=== WHAT THE TENDER REQUIRES ===")
+    reqs = []
+    if extracted:
+        for key in ("scope_of_work", "description", "requirements", "deliverables"):
+            val = extracted.get(key)
+            if val:
+                text = val if isinstance(val, str) else json.dumps(val, default=str)
+                reqs.append(text[:600])
+    if tender_data.get("scope_of_work"):
+        reqs.append(str(tender_data["scope_of_work"])[:600])
+    if reqs:
+        for r in reqs[:4]:
+            a(f"- {r}")
+    else:
+        a("- No tender document has been read yet. Upload the tender document so the")
+        a("  specific requirements can be listed here.")
+    a("")
+    a(f"Checklist prepared for this tender: {total} item(s) "
+      f"({len(mandatory_out)} mandatory still outstanding).")
+    a("")
+
+    a("=== WHAT YOU HAVE ===")
+    if complete:
+        for c in complete[:25]:
+            a(f"- [Complete] {c.get('name')}")
+    else:
+        a("- Nothing on the checklist is marked complete yet.")
+    if active_docs:
+        a("")
+        a("Active compliance documents:")
+        for d in active_docs[:15]:
+            exp = f" (expires {d.get('expiry_date')})" if d.get("expiry_date") else ""
+            a(f"- {d.get('name')} [{d.get('category')}]{exp}")
+    a("")
+
+    a("=== WHAT YOU ARE MISSING ===")
+    if not outstanding:
+        a("- Nothing outstanding — every checklist item is complete.")
+    else:
+        for c in mandatory_out[:25]:
+            a(f"- (MANDATORY) {c.get('name')}"
+              + (f" — {str(c.get('description'))[:220]}" if c.get("description") else ""))
+        for c in optional_out[:25]:
+            a(f"- (recommended) {c.get('name')}")
+    if expired:
+        a("")
+        a("EXPIRED compliance documents that will disqualify or weaken a bid:")
+        for d in expired:
+            a(f"- {d.get('name')} [{d.get('category')}] expired {d.get('expiry_date')}")
+    a("")
+
+    a("=== DEADLINES ===")
+    a(f"- {closing_line}")
+    if tender_data.get("contract_period"):
+        a(f"- Contract period: {tender_data.get('contract_period')}")
+    if tender_data.get("submission_method"):
+        a(f"- Submission: {tender_data.get('submission_method')}")
+    if expiring:
+        a("- Compliance documents expiring soon:")
+        for d in expiring:
+            a(f"  - {d.get('name')} expires in {d.get('days_to_expiry')} day(s)")
+    a("")
+
+    a("=== RISKS ===")
+    risks: List[str] = []
+    if days_left is not None and days_left < 0:
+        risks.append("This tender has already closed — a bid can no longer be submitted.")
+    if mandatory_out:
+        risks.append(
+            f"{len(mandatory_out)} mandatory checklist item(s) are still outstanding; "
+            "an incomplete mandatory document usually disqualifies a bid."
+        )
+    if expired:
+        risks.append(
+            f"{len(expired)} compliance document(s) have expired — these must be renewed "
+            "before submission."
+        )
+    if expiring:
+        risks.append(
+            f"{len(expiring)} compliance document(s) expire soon and must be renewed."
+        )
+    if days_left is not None and 0 <= days_left <= 3:
+        risks.append(f"Only {days_left} day(s) remain — there is very little time left.")
+    if not total:
+        risks.append("No checklist has been generated for this tender yet.")
+    if not risks:
+        risks.append("No major risks detected from the current data.")
+    for r in risks:
+        a(f"- {r}")
+    a("")
+
+    a("=== WHAT NEEDS TO BE DONE BEFORE SUBMISSION ===")
+    steps: List[str] = []
+    if days_left is not None and days_left < 0:
+        steps.append("This tender has closed — archive it and focus on live opportunities.")
+    for c in mandatory_out[:8]:
+        steps.append(f"Obtain and complete the mandatory item: {c.get('name')}")
+    for d in expired[:3]:
+        steps.append(f"Renew the expired document: {d.get('name')} [{d.get('category')}]")
+    for d in expiring[:3]:
+        steps.append(f"Arrange renewal of {d.get('name')} (expires in {d.get('days_to_expiry')} days)")
+    if not complete and total:
+        steps.append("Start completing the checklist items, beginning with the mandatory ones.")
+    if not total:
+        steps.append("Upload the tender document so the checklist and requirements can be built.")
+    if not company.get("registration_number") or not company.get("bbbbee_level"):
+        steps.append("Complete the company profile (registration and B-BBEE details).")
+    if tender_data.get("submission_method"):
+        steps.append(f"Plan the final submission: {tender_data.get('submission_method')}")
+    if not steps:
+        steps.append("Review the completed pack and submit.")
+    for i, s in enumerate(steps, start=1):
+        a(f"{i}. {s}")
+    a("")
+
+    a("=== READINESS SCORE ===")
+    a(f"{score}/100 — {verdict}")
+    a("")
+    a("Scoring: percentage of checklist items complete"
+      f" ({len(complete)}/{total}), less penalties for expired ({len(expired)}) "
+      f"and soon-expiring ({len(expiring)}) compliance documents.")
+    a("")
+    a("Note: this report was calculated directly from your tender data. The AI-written")
+    a("narrative is unavailable right now because the daily AI usage limit was reached,")
+    a("so re-generate it later for a written analysis of the tender document.")
+    return "\n".join(lines)
+
+
 def generate_readiness_report(tender_data: Dict[str, Any], extracted: Dict[str, Any], checklist: List[Dict[str, Any]], library_docs: List[Dict[str, Any]], company: Dict[str, Any]) -> str:
     """
     Generate the comprehensive Tender Readiness Report.
     This is the 'most important requirement' — tells the user everything they need to know.
+    Falls back to a deterministic report so the user is never left without one.
     """
     prompt = f"""Generate a READINESS REPORT for the following tender.
 
@@ -1959,7 +2152,11 @@ Generate the full READINESS REPORT with all 7 sections as specified."""
     try:
         return _gemini_chat(prompt, system=READINESS_SYSTEM, max_tokens=6000)
     except RuntimeError as e:
-        return f"Readiness report generation failed: {e}"
+        # Never surface a raw failure: give the user the real, data-driven report.
+        report = build_readiness_report_offline(
+            tender_data, extracted, checklist, library_docs, company
+        )
+        return f"{report}\n\n(AI analysis unavailable: {e})"
 
 
 # ---- Smart document analysis ----

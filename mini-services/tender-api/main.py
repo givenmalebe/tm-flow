@@ -5351,6 +5351,10 @@ def issuer_create_tender(
         raise HTTPException(status_code=400, detail="Title is required.")
     # Generate a reference number if not provided
     ref = payload.get("reference_number") or f"TMD-{company.id}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    status = (payload.get("status") or "Draft").strip() or "Draft"
+    # Honour "Published" at creation: otherwise the tender stays invisible to
+    # bidders and the issuer and bidder portals never connect.
+    wants_published = status.lower() in ("published", "open", "live")
     t = IssuedTender(
         company_id=company.id,
         reference_number=ref,
@@ -5368,8 +5372,8 @@ def issuer_create_tender(
         contact_person=payload.get("contact_person"),
         contact_email=payload.get("contact_email"),
         contact_phone=payload.get("contact_phone"),
-        status=payload.get("status") or "Draft",
-        is_published=False,
+        status=status,
+        is_published=wants_published,
         ai_generated_content=payload.get("ai_generated_content"),
         notes=payload.get("notes"),
         created_by=user.id,

@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/sheet";
 import { api } from "@/lib/api";
 import { BriefingCard } from "@/components/dashboard/tabs/assistant-briefing";
+import { SubmissionReadinessSummary } from "@/components/dashboard/submission-readiness-summary";
 import { useDashboardStore } from "@/lib/dashboard-store";
 import { cn } from "@/lib/utils";
 
@@ -887,6 +888,10 @@ export function AssistantTab() {
           <div className="relative min-h-full px-3 py-4 sm:px-5">
             <div className="mb-4">
               <BriefingCard onFocusTender={handleFocusChange} />
+            </div>
+
+            <div className="mb-4">
+              <SubmissionReadinessSummary onFocusTender={handleFocusChange} />
             </div>
 
             <AnimatePresence initial={false}>

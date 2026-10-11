@@ -83,6 +83,9 @@ class Tender(Base):
     notes = Column(Text, nullable=True)
     outcome = Column(String(100), nullable=True)  # Awarded / Unsuccessful / Pending / Withdrawn
     unsuccessful_reason = Column(Text, nullable=True)
+    # Set when this tender was published by an issuer inside this system, which
+    # lets the bidder submit their bid directly instead of exporting a bundle.
+    issued_tender_id = Column(Integer, ForeignKey("issued_tenders.id"), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -525,8 +528,30 @@ def _sanitize_login_wall_urls(db) -> None:
         db.rollback()
 
 
+def _ensure_tender_issued_link() -> None:
+    """Add tenders.issued_tender_id to databases created before it existed.
+
+    create_all() never alters existing tables, so the column is added here.
+    Safe to run repeatedly: it is a no-op once the column is present.
+    """
+    try:
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(engine)
+        if "tenders" not in inspector.get_table_names():
+            return
+        columns = {c["name"] for c in inspector.get_columns("tenders")}
+        if "issued_tender_id" in columns:
+            return
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE tenders ADD COLUMN issued_tender_id INTEGER"))
+    except Exception:
+        pass
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _ensure_tender_issued_link()
     # Seed default reminder settings
     db = SessionLocal()
     try:

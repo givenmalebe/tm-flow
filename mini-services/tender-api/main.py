@@ -3110,6 +3110,290 @@ def ai_edit_document(
     }
 
 
+@app.get("/api/ai/submission-readiness")
+def ai_submission_readiness(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """A compact readiness view of every live tender, for the AI assistant.
+
+    One pass over the bidder's tenders so the assistant can say which bids are
+    ready to send and exactly what is holding the others up, without the user
+    having to open each tender.
+    """
+    import submission as _submission
+    import ai_agent as _agent
+
+    scope = _agent.resolve_scope(db, user)
+    library_docs = _scoped_library_docs(db, user)
+    today = date.today()
+
+    tenders = (
+        db.query(Tender)
+        .filter(
+            Tender.created_by.in_(scope["member_ids"]),
+            Tender.status.notin_(["Awarded", "Unsuccessful", "Withdrawn"]),
+        )
+        .all()
+    )
+
+    items = []
+    for t in tenders:
+        generated = [
+            {"id": g.id, "doc_type": g.doc_type, "title": g.title}
+            for g in db.query(GeneratedDocument).filter(
+                GeneratedDocument.tender_id == t.id
+            ).all()
+        ]
+        try:
+            r = _submission.build_submission_readiness(db, t, library_docs, generated)
+        except Exception:
+            continue
+        days = (t.closing_date - today).days if t.closing_date else None
+        items.append({
+            "tender_id": t.id,
+            "reference_number": t.reference_number,
+            "title": t.title,
+            "client_company": t.client_company,
+            "closing_date": t.closing_date.isoformat() if t.closing_date else None,
+            "days_left": days,
+            "score": r["score"],
+            "ready_to_submit": r["ready_to_submit"],
+            "already_submitted": r["already_submitted"],
+            "source": r["source"],
+            "issuer_company": r["issuer_company"],
+            "blocking_issues": r["blocking_issues"],
+            "checks": [
+                {"key": c["key"], "label": c["label"], "status": c["status"],
+                 "detail": c["detail"], "blocking": c["blocking"], "items": c["items"][:6]}
+                for c in r["checks"]
+            ],
+        })
+
+    items.sort(key=lambda i: (i["already_submitted"], -i["score"], i["days_left"] or 9999))
+    return {
+        "items": items,
+        "ready_count": sum(1 for i in items if i["ready_to_submit"] and not i["already_submitted"]),
+        "attention_count": sum(
+            1 for i in items if not i["ready_to_submit"] and not i["already_submitted"]
+        ),
+    }
+
+
+@app.get("/api/tenders/{tender_id}/submission-readiness")
+def submission_readiness(
+    tender_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Everything that must be true before this bid can be sent.
+
+    Deterministic and free: checks every required document, certificate expiry,
+    checklist state and the closing date, and reports whether the tender was
+    issued through this system (submit in-app) or externally (export a bundle).
+    """
+    import submission as _submission
+
+    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not tender:
+        raise HTTPException(status_code=404, detail="Tender not found")
+
+    library_docs = _scoped_library_docs(db, user)
+    generated = [
+        {"id": g.id, "doc_type": g.doc_type, "title": g.title,
+         "content_length": len(g.content or "")}
+        for g in db.query(GeneratedDocument).filter(
+            GeneratedDocument.tender_id == tender_id
+        ).all()
+    ]
+    return _submission.build_submission_readiness(db, tender, library_docs, generated)
+
+
+@app.get("/api/tenders/{tender_id}/submission-bundle.zip")
+def submission_bundle(
+    tender_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Download the complete bid as a ZIP.
+
+    Used when the issuer is outside this system: the bidder gets every
+    certificate, the tender document, everything the AI wrote, and a manifest
+    showing the readiness of the pack.
+    """
+    import submission as _submission
+
+    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not tender:
+        raise HTTPException(status_code=404, detail="Tender not found")
+
+    library_docs = _scoped_library_docs(db, user)
+    generated_rows = db.query(GeneratedDocument).filter(
+        GeneratedDocument.tender_id == tender_id
+    ).all()
+    generated = [{"id": g.id, "doc_type": g.doc_type, "title": g.title} for g in generated_rows]
+    readiness = _submission.build_submission_readiness(db, tender, library_docs, generated)
+
+    contents = {g.id: g.content for g in generated_rows if g.content}
+    profile = db.query(CompanyProfile).filter(CompanyProfile.user_id == user.id).first()
+    company_name = (
+        (profile.company_name if profile else None)
+        or user.company_name or user.full_name or "Bidder"
+    )
+
+    data = _submission.build_submission_bundle(
+        readiness,
+        UPLOAD_DIR,
+        contents,
+        tender.reference_number,
+        company_name,
+    )
+    filename = f"bid-pack-{tender.reference_number}.zip".replace("/", "-")
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/api/tenders/{tender_id}/submit")
+def submit_bid(
+    tender_id: int,
+    payload: dict = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Submit this bid to the issuer, when the tender came from this system.
+
+    Refuses unless the readiness assessment is 100%: every required document
+    held, no expired certificates, checklist complete and the tender still open.
+    """
+    import submission as _submission
+
+    payload = payload or {}
+    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not tender:
+        raise HTTPException(status_code=404, detail="Tender not found")
+
+    library_docs = _scoped_library_docs(db, user)
+    generated_rows = db.query(GeneratedDocument).filter(
+        GeneratedDocument.tender_id == tender_id
+    ).all()
+    generated = [{"id": g.id, "doc_type": g.doc_type, "title": g.title} for g in generated_rows]
+    readiness = _submission.build_submission_readiness(db, tender, library_docs, generated)
+
+    if not readiness["ready_to_submit"]:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "This bid is not ready to submit yet.",
+                "blocking_issues": readiness["blocking_issues"],
+                "score": readiness["score"],
+                "checks": readiness["checks"],
+            },
+        )
+
+    if readiness["source"] != "system":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": (
+                    "This tender was not issued through this system, so it cannot be "
+                    "submitted here. Download the submission bundle instead."
+                ),
+                "source": "external",
+            },
+        )
+
+    from database import Bid, BidDocument, IssuerCompany, IssuedTender
+
+    issued = db.query(IssuedTender).filter(
+        IssuedTender.id == readiness["issued_tender_id"]
+    ).first()
+    profile = db.query(CompanyProfile).filter(CompanyProfile.user_id == user.id).first()
+
+    existing = db.query(Bid).filter(
+        Bid.tender_id == issued.id,
+        Bid.bidder_email == user.email,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="You have already bid on this tender.")
+
+    bid = Bid(
+        tender_id=issued.id,
+        bidder_company_name=(
+            (profile.company_name if profile else None) or user.company_name or user.full_name
+        ),
+        bidder_email=user.email,
+        bidder_contact_person=(profile.director_name if profile else None) or user.full_name,
+        bidder_phone=profile.phone if profile else None,
+        bidder_bbbee_level=profile.bbbbee_level if profile else None,
+        total_amount=float(payload.get("total_amount") or tender.estimated_value or 0),
+        proposal_summary=payload.get("proposal_summary")
+        or f"Submission for {issued.title} submitted via TM Flow.",
+        status="Pending",
+        submitted_at=datetime.utcnow(),
+    )
+    db.add(bid)
+    db.flush()
+
+    # Attach every file that made up the bid.
+    def _attach(abs_path: Optional[str], filename: str, doc_type: Optional[str],
+                original: Optional[str] = None, size: Optional[int] = None):
+        if not abs_path or not os.path.isfile(abs_path):
+            return
+        db.add(BidDocument(
+            bid_id=bid.id, doc_type=doc_type, filename=filename,
+            original_filename=original or filename, file_path=abs_path,
+            file_type=os.path.splitext(filename)[1] or None, file_size=size,
+        ))
+
+    for d in library_docs:
+        _attach(os.path.join(UPLOAD_DIR, d.get("file_path") or ""),
+                d.get("filename") or d.get("name"), d.get("category"),
+                original=d.get("name"))
+    for d in readiness["documents"]["tender"]:
+        _attach(os.path.join(UPLOAD_DIR, d.get("file_path") or ""),
+                d.get("filename") or "tender-document", "Tender Document",
+                original=d.get("original_filename"))
+    for g in generated_rows:
+        if not g.content:
+            continue
+        target_dir = os.path.join(UPLOAD_DIR, "bids", str(bid.id))
+        os.makedirs(target_dir, exist_ok=True)
+        fname = f"{g.doc_type}_{tender.reference_number}.txt".replace("/", "-")
+        full = os.path.join(target_dir, fname)
+        with open(full, "w", encoding="utf-8") as fh:
+            fh.write(g.content)
+        _attach(full, fname, g.title or g.doc_type, original=g.title)
+
+    # Record the submission on the bidder's own tender.
+    sub = db.query(Submission).filter(Submission.tender_id == tender.id).first()
+    if sub is None:
+        sub = Submission(tender_id=tender.id)
+        db.add(sub)
+    sub.submission_date = datetime.utcnow().date()
+    sub.submission_time = datetime.utcnow().time()
+    sub.submitted_by = user.full_name
+    sub.submission_method = "Submitted via TM Flow"
+    sub.confirmation_reference = f"BID-{bid.id}"
+    sub.notes = "Submitted through TM Flow to the issuing organisation."
+    tender.status = "Submitted"
+    db.commit()
+    db.refresh(bid)
+
+    issuer = db.query(IssuerCompany).filter(IssuerCompany.id == issued.company_id).first()
+    return {
+        "submitted": True,
+        "bid_id": bid.id,
+        "status": bid.status,
+        "reference_number": bid.confirmation_reference,
+        "issued_tender_id": issued.id,
+        "issuer": issuer.name if issuer else None,
+        "documents_attached": len(bid.documents) if bid.documents else 0,
+    }
+
+
 @app.put("/api/tenders/{tender_id}/documents/generated/{doc_id}")
 def update_generated_document(
     tender_id: int,

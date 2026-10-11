@@ -146,6 +146,32 @@ export interface DocumentPackResponse {
   failed?: any[];
 }
 
+/** One gate that must pass before a bid can be sent. */
+export interface ReadinessCheck {
+  key: string;
+  label: string;
+  status: "pass" | "fail" | "warn";
+  detail: string;
+  blocking: boolean;
+  items: string[];
+}
+
+export interface SubmissionReadiness {
+  tender_id: number;
+  score: number;
+  ready_to_submit: boolean;
+  checks: ReadinessCheck[];
+  blocking_issues: string[];
+  warnings: string[];
+  /** "system" = issuer is on this platform; "external" = export a bundle. */
+  source: "system" | "external";
+  issued_tender_id: number | null;
+  issued_tender_title: string | null;
+  issuer_company: string | null;
+  already_submitted: boolean;
+  pack?: PackItem[];
+}
+
 export interface AIMemory {
   mission: string | null;
   goals: string[];
@@ -712,6 +738,53 @@ export const api = {
   },
 
   /** The documents this tender actually needs, each resolved to a real status. */
+  /** Compact readiness of every live tender, for the AI assistant view. */
+  async getSubmissionReadinessOverview() {
+    return request<{
+      items: Array<{
+        tender_id: number; reference_number: string; title: string;
+        client_company: string | null; closing_date: string | null;
+        days_left: number | null; score: number; ready_to_submit: boolean;
+        already_submitted: boolean; source: "system" | "external";
+        issuer_company: string | null; blocking_issues: string[];
+        checks: ReadinessCheck[];
+      }>;
+      ready_count: number;
+      attention_count: number;
+    }>("/ai/submission-readiness");
+  },
+
+  /** Everything that must be true before this bid can be sent. */
+  async getSubmissionReadiness(tenderId: number) {
+    return request<SubmissionReadiness>(`/tenders/${tenderId}/submission-readiness`);
+  },
+
+  /** Download the whole bid as a ZIP (for issuers outside this platform). */
+  async downloadSubmissionBundle(tenderId: number) {
+    const token = await getToken();
+    const res = await fetch(`/api/tenders/${tenderId}/submission-bundle.zip`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error("Could not build the submission bundle");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `bid-pack-${tenderId}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
+
+  /** Submit directly to an issuer that publishes on this platform. */
+  async submitBid(tenderId: number, payload?: { total_amount?: number; proposal_summary?: string }) {
+    return request<{
+      submitted: boolean; bid_id: number; status: string; reference_number: string;
+      issuer: string | null; documents_attached: number;
+    }>(`/tenders/${tenderId}/submit`, { method: "POST", body: payload || {} });
+  },
+
   async getDocumentPack(tenderId: number) {
     return request<DocumentPackResponse>(`/tenders/${tenderId}/documents/pack`);
   },

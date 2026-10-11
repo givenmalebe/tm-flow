@@ -79,6 +79,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Switch } from "@/components/ui/switch";
 import { api, TENDER_STATUSES, TENDER_OUTCOMES, CHECKLIST_STATUSES, LIBRARY_CATEGORIES, type PackItem, type DocumentPackResponse } from "@/lib/api";
+import { SubmissionReadinessPanel } from "./submission-readiness";
 import {
   useDashboardStore,
   formatDate,
@@ -236,6 +237,15 @@ export function TenderDetail({ tenderId, onBack }: TenderDetailProps) {
           </div>
         </CardContent>
       </Card>
+
+      {/* Submission gate: what must be true before this bid can be sent */}
+      {tab !== "submission" && (
+        <SubmissionReadinessPanel
+          tenderId={tender.id}
+          referenceNumber={tender.reference_number}
+          onSubmitted={fetch}
+        />
+      )}
 
       {/* Sub-tabs */}
       <Tabs value={tab} onValueChange={(v) => setTab(v as SubTab)}>

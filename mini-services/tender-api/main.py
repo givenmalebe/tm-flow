@@ -2758,12 +2758,6 @@ def generate_document(
 
     # Get company profile (+ what the AI knows from the knowledge base)
     company = _company_for_generation(db, user)
-    company.setdefault("signature_url",
-        f"/uploads/{profile.signature_path}?XTransformPort=8000"
-        if profile and profile.signature_path else None)
-    company.setdefault("letterhead_url",
-        f"/uploads/{profile.letterhead_path}?XTransformPort=8000"
-        if profile and profile.letterhead_path else None)
 
     tender_data = {
         "reference_number": tender.reference_number,
@@ -2922,6 +2916,12 @@ def _company_for_generation(db: Session, user: User) -> dict:
         "director_name": profile.director_name if profile else user.full_name,
         "director_title": profile.director_title if profile else "Director",
         "organogram_text": profile.organogram_text if profile else None,
+        "signature_url": (
+            f"/uploads/{profile.signature_path}" if profile and profile.signature_path else None
+        ),
+        "letterhead_url": (
+            f"/uploads/{profile.letterhead_path}" if profile and profile.letterhead_path else None
+        ),
     }
     scope = _agent.resolve_scope(db, user)
     try:

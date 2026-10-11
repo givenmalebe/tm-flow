@@ -2721,8 +2721,14 @@ def _match_library_doc(requirement: Dict[str, Any],
             if d.get("id") == linked_id:
                 return d
 
-    want = _norm(requirement.get("library_category") or requirement.get("category"))
+    want = _norm(requirement.get("library_category"))
     name = _norm(requirement.get("name") or requirement.get("title"))
+    # Significant words in the requirement, e.g. "cipc documents" -> {"cipc"}.
+    stop = {"documents", "document", "certificates", "certificate", "affidavit",
+            "proof", "copy", "required", "the", "and", "of", "for", "a", "an"}
+    want_words = {w for w in (name or want).split() if len(w) > 2 and w not in stop}
+    if want:
+        want_words.update(w for w in want.split() if len(w) > 2 and w not in stop)
 
     def score(d: Dict[str, Any]) -> int:
         cat = _norm(d.get("category"))
@@ -2732,6 +2738,11 @@ def _match_library_doc(requirement: Dict[str, Any],
         if want and cat and (want in cat or cat in want):
             return 2
         if name and doc_name and (name in doc_name or doc_name in name):
+            return 2
+        # Weak but useful: the requirement and the document share a key word
+        # ("CIPC documents" <-> "CIPC Certificate", "B-BBEE affidavit" <-> "B-BBEE").
+        doc_words = set((cat + " " + doc_name).split())
+        if want_words & doc_words:
             return 1
         return 0
 

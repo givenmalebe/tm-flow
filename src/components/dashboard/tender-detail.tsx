@@ -3044,16 +3044,29 @@ function GeneratedDocumentsSection({ tender, onChanged }: { tender: any; onChang
 
   const handlePrepareAll = async () => {
     setPreparing(true);
-    toast.info("Bringing together the documents this tender needs…", {
+    const toastId = toast.info("Bringing together the documents this tender needs…", {
       description: "Linking your library documents and writing the rest from your knowledge base.",
     });
     try {
-      const res = await api.prepareDocuments(tender.id);
-      setPack(res.items || []);
-      setPackSummary(res.summary || null);
+      let written = 0;
+      let last: Awaited<ReturnType<typeof api.prepareDocuments>> | null = null;
+      for (let i = 0; i < 12; i++) {
+        const res = await api.prepareDocuments(tender.id, undefined, 3);
+        last = res;
+        written += (res.written || []).length;
+        setPack(res.items || []);
+        setPackSummary(res.summary || null);
+        if ((res.written || []).length === 0) break;
+        toast.info(`Writing your bid documents… ${written} done`, {
+          description: `${res.remaining ?? 0} still to write.`,
+          id: toastId,
+        });
+      }
+      setPack(last?.items || []);
+      setPackSummary(last?.summary || null);
       setGenerated((arr) => {
         const merged = [...arr];
-        for (const d of res.items || []) {
+        for (const d of last?.items || []) {
           if (d.doc_type && d.generated_id) {
             const i = merged.findIndex((x) => x.doc_type === d.doc_type);
             const stub = { id: d.generated_id, doc_type: d.doc_type, title: d.title };
@@ -3064,12 +3077,12 @@ function GeneratedDocumentsSection({ tender, onChanged }: { tender: any; onChang
         return merged;
       });
       onChanged();
-      const written = (res.written || []).length;
-      const missing = res.summary?.missing ?? 0;
-      toast.success(written ? `${written} document(s) prepared` : "Everything possible is already in place", {
+      const missing = last?.summary?.missing ?? 0;
+      toast.success(written ? `${written} document(s) written for this bid` : "Everything possible is already in place", {
+        id: toastId,
         description: missing
-          ? `${missing} document(s) you must still obtain yourself — they are marked Missing.`
-          : "Your tender pack is complete.",
+          ? `${missing} document(s) you must still obtain — they are marked Missing.`
+          : "Your bid pack is complete.",
       });
     } catch (e: any) {
       toast.error(e.message || "Could not prepare documents");

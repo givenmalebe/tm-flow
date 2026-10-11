@@ -3022,11 +3022,21 @@ def prepare_documents(
     company = _company_for_generation(db, user)
 
     written, failed = [], []
-    for entry in pack:
-        if entry["kind"] != "content" or entry.get("status") == "generated":
-            continue
-        if only and entry.get("doc_type") not in only:
-            continue
+    # Each document is an AI call, and this endpoint sits behind a ~60s Hosting
+    # proxy. Work in bounded batches and report what is left so the caller can
+    # continue, rather than timing out halfway through a bid pack.
+    pending = [
+        e for e in pack
+        if e["kind"] == "content" and e.get("status") != "generated"
+        and (not only or e.get("doc_type") in only)
+    ]
+    batch = pending[: max(1, min(int((payload or {}).get("max_docs") or 4), 8))]
+    import time as _time
+    deadline = _time.monotonic() + 40
+
+    for entry in batch:
+        if _time.monotonic() > deadline:
+            break
         doc_type = entry["doc_type"]
         try:
             generator = ai_module.DOCUMENT_GENERATORS[doc_type]
@@ -3059,12 +3069,17 @@ def prepare_documents(
 
     checklist, library_docs, generated = _pack_inputs(tender, db, user)
     pack = ai_module.build_document_pack(checklist, library_docs, generated, smart_docs)
+    still_pending = sum(
+        1 for e in pack if e["kind"] == "content" and e.get("status") != "generated"
+    )
     return {
         "tender_id": tender_id,
         "written": written,
         "failed": failed,
         "items": pack,
         "summary": ai_module.document_pack_summary(pack),
+        "remaining": still_pending,
+        "complete": still_pending == 0,
     }
 
 

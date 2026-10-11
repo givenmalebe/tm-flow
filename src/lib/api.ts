@@ -790,11 +790,28 @@ export const api = {
   },
 
   /** Link library documents, write the ones we can, and report what is missing. */
-  async prepareDocuments(tenderId: number, docTypes?: string[]) {
-    return request<DocumentPackResponse & { written: any[]; failed: any[] }>(
-      `/tenders/${tenderId}/documents/prepare`,
-      { method: "POST", body: { doc_types: docTypes } }
-    );
+  async prepareDocuments(tenderId: number, docTypes?: string[], maxDocs = 4) {
+    return request<DocumentPackResponse & {
+      written: any[]; failed: any[]; remaining: number; complete: boolean;
+    }>(`/tenders/${tenderId}/documents/prepare`, {
+      method: "POST",
+      body: { doc_types: docTypes, max_docs: maxDocs },
+    });
+  },
+
+  /**
+   * Prepare every document, working in bounded batches so a long AI run never
+   * trips the hosting proxy timeout.
+   */
+  async prepareAllDocuments(tenderId: number, onProgress?: (written: number, remaining: number) => void) {
+    let written = 0;
+    for (let i = 0; i < 12; i++) {
+      const res = await this.prepareDocuments(tenderId, undefined, 3);
+      written += (res.written || []).length;
+      onProgress?.(written, res.remaining ?? 0);
+      if (res.complete || (res.remaining ?? 0) === 0 || !(res.written || []).length) break;
+    }
+    return { written };
   },
 
   /** Ask the AI to revise a prepared document; you review and edit afterwards. */

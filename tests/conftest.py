@@ -63,8 +63,20 @@ def client(db):
             raise HTTPException(status_code=401, detail="No test user set — use act_as(user)")
         return AuthState.user
 
+    def override_get_current_claims():
+        if AuthState.user is None:
+            raise HTTPException(status_code=401, detail="No test user set — use act_as(user)")
+        # The SQLite user has an integer id, not a Firebase UID; synthesise a
+        # stable string so Postgres-facing endpoints have something to key on.
+        return {
+            "uid": f"test-uid-{AuthState.user.id}",
+            "email": AuthState.user.email,
+            "name": AuthState.user.full_name,
+        }
+
     mainmod.app.dependency_overrides[dbmod.get_db] = override_get_db
     mainmod.app.dependency_overrides[mainmod.get_current_user] = override_get_current_user
+    mainmod.app.dependency_overrides[mainmod.get_current_claims] = override_get_current_claims
     with TestClient(mainmod.app) as c:
         yield c
     mainmod.app.dependency_overrides.clear()

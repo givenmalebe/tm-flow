@@ -53,6 +53,14 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+/**
+ * The account type chosen on the sign-up form. RegisterUser runs from the
+ * onAuthStateChanged handler, which does not receive the form values, so the
+ * choice is stashed here until the first profile load consumes it. Without it
+ * every new account was written as an applicant.
+ */
+let pendingAccountType: "applicant" | "issuer" = "applicant";
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -81,8 +89,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         fullName: fbUser.displayName || fbUser.email?.split("@")[0] || "New user",
         organisationName: `${fbUser.email?.split("@")[0] || "New user"}'s Organisation`,
         companyName: null,
-        accountType: "applicant",
+        accountType: pendingAccountType,
       });
+      pendingAccountType = "applicant";
     }
 
     const res = await me(dc, { fetchPolicy: "SERVER_ONLY" });
@@ -147,6 +156,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     _company_name?: string,
     _account_type?: "applicant" | "issuer"
   ) => {
+    // Remember the choice before creating the account: the onAuthStateChanged
+    // handler fires as soon as the user exists and runs RegisterUser with it.
+    pendingAccountType = _account_type === "issuer" ? "issuer" : "applicant";
+
     const cred = await createUserWithEmailAndPassword(getFirebaseAuth(), email, password);
     await updateProfile(cred.user, { displayName: full_name });
     markFreshLogin();

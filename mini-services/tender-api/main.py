@@ -27,8 +27,10 @@ from database import (
     IssuerCompany, CompanyMember, IssuedTender, Bid, BidDocument,
     BidderCompany, BidderMember
 )
-from auth import get_current_user
+from auth import get_current_user, get_current_claims
 import ai_module
+import pg
+import pg_store
 
 # Initialize DB on import
 init_db()
@@ -716,12 +718,17 @@ def set_account_type(
     payload: dict,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    claims: dict = Depends(get_current_claims),
 ):
     """Record how this organisation uses the platform: bidder or issuer.
 
     Called straight after Firebase sign-up, because the backend user row is
     created on the first authenticated request and would otherwise always be
     an applicant — leaving the issuer portal unreachable.
+
+    The value is written to both stores during the Data Connect migration: the
+    legacy SQLite row (which the REST endpoints still read) and the Postgres
+    `public.user` row (which the frontend's Data Connect SDK reads).
     """
     requested = str((payload or {}).get("account_type") or "").strip().lower()
     if requested not in ("issuer", "applicant"):
@@ -732,7 +739,60 @@ def set_account_type(
         user.account_type = requested
         db.commit()
         db.refresh(user)
-    return {"account_type": user.account_type, "user": UserOut.model_validate(user).model_dump()}
+
+    # Mirror onto the Data Connect-owned Postgres row so the UI, which reads
+    # account_type through the Data Connect SDK, sees the same choice.
+    pg_synced = False
+    uid = claims.get("uid") or claims.get("sub")
+    if uid and pg.is_configured():
+        try:
+            pg_store.upsert_user(
+                uid,
+                email=claims.get("email") or user.email,
+                full_name=claims.get("name") or user.full_name,
+                company_name=user.company_name,
+                role=user.role or "admin",
+                account_type=requested,
+            )
+            pg_store.set_account_type(uid, requested)
+            pg_synced = True
+        except Exception:
+            pg_synced = False
+
+    return {
+        "account_type": user.account_type,
+        "pg_synced": pg_synced,
+        "user": UserOut.model_validate(user).model_dump(),
+    }
+
+
+@app.get("/api/auth/me-pg")
+def get_me_pg(claims: dict = Depends(get_current_claims)):
+    """Return the caller's Postgres user row (the Data Connect source of truth)."""
+    if not pg.is_configured():
+        raise HTTPException(status_code=503, detail="Postgres is not configured")
+    uid = claims.get("uid") or claims.get("sub")
+    # The frontend may have signed up a few seconds ago; make sure a row exists.
+    row = pg_store.upsert_user(
+        uid,
+        email=claims.get("email") or "",
+        full_name=claims.get("name") or (claims.get("email") or "").split("@")[0],
+    )
+    if row is None:
+        raise HTTPException(status_code=503, detail="Postgres is unavailable")
+    return row
+
+
+@app.get("/api/pg/health")
+def pg_health(user: User = Depends(get_current_user)):
+    """Prove the FastAPI service can reach the Data Connect Postgres database."""
+    configured = pg.is_configured()
+    ok = pg.ping()
+    return {
+        "configured": configured,
+        "ok": ok,
+        "user_count": pg_store.count_users() if ok else None,
+    }
 
 
 @app.post("/api/company-profile/company-profile-doc")

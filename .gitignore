@@ -82,3 +82,7 @@ prompt
 server.log
 # Skills directory
 /skills/
+# local probe/debug scripts (may contain secrets)
+.zscripts/*.mjs
+.zscripts/*.bak
+

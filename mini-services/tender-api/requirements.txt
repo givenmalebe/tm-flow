@@ -1,4 +1,5 @@
 bcrypt==5.0.0
+cloud-sql-python-connector[pg8000]==1.22.0
 email-validator==2.3.0
 fastapi==0.128.0
 httpx==0.28.1

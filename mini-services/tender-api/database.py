@@ -2,6 +2,7 @@
 TenderFlow - Database Models & SQLAlchemy Setup
 """
 import os
+import sqlite3
 from datetime import datetime, date
 from typing import List, Optional
 
@@ -19,9 +20,15 @@ os.makedirs(DATA_DIR, exist_ok=True)
 DB_PATH = os.environ.get("DB_PATH", os.path.join(DATA_DIR, "tender.db"))
 DB_URL = f"sqlite:///{DB_PATH}"
 
-# Enable foreign key constraints for SQLite
+# Enable foreign key constraints for SQLite.
+#
+# This listener is attached to the Engine *class*, so it also fires for the
+# Postgres engine used to reach the Data Connect tables. PRAGMA is SQLite-only
+# and raises a syntax error there, so guard on the DBAPI connection type.
 @event.listens_for(Engine, "connect")
 def set_sqlite_pragma(dbapi_connection, connection_record):
+    if not isinstance(dbapi_connection, sqlite3.Connection):
+        return
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()

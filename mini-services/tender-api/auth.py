@@ -118,6 +118,17 @@ def get_current_user(
     return user
 
 
+def get_current_claims(token: Optional[str] = Depends(oauth2_scheme)) -> dict:
+    """Return the verified Firebase claims, or raise 401.
+
+    Endpoints that need the Firebase UID (which is not stored on the legacy
+    SQLite user row) depend on this alongside get_current_user.
+    """
+    if not token:
+        raise _unauthorized()
+    return verify_firebase_token(token)
+
+
 def get_optional_user(token: Optional[str] = Depends(oauth2_scheme)) -> Optional[User]:
     """Same as get_current_user but returns None instead of raising."""
     if not token:

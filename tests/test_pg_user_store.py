@@ -75,3 +75,30 @@ def test_user_roundtrip_and_preference_is_sticky():
 
     with eng.begin() as conn:
         conn.execute(text('DELETE FROM public."user" WHERE id = :id'), {"id": uid})
+
+
+def test_update_user_touches_only_provided_fields():
+    eng = _bind()
+    import pg_store
+
+    uid = "test-uid-identity-update"
+    with eng.begin() as conn:
+        conn.execute(text('DELETE FROM public."user" WHERE id = :id'), {"id": uid})
+
+    pg_store.upsert_user(uid, "upd@example.com", "Upd Er", company_name="Old Co")
+
+    updated = pg_store.update_user(uid, onboarding_completed=True)
+    assert updated["onboarding_completed"] is True
+    assert updated["company_name"] == "Old Co"
+    assert updated["account_type"] == "applicant"
+
+    pg_store.update_user(uid, company_name="New Co")
+    row = pg_store.get_user(uid)
+    assert row["company_name"] == "New Co"
+    assert row["onboarding_completed"] is True
+
+    # No fields provided: no-op that still returns the row.
+    assert pg_store.update_user(uid)["email"] == "upd@example.com"
+
+    with eng.begin() as conn:
+        conn.execute(text('DELETE FROM public."user" WHERE id = :id'), {"id": uid})

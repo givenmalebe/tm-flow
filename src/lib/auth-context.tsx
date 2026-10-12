@@ -145,6 +145,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loadProfile]);
 
   const login = async (email: string, password: string) => {
+    // A sign-up that failed after stashing its choice must not leak it into
+    // the next sign-in's RegisterUser.
+    pendingAccountType = "applicant";
     await signInWithEmailAndPassword(getFirebaseAuth(), email, password);
     markFreshLogin();
   };

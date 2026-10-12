@@ -52,6 +52,11 @@ def get_db():
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
+    # Firebase Auth UID. The Data Connect `public.user` row is keyed by it, so
+    # storing it here joins the two stores without trusting email (which can
+    # change). Nullable because rows created before the Data Connect migration
+    # are backfilled lazily on their first authenticated request.
+    firebase_uid = Column(String(128), unique=True, nullable=True, index=True)
     email = Column(String(255), unique=True, nullable=False, index=True)
     full_name = Column(String(255), nullable=False)
     company_name = Column(String(255), nullable=True)
@@ -556,9 +561,38 @@ def _ensure_tender_issued_link() -> None:
         pass
 
 
+def _ensure_user_firebase_uid() -> None:
+    """Add users.firebase_uid to databases created before the Data Connect migration.
+
+    create_all() never alters existing tables, so the column is added here.
+    Safe to run repeatedly: it is a no-op once the column is present. SQLite
+    treats NULLs as distinct in a unique index, so unbackfilled rows coexist.
+    """
+    try:
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(engine)
+        if "users" not in inspector.get_table_names():
+            return
+        columns = {c["name"] for c in inspector.get_columns("users")}
+        if "firebase_uid" not in columns:
+            with engine.begin() as conn:
+                conn.execute(
+                    text("ALTER TABLE users ADD COLUMN firebase_uid VARCHAR(128)")
+                )
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_firebase_uid "
+                "ON users (firebase_uid)"
+            ))
+    except Exception:
+        pass
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     _ensure_tender_issued_link()
+    _ensure_user_firebase_uid()
     # Seed default reminder settings
     db = SessionLocal()
     try:

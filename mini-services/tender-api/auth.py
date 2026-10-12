@@ -4,7 +4,9 @@ TenderFlow - Authentication utilities
 Identity is owned by Firebase Auth. Incoming requests carry a Firebase ID token
 (RS256, signed by Google) rather than a token this service minted. The token is
 verified with firebase-admin, and the Firebase UID is mapped onto the local
-users row by email.
+users row via users.firebase_uid (email is only a fallback for rows predating
+the Data Connect migration). The Data Connect Postgres row is the source of
+truth for identity fields; the SQLite row shadows it.
 
 This file replaced an implementation that signed its own HS256 JWT and fell back
 to a secret committed to the repository.
@@ -76,6 +78,54 @@ def verify_firebase_token(token: str) -> dict:
         raise _unauthorized()
 
 
+def _uid_from_claims(claims: dict) -> Optional[str]:
+    """The Firebase UID appears under several claim keys depending on SDK."""
+    return claims.get("user_id") or claims.get("uid") or claims.get("sub")
+
+
+def _sync_shadow_from_postgres(db: Session, user: User, uid: str) -> None:
+    """Fold the Postgres identity fields into the SQLite shadow row.
+
+    The Data Connect `public.user` row is the source of truth the UI reads;
+    the REST endpoints still read SQLite, so the shadow is refreshed here to
+    keep both stores telling the same story. Postgres is not a hard dependency:
+    when it is unreachable the shadow row serves the request alone.
+    """
+    try:
+        import pg_store
+
+        pg_user = pg_store.get_user(uid)
+        if pg_user is None:
+            # First authenticated request for this Firebase account: create
+            # the Postgres row so both stores exist from the start.
+            pg_store.upsert_user(
+                uid,
+                email=user.email,
+                full_name=user.full_name,
+                company_name=user.company_name,
+                role=user.role or "admin",
+            )
+            return
+        changed = False
+        if (
+            pg_user.get("account_type") in ("applicant", "issuer")
+            and user.account_type != pg_user["account_type"]
+        ):
+            user.account_type = pg_user["account_type"]
+            changed = True
+        if pg_user.get("onboarding_completed") and not user.onboarding_completed:
+            user.onboarding_completed = True
+            changed = True
+        if pg_user.get("company_name") and not user.company_name:
+            user.company_name = pg_user["company_name"]
+            changed = True
+        if changed:
+            db.commit()
+            db.refresh(user)
+    except Exception:
+        pass
+
+
 def get_current_user(
     token: Optional[str] = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
@@ -83,9 +133,10 @@ def get_current_user(
     """
     Resolve the caller from their Firebase ID token.
 
-    Lookup is by email because the local users table predates Firebase Auth and
-    is keyed by integer id. Once these REST endpoints are retired in favour of
-    SQL Connect, this indirection disappears.
+    The Firebase UID is the primary key of the Data Connect `user` table and is
+    kept on the legacy SQLite row (`users.firebase_uid`), so lookup is by UID
+    first; rows predating the column are matched by email and backfilled on
+    their first authenticated request.
 
     The request-scoped `db` session must be injected here. Returning an object
     from a session that is then closed leaves the caller holding a detached
@@ -98,10 +149,19 @@ def get_current_user(
 
     claims = verify_firebase_token(token)
     email = claims.get("email")
+    uid = _uid_from_claims(claims)
     if not email:
         raise _unauthorized()
 
-    user = db.query(User).filter(User.email == email).first()
+    user = None
+    if uid:
+        user = db.query(User).filter(User.firebase_uid == uid).first()
+    if user is None:
+        user = db.query(User).filter(User.email == email).first()
+        if user is not None and uid and not user.firebase_uid:
+            user.firebase_uid = uid
+            db.commit()
+            db.refresh(user)
     if user is None:
         # A Firebase account with no local row: create one so the existing
         # endpoints have something to attach records to.
@@ -111,10 +171,14 @@ def get_current_user(
             hashed_password="",
             role=claims.get("role") or "admin",
             account_type="applicant",
+            firebase_uid=uid,
         )
         db.add(user)
         db.commit()
         db.refresh(user)
+
+    if uid:
+        _sync_shadow_from_postgres(db, user, uid)
     return user
 
 
@@ -129,11 +193,14 @@ def get_current_claims(token: Optional[str] = Depends(oauth2_scheme)) -> dict:
     return verify_firebase_token(token)
 
 
-def get_optional_user(token: Optional[str] = Depends(oauth2_scheme)) -> Optional[User]:
+def get_optional_user(
+    token: Optional[str] = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> Optional[User]:
     """Same as get_current_user but returns None instead of raising."""
     if not token:
         return None
     try:
-        return get_current_user(token)
+        return get_current_user(token, db)
     except HTTPException:
         return None

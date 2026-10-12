@@ -99,6 +99,38 @@ def set_account_type(uid: str, account_type: str) -> Optional[dict]:
     return get_user(uid)
 
 
+def update_user(
+    uid: str,
+    company_name: Optional[str] = None,
+    onboarding_completed: Optional[bool] = None,
+) -> Optional[dict]:
+    """Update only the profile fields provided, leaving the rest untouched.
+
+    account_type deliberately has no parameter here: it goes through
+    set_account_type, which every write path must route through so the
+    explicit bidder/issuer choice is never clobbered by a partial update.
+    """
+    eng = pg.engine()
+    if eng is None:
+        return None
+    sets, params = [], {"id": uid}
+    if company_name is not None:
+        sets.append("company_name = :company_name")
+        params["company_name"] = company_name
+    if onboarding_completed is not None:
+        sets.append("onboarding_completed = :onboarding_completed")
+        params["onboarding_completed"] = onboarding_completed
+    if sets:
+        with eng.begin() as conn:
+            conn.execute(
+                text(
+                    f'UPDATE public."user" SET {", ".join(sets)} WHERE id = :id'
+                ),
+                params,
+            )
+    return get_user(uid)
+
+
 def count_users() -> Optional[int]:
     eng = pg.engine()
     if eng is None:

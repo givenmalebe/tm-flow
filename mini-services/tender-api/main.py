@@ -681,11 +681,50 @@ def me(user: User = Depends(get_current_user)):
     return user
 
 
+def _uid_from(claims: dict):
+    """The Firebase UID sits under different claim keys depending on SDK."""
+    return (
+        (claims or {}).get("uid")
+        or (claims or {}).get("user_id")
+        or (claims or {}).get("sub")
+    )
+
+
+def _push_identity_to_pg(
+    uid,
+    account_type=None,
+    company_name=None,
+    onboarding_completed=None,
+) -> bool:
+    """Mirror identity fields onto the Data Connect-owned Postgres row.
+
+    Returns False — never raises — when Postgres is unconfigured or
+    unreachable, so the SQLite write above stays authoritative for the
+    rest of the request. The next authenticated request re-syncs via
+    get_current_user.
+    """
+    if not uid or not pg.is_configured():
+        return False
+    try:
+        if account_type in ("applicant", "issuer"):
+            pg_store.set_account_type(uid, account_type)
+        if company_name or onboarding_completed is not None:
+            pg_store.update_user(
+                uid,
+                company_name=company_name,
+                onboarding_completed=onboarding_completed,
+            )
+        return True
+    except Exception:
+        return False
+
+
 @app.post("/api/auth/complete-onboarding")
 def complete_onboarding(
     payload: dict,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    claims: dict = Depends(get_current_claims),
 ):
     """Complete the onboarding process — saves company profile and marks onboarding as done."""
     # Update user's company name
@@ -710,7 +749,20 @@ def complete_onboarding(
         ai_agent.ensure_company_bootstrap(db, user)
     except Exception:
         pass
-    return {"onboarding_completed": True, "user": UserOut.model_validate(user).model_dump()}
+
+    # The UI reads identity through the Data Connect SDK, so onboarding state
+    # must land in Postgres too, not just the SQLite shadow.
+    pg_synced = _push_identity_to_pg(
+        _uid_from(claims),
+        account_type=requested_type if requested_type in ("issuer", "applicant") else None,
+        company_name=user.company_name,
+        onboarding_completed=True,
+    )
+    return {
+        "onboarding_completed": True,
+        "pg_synced": pg_synced,
+        "user": UserOut.model_validate(user).model_dump(),
+    }
 
 
 @app.post("/api/auth/account-type")
@@ -4618,6 +4670,7 @@ def bidder_register_company(
     payload: dict,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    claims: dict = Depends(get_current_claims),
 ):
     """Create a new bidder company. The registering user becomes the admin."""
     if user.account_type == "issuer":
@@ -4655,6 +4708,11 @@ def bidder_register_company(
         user.company_name = company.name
     db.commit()
     db.refresh(company)
+    _push_identity_to_pg(
+        _uid_from(claims),
+        company_name=user.company_name,
+        onboarding_completed=True,
+    )
     return {
         "id": company.id,
         "name": company.name,
@@ -4776,6 +4834,14 @@ def bidder_update_member(
     db.commit()
     db.refresh(target)
     u = db.query(User).filter(User.id == target.user_id).first()
+    # Membership approval completes the target user's onboarding; mirror that
+    # onto their Postgres row when the shadow carries a Firebase UID.
+    if u is not None and u.onboarding_completed and u.firebase_uid:
+        _push_identity_to_pg(
+            u.firebase_uid,
+            company_name=u.company_name,
+            onboarding_completed=True,
+        )
     return {
         "id": target.id,
         "email": u.email if u else None,
@@ -5160,6 +5226,7 @@ def issuer_register_company(
     payload: dict,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    claims: dict = Depends(get_current_claims),
 ):
     """Create a new issuer company. The registering user becomes the admin."""
     if user.account_type != "issuer":
@@ -5199,6 +5266,11 @@ def issuer_register_company(
         user.company_name = name
     user.onboarding_completed = True
     db.commit()
+    _push_identity_to_pg(
+        _uid_from(claims),
+        company_name=user.company_name,
+        onboarding_completed=True,
+    )
     return {
         "id": company.id,
         "name": company.name,
@@ -5336,6 +5408,14 @@ def issuer_update_member(
     db.commit()
     db.refresh(target)
     u = db.query(User).filter(User.id == target.user_id).first()
+    # Membership approval completes the target user's onboarding; mirror that
+    # onto their Postgres row when the shadow carries a Firebase UID.
+    if u is not None and u.onboarding_completed and u.firebase_uid:
+        _push_identity_to_pg(
+            u.firebase_uid,
+            company_name=u.company_name,
+            onboarding_completed=True,
+        )
     return {
         "id": target.id,
         "email": u.email if u else None,
